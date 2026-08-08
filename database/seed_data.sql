@@ -1,0 +1,3 @@
+-- Initial seed data for SanServeAll (branches, roles, starter product catalog)
+-- Implemented in Week 2 once the accounts schema (User, Role, Branch) exists.
+-- Branches: Batangas City, Alangilan (KAHERO_BRANCH), Lipa City

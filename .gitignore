@@ -1,0 +1,26 @@
+# Secrets
+.env
+.env.*
+!.env.example
+!deployment/**/env.*.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Django
+backend/media/
+backend/logs/
+backend/db.sqlite3
+backend/staticfiles/
+
+# Backups (never committed, only ever local/temporary)
+database/backups/*
+!database/backups/.gitkeep
+
+# Editor/OS cruft
+.vscode/
+.idea/
+.DS_Store
