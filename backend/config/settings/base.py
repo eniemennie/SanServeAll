@@ -65,7 +65,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-# AUTH_USER_MODEL = "accounts.User"  # TODO (Week 2): uncomment once
+AUTH_USER_MODEL = "accounts.User"  # TODO (Week 2): uncomment once
 # apps/accounts/models.py implements a real User(AbstractUser) subclass.
 # Left commented rather than pointed at a non-existent model, so `manage.py
 # check`/`migrate` work correctly on this scaffold before Week 2 lands.
