@@ -2,8 +2,9 @@
 Root URL configuration for SanServeAll.
 Each domain app owns its own urls.py; this file only mounts them.
 """
+
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path
 
 urlpatterns = [
     path("admin/", admin.site.urls),

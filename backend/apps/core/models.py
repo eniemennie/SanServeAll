@@ -1,6 +1,7 @@
 """
 Shared base models, permissions, and utilities used by every other app.
 """
+
 from django.db import models
 
 

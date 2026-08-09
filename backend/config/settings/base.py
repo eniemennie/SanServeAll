@@ -3,6 +3,7 @@ Shared Django settings for SanServeAll.
 Environment-specific settings (development/staging/production) import
 from this file and override only what differs.
 """
+
 import os
 from pathlib import Path
 
@@ -17,11 +18,9 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-
     "rest_framework",
     "django_otp",
     "django_otp.plugins.otp_totp",
-
     # SanServeAll apps
     "apps.core",
     "apps.accounts",

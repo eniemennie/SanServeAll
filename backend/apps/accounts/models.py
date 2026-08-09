@@ -2,6 +2,7 @@
 Users, Roles, Branches, RBAC, Cashier PIN, 2FA
 (Row 9 of the Phase 9 WBS — Design Accounts Schema)
 """
+
 from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.models import AbstractUser
