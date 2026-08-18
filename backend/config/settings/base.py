@@ -3,6 +3,7 @@ Shared Django settings for SanServeAll.
 Environment-specific settings (development/staging/production) import
 from this file and override only what differs.
 """
+
 import os
 from pathlib import Path
 
@@ -17,11 +18,9 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-
     "rest_framework",
     "django_otp",
     "django_otp.plugins.otp_totp",
-
     # SanServeAll apps
     "apps.core",
     "apps.accounts",
@@ -65,7 +64,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-# AUTH_USER_MODEL = "accounts.User"  # TODO (Week 2): uncomment once
+AUTH_USER_MODEL = "accounts.User"  # TODO (Week 2): uncomment once
 # apps/accounts/models.py implements a real User(AbstractUser) subclass.
 # Left commented rather than pointed at a non-existent model, so `manage.py
 # check`/`migrate` work correctly on this scaffold before Week 2 lands.
