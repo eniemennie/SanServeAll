@@ -16,7 +16,9 @@ jobs:
         run: |
           pip install -r backend/requirements/development.txt
       - name: Lint (flake8)
-        run: flake8 backend
+        run: |
+          cd backend
+          flake8 .
       - name: Check formatting (black)
         run: black --check backend
       - name: Run tests
