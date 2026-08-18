@@ -24,3 +24,4 @@ database/backups/*
 .vscode/
 .idea/
 .DS_Store
+desktop.ini
