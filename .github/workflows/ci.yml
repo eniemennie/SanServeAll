@@ -11,12 +11,14 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.13"
       - name: Install dependencies
         run: |
           pip install -r backend/requirements/development.txt
       - name: Lint (flake8)
-        run: flake8 backend
+        run: |
+          cd backend
+          flake8 .
       - name: Check formatting (black)
         run: black --check backend
       - name: Run tests
