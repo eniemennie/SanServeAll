@@ -4,11 +4,11 @@ Each domain app owns its own urls.py; this file only mounts them.
 """
 
 from django.contrib import admin
-from django.urls import path
+from django.urls import include, path
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    # path("api/v1/accounts/", include("apps.accounts.urls")),
+    path("accounts/", include("apps.accounts.urls")),
     # path("api/v1/pos/", include("apps.pos.urls")),
     # path("api/v1/inventory/", include("apps.inventory.urls")),
     # path("api/v1/production/", include("apps.production.urls")),
