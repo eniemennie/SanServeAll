@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Enter PIN - SanServeAll{% endblock %}
+{% block content %}
+<div class="container d-flex align-items-center justify-content-center" style="min-height: 100vh;">
+    <div class="card shadow-sm" style="max-width: 340px; width: 100%;">
+        <div class="card-body p-4 text-center">
+            <h1 class="h4 mb-3">Enter Your PIN</h1>
+
+            {% if error %}
+                <div class="alert alert-danger py-2">{{ error }}</div>
+            {% endif %}
+
+            <form method="post">
+                {% csrf_token %}
+                <input type="password" name="pin" inputmode="numeric" pattern="[0-9]*"
+                       maxlength="6" class="form-control form-control-lg text-center mb-3"
+                       placeholder="••••" required autofocus>
+                <button type="submit" class="btn btn-primary w-100">Unlock</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

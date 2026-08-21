@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Set Up Two-Factor Authentication - SanServeAll{% endblock %}
+{% block content %}
+<div class="container d-flex align-items-center justify-content-center" style="min-height: 100vh;">
+    <div class="card shadow-sm" style="max-width: 460px; width: 100%;">
+        <div class="card-body p-4">
+            <h1 class="h4 mb-3 text-center">Set Up Two-Factor Authentication</h1>
+            <p class="text-muted small">
+                Add this account to Google Authenticator, Authy, or a
+                similar app using the manual entry key below, then enter
+                the 6-digit code it generates to finish setup.
+            </p>
+
+            {% if error %}
+                <div class="alert alert-danger py-2">{{ error }}</div>
+            {% endif %}
+
+            <div class="alert alert-secondary">
+                <div class="small text-muted mb-1">Manual entry key</div>
+                <code class="fs-6">{{ secret }}</code>
+            </div>
+
+            <form method="post">
+                {% csrf_token %}
+                <div class="mb-3">
+                    <label for="id_token" class="form-label">6-digit code</label>
+                    <input type="text" name="token" id="id_token" inputmode="numeric"
+                           pattern="[0-9]*" maxlength="6" class="form-control" required autofocus>
+                </div>
+                <button type="submit" class="btn btn-dark w-100">Confirm and Enable 2FA</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

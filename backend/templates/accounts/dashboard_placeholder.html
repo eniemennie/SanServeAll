@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - SanServeAll{% endblock %}
+{% block content %}
+<div class="container py-5">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1 class="h3">Welcome, {{ user.get_username }}</h1>
+        <form method="post" action="{% url 'accounts:logout' %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-outline-secondary btn-sm">Log Out</button>
+        </form>
+    </div>
+    <div class="alert alert-info">
+        This is a temporary landing page. Role-specific dashboards (POS,
+        Analytics, Admin) are built in later weeks per the Phase 9 timeline.
+        Reaching this page confirms the Week 3 login &rarr; branch selection
+        &rarr; PIN flow completed successfully.
+    </div>
+</div>
+{% endblock %}

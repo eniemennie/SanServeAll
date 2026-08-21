@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Admin Login - SanServeAll{% endblock %}
+{% block content %}
+<div class="container d-flex align-items-center justify-content-center" style="min-height: 100vh;">
+    <div class="card shadow-sm" style="max-width: 380px; width: 100%;">
+        <div class="card-body p-4">
+            <h1 class="h4 mb-1 text-center">Admin Login</h1>
+            <p class="text-muted text-center mb-4">SanServeAll Administration</p>
+
+            {% if error %}
+                <div class="alert alert-danger py-2">{{ error }}</div>
+            {% endif %}
+
+            <form method="post">
+                {% csrf_token %}
+                <div class="mb-3">
+                    <label for="id_email" class="form-label">Email</label>
+                    <input type="email" name="email" id="id_email" class="form-control" required autofocus>
+                </div>
+                <div class="mb-3">
+                    <label for="id_password" class="form-label">Password</label>
+                    <input type="password" name="password" id="id_password" class="form-control" required>
+                </div>
+                <button type="submit" class="btn btn-dark w-100">Log In</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

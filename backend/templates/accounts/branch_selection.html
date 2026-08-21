@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Select Branch - SanServeAll{% endblock %}
+{% block content %}
+<div class="container d-flex align-items-center justify-content-center" style="min-height: 100vh;">
+    <div class="card shadow-sm" style="max-width: 420px; width: 100%;">
+        <div class="card-body p-4">
+            <h1 class="h4 mb-3 text-center">Select Branch</h1>
+
+            {% if error %}
+                <div class="alert alert-danger py-2">{{ error }}</div>
+            {% endif %}
+
+            {% if branches %}
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="list-group mb-3">
+                        {% for branch in branches %}
+                        <label class="list-group-item d-flex align-items-center">
+                            <input class="form-check-input me-2" type="radio" name="branch_id" value="{{ branch.pk }}" required>
+                            {{ branch.name }}
+                            {% if branch.is_kahero_branch %}
+                                <span class="badge bg-secondary ms-auto">KaHero / Batch</span>
+                            {% endif %}
+                        </label>
+                        {% endfor %}
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Continue</button>
+                </form>
+            {% else %}
+                <p class="text-muted text-center">No branch is assigned to your account. Contact your administrator.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
