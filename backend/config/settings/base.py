@@ -21,7 +21,6 @@ INSTALLED_APPS = [
     "rest_framework",
     "django_otp",
     "django_otp.plugins.otp_totp",
-    # SanServeAll apps
     "apps.core",
     "apps.accounts",
     "apps.pos",
@@ -39,9 +38,9 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django_otp.middleware.OTPMiddleware",
+    "apps.core.middleware.BranchScopingMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    # TODO (Week 3): "apps.core.middleware.BranchScopingMiddleware",
 ]
 
 ROOT_URLCONF = "config.urls"
@@ -64,10 +63,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-AUTH_USER_MODEL = "accounts.User"  # TODO (Week 2): uncomment once
-# apps/accounts/models.py implements a real User(AbstractUser) subclass.
-# Left commented rather than pointed at a non-existent model, so `manage.py
-# check`/`migrate` work correctly on this scaffold before Week 2 lands.
+AUTH_USER_MODEL = "accounts.User"
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -75,8 +71,6 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
-# PBKDF2 is Django's default password hasher — satisfies the manuscript's
-# security requirement (Phase 3) with no custom crypto code needed.
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "Asia/Manila"
@@ -101,9 +95,16 @@ REST_FRAMEWORK = {
     ],
 }
 
-# KaHero branch configuration (Phase 2/4 decision) — single source of truth,
-# never hardcode this branch name anywhere else in the codebase.
+# KaHero branch configuration (Phase 2/4 decision) -- single source of
+# truth, never hardcode this branch name anywhere else in the codebase.
 KAHERO_BRANCH = os.environ.get("KAHERO_BRANCH", "Alangilan")
+
+# Auth flow (Week 3): unauthenticated requests to a login-required view
+# land on the Login/Start Screen; a successful login's default next-step
+# is Branch Selection unless a view overrides get_success_url() itself.
+LOGIN_URL = "accounts:login"
+LOGIN_REDIRECT_URL = "accounts:select_branch"
+LOGOUT_REDIRECT_URL = "accounts:login"
 
 LOGGING = {
     "version": 1,
