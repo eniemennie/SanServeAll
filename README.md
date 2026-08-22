@@ -1,4 +1,4 @@
-# SanServeAll
+# SanServeAll: A Centralized Web-Based Enterprise Operations and AI-Powered Intelligent Decision Support System for Jorge’s Casa De Sans Rival
 
 Centralized Web-Based Enterprise Operations and AI-Powered Intelligent
 Decision Support System for Jorge's Casa De Sans Rival.
