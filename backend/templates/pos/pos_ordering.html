@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}POS - SanServeAll{% endblock %}
+{% block content %}
+<div class="container-fluid py-3">
+    <div class="row">
+        <!-- Product catalog + search (Fig. 3-12) -->
+        <div class="col-md-7">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h1 class="h4 mb-0">Order</h1>
+                <a href="{% url 'pos:add_custom_product' %}" class="btn btn-outline-dark btn-sm">
+                    + Custom Item
+                </a>
+            </div>
+
+            <form method="get" class="mb-3">
+                <input type="text" name="q" value="{{ query }}" class="form-control"
+                       placeholder="Search products...">
+            </form>
+
+            <div class="list-group">
+                {% for product in products %}
+                <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <div>
+                        <div>{{ product.name }}</div>
+                        <div class="text-muted small">₱{{ product.price }}</div>
+                    </div>
+                    <form method="post" action="{% url 'pos:add_catalog_item' %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="product_id" value="{{ product.pk }}">
+                        <input type="hidden" name="quantity" value="1">
+                        <button type="submit" class="btn btn-primary btn-sm">Add</button>
+                    </form>
+                </div>
+                {% empty %}
+                <p class="text-muted">No products found.</p>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Order summary (current draft transaction) -->
+        <div class="col-md-5">
+            <h2 class="h5">Current Order</h2>
+            <div class="list-group mb-3">
+                {% for item in draft.items.all %}
+                <div class="list-group-item">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <strong>{{ item.display_name }}</strong> &times; {{ item.quantity }}
+                            {% if item.customizations.size or item.customizations.sugar_level %}
+                                <div class="small text-muted">
+                                    {{ item.customizations.size }}
+                                    {% if item.customizations.sugar_level %} &middot; {{ item.customizations.sugar_level }}{% endif %}
+                                </div>
+                            {% endif %}
+                        </div>
+                        <div class="text-end">
+                            <div>₱{{ item.subtotal }}</div>
+                            <a href="{% url 'pos:customize_item' item.pk %}" class="small">Edit</a>
+                            &middot;
+                            <form method="post" action="{% url 'pos:remove_item' item.pk %}" class="d-inline">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-link btn-sm p-0 text-danger">Remove</button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                {% empty %}
+                <p class="text-muted">No items yet.</p>
+                {% endfor %}
+            </div>
+            <div class="d-flex justify-content-between fw-bold fs-5">
+                <span>Total</span>
+                <span>₱{{ draft.total_amount }}</span>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

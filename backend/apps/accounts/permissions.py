@@ -59,3 +59,27 @@ class RoleRequiredMixin:
         if not _user_has_role(request.user, self.allowed_roles):
             raise PermissionDenied("You do not have permission to access this page.")
         return super().dispatch(request, *args, **kwargs)
+
+
+def pos_unlock_required(view_func):
+    """Gates POS views (Week 4+) behind the full Week 3 flow: logged in,
+    a branch selected, and the Cashier PIN actually entered this session.
+
+    Rather than a blanket 403, each failure state redirects to wherever the
+    user actually needs to go next -- login, branch selection, or the PIN
+    screen -- so a cashier who, say, refreshes mid-shift after a session
+    timeout lands back in the right place instead of a dead end.
+    """
+
+    @wraps(view_func)
+    @login_required
+    def _wrapped(request, *args, **kwargs):
+        from django.shortcuts import redirect
+
+        if "selected_branch_id" not in request.session:
+            return redirect("accounts:select_branch")
+        if not request.session.get("pos_unlocked"):
+            return redirect("accounts:cashier_pin")
+        return view_func(request, *args, **kwargs)
+
+    return _wrapped

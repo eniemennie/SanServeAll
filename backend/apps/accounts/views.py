@@ -112,7 +112,7 @@ class CashierPinView(LoginRequiredMixin, View):
         raw_pin = request.POST.get("pin", "")
         if verify_cashier_pin(request.user, raw_pin):
             request.session["pos_unlocked"] = True
-            return redirect("accounts:dashboard")
+            return redirect("pos:ordering")
         return render(
             request,
             self.template_name,

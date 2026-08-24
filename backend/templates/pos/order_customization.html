@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Customize Order - SanServeAll{% endblock %}
+{% block content %}
+<div class="container d-flex align-items-center justify-content-center" style="min-height: 100vh;">
+    <div class="card shadow-sm" style="max-width: 420px; width: 100%;">
+        <div class="card-body p-4">
+            <h1 class="h4 mb-1">{{ item.display_name }}</h1>
+            <p class="text-muted small mb-3">Customize this item</p>
+
+            <form method="post">
+                {% csrf_token %}
+                <div class="mb-3">
+                    <label for="id_quantity" class="form-label">Quantity</label>
+                    <input type="number" name="quantity" id="id_quantity" min="1"
+                           value="{{ item.quantity }}" class="form-control">
+                </div>
+                <div class="mb-3">
+                    <label for="id_size" class="form-label">Size</label>
+                    <select name="size" id="id_size" class="form-select">
+                        <option value="" {% if not item.customizations.size %}selected{% endif %}>None</option>
+                        <option value="Small" {% if item.customizations.size == "Small" %}selected{% endif %}>Small</option>
+                        <option value="Medium" {% if item.customizations.size == "Medium" %}selected{% endif %}>Medium</option>
+                        <option value="Large" {% if item.customizations.size == "Large" %}selected{% endif %}>Large</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label for="id_sugar_level" class="form-label">Sugar Level</label>
+                    <select name="sugar_level" id="id_sugar_level" class="form-select">
+                        <option value="" {% if not item.customizations.sugar_level %}selected{% endif %}>None</option>
+                        <option value="0%" {% if item.customizations.sugar_level == "0%" %}selected{% endif %}>0%</option>
+                        <option value="50%" {% if item.customizations.sugar_level == "50%" %}selected{% endif %}>50%</option>
+                        <option value="100%" {% if item.customizations.sugar_level == "100%" %}selected{% endif %}>100%</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Add-ons</label>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="add_ons" value="Pearls"
+                               id="addon_pearls" {% if "Pearls" in item.customizations.add_ons %}checked{% endif %}>
+                        <label class="form-check-label" for="addon_pearls">Pearls</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="add_ons" value="Extra Shot"
+                               id="addon_shot" {% if "Extra Shot" in item.customizations.add_ons %}checked{% endif %}>
+                        <label class="form-check-label" for="addon_shot">Extra Shot</label>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label for="id_notes" class="form-label">Notes</label>
+                    <input type="text" name="notes" id="id_notes"
+                           value="{{ item.customizations.notes }}" class="form-control">
+                </div>
+                <div class="d-flex gap-2">
+                    <a href="{% url 'pos:ordering' %}" class="btn btn-outline-secondary w-50">Cancel</a>
+                    <button type="submit" class="btn btn-primary w-50">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
