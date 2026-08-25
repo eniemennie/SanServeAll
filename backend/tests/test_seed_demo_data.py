@@ -10,6 +10,7 @@ import pytest
 from django.conf import settings
 
 from apps.accounts.models import Branch, Role
+from apps.inventory.models import Product
 
 pytestmark = pytest.mark.django_db
 
@@ -52,3 +53,13 @@ class TestSeedDemoData:
         _run_seed()
         _run_seed()
         assert Branch.objects.filter(is_kahero_branch=True).count() == 1
+
+    def test_creates_starter_product_catalog(self):
+        _run_seed()
+        assert Product.objects.count() == 8
+        assert Product.objects.filter(is_active=True).count() == 8
+
+    def test_running_twice_does_not_duplicate_products(self):
+        _run_seed()
+        _run_seed()
+        assert Product.objects.count() == 8

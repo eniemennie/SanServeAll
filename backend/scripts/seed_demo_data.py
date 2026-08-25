@@ -27,6 +27,7 @@ if not django.apps.apps.ready:
     django.setup()
 
 from apps.accounts.models import Branch, Role  # noqa: E402
+from apps.inventory.models import Product  # noqa: E402
 
 # Confirmed branch configuration (Phase 2 decision, resolved client
 # contradiction): Alangilan runs KaHero POS / batch-import mode.
@@ -55,6 +56,21 @@ ROLES = [
     },
 ]
 
+# A minimal starter catalog so the POS Ordering Screen (Week 4) has real
+# products to test against ahead of the full Inventory module (Week 6).
+# Categories match the manuscript's own description of Jorge's Café menu
+# (Phase 1 SS1.1: sweets, cakes, pastries, all-day meals, pasta, beverages).
+PRODUCTS = [
+    {"name": "Sans Rival Slice", "price": "150.00"},
+    {"name": "Chocolate Cake Slice", "price": "140.00"},
+    {"name": "Ensaymada", "price": "45.00"},
+    {"name": "Spanish Latte", "price": "125.00"},
+    {"name": "Cappuccino", "price": "115.00"},
+    {"name": "Carbonara", "price": "185.00"},
+    {"name": "Chicken Pesto Pasta", "price": "195.00"},
+    {"name": "Sans Rival Breakfast Plate", "price": "220.00"},
+]
+
 
 def run():
     print("Seeding branches...")
@@ -76,6 +92,14 @@ def run():
         )
         status = "created" if created else "already exists"
         print(f"  [{status}] {role.get_name_display()}")
+
+    print("\nSeeding starter product catalog...")
+    for data in PRODUCTS:
+        product, created = Product.objects.get_or_create(
+            name=data["name"], defaults={"price": data["price"]}
+        )
+        status = "created" if created else "already exists"
+        print(f"  [{status}] {product.name} (Php{product.price})")
 
     kahero_count = Branch.objects.filter(is_kahero_branch=True).count()
     assert kahero_count == 1, (
