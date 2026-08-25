@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Batch Processing Dashboard - SanServeAll{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h4">Batch Processing Analytics</h1>
+        <a href="{% url 'kahero:upload' %}" class="btn btn-primary btn-sm">Upload New Batch</a>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Total Batches</div>
+                <div class="fs-3 fw-bold">{{ total_batches }}</div>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Completed</div>
+                <div class="fs-3 fw-bold text-success">{{ status_counts.Completed }}</div>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Failed</div>
+                <div class="fs-3 fw-bold text-danger">{{ status_counts.Failed }}</div>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Total Rows Received</div>
+                <div class="fs-3 fw-bold">{{ total_rows_received }}</div>
+            </div></div>
+        </div>
+    </div>
+
+    <table class="table table-sm table-hover bg-white">
+        <thead>
+            <tr>
+                <th>Batch</th>
+                <th>File</th>
+                <th>Branch</th>
+                <th>Uploaded By</th>
+                <th>Status</th>
+                <th>Rows</th>
+                <th>Quality Rate</th>
+                <th>Date</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for batch in batches %}
+            <tr>
+                <td><a href="{% url 'kahero:batch_detail' batch.pk %}">#{{ batch.pk }}</a></td>
+                <td>{{ batch.original_filename }}</td>
+                <td>{{ batch.branch.name }}</td>
+                <td>{{ batch.uploaded_by.get_username }}</td>
+                <td>
+                    <span class="badge
+                        {% if batch.status == 'COMPLETED' %}bg-success
+                        {% elif batch.status == 'FAILED' %}bg-danger
+                        {% elif batch.status == 'PROCESSING' %}bg-info
+                        {% else %}bg-secondary{% endif %}">
+                        {{ batch.get_status_display }}
+                    </span>
+                </td>
+                <td>{{ batch.success_count }} / {{ batch.total_rows }}</td>
+                <td>{% if batch.quality_rate is not None %}{{ batch.quality_rate }}%{% else %}&mdash;{% endif %}</td>
+                <td>{{ batch.created_at }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="8" class="text-center text-muted py-3">No batches uploaded yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
