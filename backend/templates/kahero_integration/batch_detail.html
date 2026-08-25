@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Batch #{{ batch.pk }} - SanServeAll{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h4">Batch #{{ batch.pk }}</h1>
+        <a href="{% url 'kahero:dashboard' %}" class="btn btn-outline-secondary btn-sm">Back to Dashboard</a>
+    </div>
+
+    <dl class="row">
+        <dt class="col-sm-3">File</dt>
+        <dd class="col-sm-9">{{ batch.original_filename }}</dd>
+        <dt class="col-sm-3">Branch</dt>
+        <dd class="col-sm-9">{{ batch.branch.name }}</dd>
+        <dt class="col-sm-3">Status</dt>
+        <dd class="col-sm-9">{{ batch.get_status_display }}</dd>
+        <dt class="col-sm-3">Rows</dt>
+        <dd class="col-sm-9">{{ batch.success_count }} succeeded / {{ batch.error_count }} failed / {{ batch.total_rows }} total</dd>
+        <dt class="col-sm-3">Quality Rate</dt>
+        <dd class="col-sm-9">{% if batch.quality_rate is not None %}{{ batch.quality_rate }}%{% else %}&mdash;{% endif %}</dd>
+    </dl>
+
+    {% if batch.error_log %}
+    <h2 class="h6 mt-4">Row Errors</h2>
+    <ul class="list-group">
+        {% for err in batch.error_log %}
+        <li class="list-group-item small text-danger">{{ err.message }}</li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-muted">No errors recorded for this batch.</p>
+    {% endif %}
+</div>
+{% endblock %}
