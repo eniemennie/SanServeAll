@@ -11,7 +11,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("accounts/", include("apps.accounts.urls")),
     path("pos/", include("apps.pos.urls")),
-    # path("api/v1/inventory/", include("apps.inventory.urls")),
+    path("inventory/", include("apps.inventory.urls")),
     # path("api/v1/production/", include("apps.production.urls")),
     # path("api/v1/kahero/", include("apps.kahero_integration.urls")),
     # path("api/v1/analytics/", include("apps.analytics.urls")),
