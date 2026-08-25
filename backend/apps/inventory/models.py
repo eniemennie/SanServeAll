@@ -1,24 +1,33 @@
 """
 Products, stock levels, stock movement, batch materials.
 
-The Product model below is intentionally minimal -- POS (Week 4) needs a
-sellable catalog before Inventory's own stock-tracking features exist
-(Week 6, per the Phase 9 timeline). Week 6 extends this same model with
-stock levels, reorder thresholds, and the full Inventory module rather
-than replacing it, so POS's FK references here remain valid.
-
-Inventory and InventoryTransaction below are ALSO intentionally minimal --
-they exist now only to support the Week 5 real-time deduction hook (a
-sale reduces stock on hand). Reorder thresholds, low-stock alerts, batch
-tracking, and the actual Inventory Monitoring screens are Week 6 work.
+Week 6 extends Product and Inventory with the fields the Inventory Module
+actually needs (reorder threshold, product type distinguishing finished
+goods from raw materials) -- rather than replacing what Week 4/5 already
+built, so POS's and the deduction hook's existing FK references and
+behavior stay valid unchanged.
 """
 
 from django.db import models
 
 
 class Product(models.Model):
+    class ProductType(models.TextChoices):
+        FINISHED_GOOD = "FINISHED_GOOD", "Finished Good"
+        MATERIAL = "MATERIAL", "Raw Material"
+
     name = models.CharField(max_length=150)
     price = models.DecimalField(max_digits=10, decimal_places=2)
+    # MATERIAL rows (flour, sugar, cups, etc. -- Phase 1 SS1.1) are not sold
+    # directly through POS; `price` still applies as their unit cost for
+    # inventory valuation, just not as a sellable catalog price.
+    product_type = models.CharField(
+        max_length=32, choices=ProductType.choices, default=ProductType.FINISHED_GOOD
+    )
+    # Below this quantity_on_hand, Inventory.is_low_stock flags the item
+    # (Row 6.4). Zero means "don't flag" rather than "always flag" -- a
+    # product with no threshold configured yet shouldn't spam alerts.
+    reorder_threshold = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -48,6 +57,27 @@ class Inventory(models.Model):
 
     def __str__(self):
         return f"{self.product.name} @ {self.branch.name}: {self.quantity_on_hand}"
+
+    @property
+    def is_out_of_stock(self):
+        return self.quantity_on_hand <= 0
+
+    @property
+    def is_low_stock(self):
+        """True when stock is at or below the product's configured reorder
+        threshold, but still above zero (out-of-stock is its own, more
+        urgent status -- Fig. 3-20/3-32 distinguish the two)."""
+        if self.product.reorder_threshold <= 0:
+            return False
+        return 0 < self.quantity_on_hand <= self.product.reorder_threshold
+
+    @property
+    def status_label(self):
+        if self.is_out_of_stock:
+            return "Out of Stock"
+        if self.is_low_stock:
+            return "Low Stock"
+        return "Available"
 
 
 class InventoryTransaction(models.Model):
