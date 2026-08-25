@@ -20,10 +20,16 @@ class SalesTransaction(models.Model):
         COMPLETED = "COMPLETED", "Completed"
         VOIDED = "VOIDED", "Voided"
 
+    class PaymentMethod(models.TextChoices):
+        CASH = "CASH", "Cash"
+        GCASH = "GCASH", "GCash"
+        CARD = "CARD", "Card"
+
     branch = models.ForeignKey("accounts.Branch", on_delete=models.PROTECT)
     cashier = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.DRAFT)
-    payment_method = models.CharField(max_length=32, blank=True)
+    payment_method = models.CharField(max_length=32, choices=PaymentMethod.choices, blank=True)
+    amount_tendered = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -37,6 +43,12 @@ class SalesTransaction(models.Model):
     @property
     def total_amount(self):
         return sum((item.subtotal for item in self.items.all()), Decimal("0.00"))
+
+    @property
+    def change_due(self):
+        if self.amount_tendered is None:
+            return None
+        return self.amount_tendered - self.total_amount
 
 
 class SalesItem(models.Model):

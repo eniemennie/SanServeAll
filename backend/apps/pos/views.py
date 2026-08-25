@@ -1,6 +1,7 @@
 """
 Views for the POS module: Ordering Screen, Add Custom Product, Order
-Customization (Phase 1 Figs. 3-12, 3-13, 3-14).
+Customization, Payment Processing, Transaction Receipt (Phase 1 Figs.
+3-12 through 3-17).
 
 All views here are gated by @pos_unlock_required (Week 3's full login ->
 branch selection -> cashier PIN flow) and operate only on the current
@@ -12,7 +13,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from apps.accounts.permissions import pos_unlock_required
 from apps.inventory.models import Product
 from apps.pos import services
-from apps.pos.models import SalesItem
+from apps.pos.models import SalesItem, SalesTransaction
 
 
 def _get_draft(request):
@@ -89,3 +90,48 @@ def remove_item(request, item_id):
         draft = _get_draft(request)
         services.remove_item(draft, item_id)
     return redirect("pos:ordering")
+
+
+@pos_unlock_required
+def payment(request):
+    """POS Payment Processing Interface (Fig. 3-16): review order summary
+    and total, select payment mode, enter amount tendered, confirm."""
+    draft = _get_draft(request)
+    error = None
+
+    if request.method == "POST":
+        try:
+            services.complete_sale_payment(
+                draft,
+                payment_method=request.POST.get("payment_method"),
+                amount_tendered=request.POST.get("amount_tendered"),
+            )
+            return redirect("pos:receipt", transaction_id=draft.pk)
+        except services.PaymentError as exc:
+            error = str(exc)
+
+    return render(
+        request,
+        "pos/payment.html",
+        {
+            "draft": draft,
+            "error": error,
+            "payment_methods": SalesTransaction.PaymentMethod.choices,
+        },
+    )
+
+
+@pos_unlock_required
+def receipt(request, transaction_id):
+    """Transaction Receipt Interface (Fig. 3-17): itemized digital
+    receipt for a COMPLETED sale. Scoped to the current cashier/branch --
+    not just any transaction ID -- so one cashier can't view another's
+    receipts by guessing a URL."""
+    completed_transaction = get_object_or_404(
+        SalesTransaction,
+        pk=transaction_id,
+        cashier=request.user,
+        branch=request.selected_branch,
+        status=SalesTransaction.Status.COMPLETED,
+    )
+    return render(request, "pos/receipt.html", {"transaction": completed_transaction})

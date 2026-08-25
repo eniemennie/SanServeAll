@@ -10,4 +10,6 @@ urlpatterns = [
     path("add-custom-product/", views.add_custom_product, name="add_custom_product"),
     path("item/<int:item_id>/customize/", views.customize_item, name="customize_item"),
     path("item/<int:item_id>/remove/", views.remove_item, name="remove_item"),
+    path("payment/", views.payment, name="payment"),
+    path("receipt/<int:transaction_id>/", views.receipt, name="receipt"),
 ]

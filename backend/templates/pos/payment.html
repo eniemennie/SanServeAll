@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Payment - SanServeAll{% endblock %}
+{% block content %}
+<div class="container d-flex align-items-center justify-content-center" style="min-height: 100vh;">
+    <div class="card shadow-sm" style="max-width: 420px; width: 100%;">
+        <div class="card-body p-4">
+            <h1 class="h4 mb-3">Payment</h1>
+
+            {% if error %}
+                <div class="alert alert-danger py-2">{{ error }}</div>
+            {% endif %}
+
+            <div class="list-group mb-3">
+                {% for item in draft.items.all %}
+                <div class="list-group-item d-flex justify-content-between">
+                    <span>{{ item.display_name }} &times; {{ item.quantity }}</span>
+                    <span>&#8369;{{ item.subtotal }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            <div class="d-flex justify-content-between fw-bold fs-5 mb-4">
+                <span>Total Due</span>
+                <span>&#8369;{{ draft.total_amount }}</span>
+            </div>
+
+            <form method="post">
+                {% csrf_token %}
+                <div class="mb-3">
+                    <label class="form-label">Payment Mode</label>
+                    <select name="payment_method" class="form-select" required>
+                        <option value="" selected disabled>Select mode</option>
+                        {% for value, label in payment_methods %}
+                        <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label for="id_amount_tendered" class="form-label">Amount Tendered</label>
+                    <input type="number" name="amount_tendered" id="id_amount_tendered"
+                           step="0.01" min="0" class="form-control" required autofocus>
+                    <div class="mt-2 d-flex gap-1 flex-wrap">
+                        <button type="button" class="btn btn-outline-secondary btn-sm quick-amount" data-amount="100">&#8369;100</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm quick-amount" data-amount="200">&#8369;200</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm quick-amount" data-amount="500">&#8369;500</button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm quick-amount" data-amount="1000">&#8369;1000</button>
+                    </div>
+                </div>
+                <div class="d-flex gap-2">
+                    <a href="{% url 'pos:ordering' %}" class="btn btn-outline-secondary w-50">Back</a>
+                    <button type="submit" class="btn btn-primary w-50">Confirm Payment</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+<script>
+document.querySelectorAll(".quick-amount").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+        document.getElementById("id_amount_tendered").value = btn.dataset.amount;
+    });
+});
+</script>
+{% endblock %}
