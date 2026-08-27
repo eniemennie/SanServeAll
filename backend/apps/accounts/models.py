@@ -36,6 +36,15 @@ class Branch(TimestampedModel):
             "SanServeAll POS in real time."
         ),
     )
+    is_commissary = models.BooleanField(
+        default=False,
+        help_text=(
+            "True only for the centralized commissary (Phase 1 §1.1). "
+            "Modeled as a Branch row so Production (Week 8) can reuse "
+            "existing branch-scoping, selection, and Inventory "
+            "infrastructure rather than a parallel system."
+        ),
+    )
     is_active = models.BooleanField(default=True)
 
     class Meta:

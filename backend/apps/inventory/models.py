@@ -88,6 +88,12 @@ class InventoryTransaction(models.Model):
     class MovementType(models.TextChoices):
         SALE_DEDUCTION = "SALE_DEDUCTION", "Sale Deduction"
         MANUAL_ADJUSTMENT = "MANUAL_ADJUSTMENT", "Manual Adjustment"
+        # Week 8: distinct from MANUAL_ADJUSTMENT so the audit trail can
+        # actually distinguish "an admin corrected a miscount" from "the
+        # commissary consumed/produced stock via a production run" --
+        # both are automatic, neither is a manual override.
+        PRODUCTION_CONSUMPTION = "PRODUCTION_CONSUMPTION", "Production Consumption"
+        PRODUCTION_OUTPUT = "PRODUCTION_OUTPUT", "Production Output"
 
     branch = models.ForeignKey("accounts.Branch", on_delete=models.PROTECT)
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
