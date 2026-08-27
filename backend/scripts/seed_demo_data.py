@@ -38,6 +38,13 @@ BRANCHES = [
     {"name": "Lipa City", "code": "LIPA", "is_kahero_branch": False},
 ]
 
+# The commissary (Phase 1 SS1.1) is modeled as a Branch row too (Week 8
+# decision -- reuses all existing branch-scoping infrastructure) but is
+# tracked separately from the 3 customer-facing branches above, since it
+# has its own dedicated flag rather than a fourth is_kahero_branch-style
+# entry in that list.
+COMMISSARY = {"name": "Commissary", "code": "COMMISSARY", "is_commissary": True}
+
 ROLES = [
     {
         "name": Role.OWNER_ADMIN,
@@ -71,6 +78,17 @@ PRODUCTS = [
     {"name": "Sans Rival Breakfast Plate", "price": "220.00"},
 ]
 
+# Starter raw materials (Week 8) so Production has something real to
+# consume -- matches the manuscript's own ingredient examples (Phase 1
+# SS1.1: flour, sugar, butter, eggs, milk, flavorings).
+MATERIALS = [
+    {"name": "Flour (kg)", "price": "55.00"},
+    {"name": "Sugar (kg)", "price": "60.00"},
+    {"name": "Butter (kg)", "price": "320.00"},
+    {"name": "Eggs (tray)", "price": "210.00"},
+    {"name": "Milk (liter)", "price": "95.00"},
+]
+
 
 def run():
     print("Seeding branches...")
@@ -84,6 +102,13 @@ def run():
             f"  [{status}] {branch.name} (code={branch.code}, "
             f"is_kahero_branch={branch.is_kahero_branch})"
         )
+
+    print("\nSeeding commissary...")
+    commissary, created = Branch.objects.get_or_create(
+        code=COMMISSARY["code"], defaults={"name": COMMISSARY["name"], "is_commissary": True}
+    )
+    status = "created" if created else "already exists"
+    print(f"  [{status}] {commissary.name} (code={commissary.code})")
 
     print("\nSeeding roles...")
     for data in ROLES:
@@ -100,6 +125,15 @@ def run():
         )
         status = "created" if created else "already exists"
         print(f"  [{status}] {product.name} (Php{product.price})")
+
+    print("\nSeeding starter raw materials...")
+    for data in MATERIALS:
+        material, created = Product.objects.get_or_create(
+            name=data["name"],
+            defaults={"price": data["price"], "product_type": Product.ProductType.MATERIAL},
+        )
+        status = "created" if created else "already exists"
+        print(f"  [{status}] {material.name} (Php{material.price})")
 
     kahero_count = Branch.objects.filter(is_kahero_branch=True).count()
     assert kahero_count == 1, (
