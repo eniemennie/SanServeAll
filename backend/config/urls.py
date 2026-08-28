@@ -14,7 +14,7 @@ urlpatterns = [
     path("inventory/", include("apps.inventory.urls")),
     path("kahero/", include("apps.kahero_integration.urls")),
     path("production/", include("apps.production.urls")),
-    # path("api/v1/analytics/", include("apps.analytics.urls")),
+    path("analytics/", include("apps.analytics.urls")),
     # path("api/v1/forecasting/", include("apps.forecasting.urls")),
     # TODO: uncomment each line as that app's urls.py is implemented (see Phase 9 timeline)
 ]

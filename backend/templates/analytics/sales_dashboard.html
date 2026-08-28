@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Sales Analytics - SanServeAll{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h4">Sales Analytics Dashboard</h1>
+        <div class="d-flex gap-2">
+            <a href="{% url 'analytics:product_performance' %}" class="btn btn-outline-secondary btn-sm">Product Performance</a>
+            <a href="{% url 'analytics:resource_consumption' %}" class="btn btn-outline-secondary btn-sm">Resource Consumption</a>
+        </div>
+    </div>
+
+    <form method="get" class="row g-2 mb-3">
+        <div class="col-auto">
+            <select name="branch" class="form-select form-select-sm" onchange="this.form.submit()">
+                <option value="">All Branches</option>
+                {% for b in branches %}
+                <option value="{{ b.pk }}" {% if selected_branch.pk == b.pk %}selected{% endif %}>{{ b.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </form>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Total Revenue ({{ summary.days }}d)</div>
+                <div class="fs-4 fw-bold">&#8369;{{ summary.total_revenue|floatformat:2 }}</div>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Avg Daily Revenue</div>
+                <div class="fs-4 fw-bold">&#8369;{{ summary.average_daily_revenue|floatformat:2 }}</div>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Total Transactions</div>
+                <div class="fs-4 fw-bold">{{ summary.total_transactions }}</div>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Total Units Sold</div>
+                <div class="fs-4 fw-bold">{{ summary.total_units_sold }}</div>
+            </div></div>
+        </div>
+    </div>
+
+    {% if low_stock_count is not None %}
+    <div class="alert alert-warning">
+        <strong>{{ low_stock_count }}</strong> item(s) at {{ selected_branch.name }} are low/out of stock.
+        <a href="{% url 'inventory:monitoring' %}">View Inventory Monitoring</a>
+    </div>
+    {% endif %}
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <h2 class="h6">Weekly Sales Trend</h2>
+            <canvas id="salesTrendChart" height="80"></canvas>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <h2 class="h6">Top Products</h2>
+            <table class="table table-sm">
+                <thead><tr><th>Product</th><th>Units Sold</th><th>Revenue</th></tr></thead>
+                <tbody>
+                    {% for p in top_products %}
+                    <tr>
+                        <td>{{ p.product__name }}</td>
+                        <td>{{ p.units_sold }}</td>
+                        <td>&#8369;{{ p.revenue|floatformat:2 }}</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="3" class="text-center text-muted py-3">No sales recorded in this window yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+new Chart(document.getElementById("salesTrendChart"), {
+    type: "line",
+    data: {
+        labels: {{ trend_labels_json|safe }},
+        datasets: [{
+            label: "Revenue (Php)",
+            data: {{ trend_revenue_json|safe }},
+            borderColor: "#0d6efd",
+            backgroundColor: "rgba(13, 110, 253, 0.1)",
+            fill: true,
+            tension: 0.3,
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true } }
+    }
+});
+</script>
+{% endblock %}
