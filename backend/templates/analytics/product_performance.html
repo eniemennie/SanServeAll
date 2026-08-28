@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Product Performance - SanServeAll{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h4">Product Performance</h1>
+        <a href="{% url 'analytics:sales_dashboard' %}" class="btn btn-outline-secondary btn-sm">Back to Dashboard</a>
+    </div>
+
+    <form method="get" class="row g-2 mb-3">
+        <div class="col-auto">
+            <select name="days" class="form-select form-select-sm" onchange="this.form.submit()">
+                <option value="7" {% if days == 7 %}selected{% endif %}>Last 7 days</option>
+                <option value="30" {% if days == 30 %}selected{% endif %}>Last 30 days</option>
+                <option value="90" {% if days == 90 %}selected{% endif %}>Last 90 days</option>
+            </select>
+        </div>
+    </form>
+
+    <p class="text-muted small">
+        Comparing the last {{ days }} days against the {{ days }} days before that.
+    </p>
+
+    <table class="table table-sm table-hover bg-white">
+        <thead>
+            <tr>
+                <th>Product</th>
+                <th>This Period</th>
+                <th>Previous Period</th>
+                <th>Growth</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in performance %}
+            <tr>
+                <td>{{ row.product_name }}</td>
+                <td>{{ row.current_units }}</td>
+                <td>{{ row.previous_units }}</td>
+                <td>
+                    {% if row.growth_rate is None %}
+                        <span class="badge bg-info">New</span>
+                    {% elif row.growth_rate > 0 %}
+                        <span class="badge bg-success">+{{ row.growth_rate|floatformat:1 }}%</span>
+                    {% elif row.growth_rate < 0 %}
+                        <span class="badge bg-danger">{{ row.growth_rate|floatformat:1 }}%</span>
+                    {% else %}
+                        <span class="badge bg-secondary">0.0%</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="4" class="text-center text-muted py-3">No sales data in either period yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
