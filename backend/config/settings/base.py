@@ -99,6 +99,11 @@ REST_FRAMEWORK = {
 # truth, never hardcode this branch name anywhere else in the codebase.
 KAHERO_BRANCH = os.environ.get("KAHERO_BRANCH", "Alangilan")
 
+# Whether the APScheduler background scheduler (config/scheduler.py)
+# starts automatically when Django starts. False in config/settings/test.py
+# so the test suite never accidentally fires real scheduled jobs.
+APSCHEDULER_AUTOSTART = True
+
 # Auth flow (Week 3): unauthenticated requests to a login-required view
 # land on the Login/Start Screen; a successful login's default next-step
 # is Branch Selection unless a view overrides get_success_url() itself.
