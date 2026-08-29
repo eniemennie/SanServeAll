@@ -23,18 +23,41 @@ MEDIUM_RISK_DAYS_THRESHOLD = 10
 
 
 def compute_average_daily_demand(branch, product, days_history=30):
-    """Average units of `product` sold per day at `branch` over the
-    recent window -- the demand-velocity input to risk scoring. Simpler
-    than forecasting's own ARIMA-based series (no need for a full time
-    series here, just one summary number)."""
+    """Average units of `product` consumed per day at `branch` over the
+    recent window -- the demand-velocity input to risk scoring.
+
+    Finished goods are sold via POS, so their demand comes from SalesItem.
+    Raw materials are never sold directly -- they're consumed through
+    Production (Week 8's IngredientUsage) -- so using SalesItem for them
+    would always read zero demand regardless of real consumption, making
+    every material look artificially "safe." Each product type reads
+    from the data source that actually reflects how it leaves inventory.
+    """
+    from apps.inventory.models import Product
+
     since = timezone.now() - timedelta(days=days_history)
-    total_sold = SalesItem.objects.filter(
-        transaction__branch=branch,
-        transaction__status=SalesTransaction.Status.COMPLETED,
-        transaction__completed_at__gte=since,
-        product=product,
-    ).values_list("quantity", flat=True)
-    total = sum(total_sold)
+
+    if product.product_type == Product.ProductType.MATERIAL:
+        from apps.production.models import IngredientUsage
+
+        # ProductionRecord has no branch field -- all production happens
+        # at the single commissary by design (Week 8), so `branch` isn't
+        # meaningful to filter by here; every material's consumption is
+        # already implicitly commissary-scoped.
+        total_used = IngredientUsage.objects.filter(
+            production_record__created_at__gte=since,
+            material=product,
+        ).values_list("quantity_used", flat=True)
+        total = sum(total_used)
+    else:
+        total_sold = SalesItem.objects.filter(
+            transaction__branch=branch,
+            transaction__status=SalesTransaction.Status.COMPLETED,
+            transaction__completed_at__gte=since,
+            product=product,
+        ).values_list("quantity", flat=True)
+        total = sum(total_sold)
+
     return total / days_history if days_history else 0.0
 
 

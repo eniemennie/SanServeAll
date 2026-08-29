@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Forecasting Dashboard - SanServeAll{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h4">AI-Powered Forecasting Dashboard</h1>
+        <a href="{% url 'forecasting:decision_support' %}" class="btn btn-outline-secondary btn-sm">Decision Support</a>
+    </div>
+
+    <form method="get" class="row g-2 mb-3">
+        <div class="col-auto">
+            <select name="branch" class="form-select form-select-sm" onchange="this.form.submit()">
+                <option value="">All Branches</option>
+                {% for b in branches %}
+                <option value="{{ b.pk }}" {% if selected_branch.pk == b.pk %}selected{% endif %}>{{ b.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </form>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Predictions Made</div>
+                <div class="fs-4 fw-bold">{{ summary.predictions_made }}</div>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Products Forecasted</div>
+                <div class="fs-4 fw-bold">{{ summary.products_forecasted }}</div>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Avg. MAE</div>
+                <div class="fs-4 fw-bold">{% if summary.avg_mae is not None %}{{ summary.avg_mae }}{% else %}&mdash;{% endif %}</div>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Avg. Confidence*</div>
+                <div class="fs-4 fw-bold">{% if summary.avg_confidence_pct is not None %}{{ summary.avg_confidence_pct }}%{% else %}&mdash;{% endif %}</div>
+            </div></div>
+        </div>
+    </div>
+    <p class="text-muted small">*Confidence is a simple heuristic (1 - error/predicted demand), not a formal statistical confidence interval.</p>
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <h2 class="h6">7-Day Demand Pattern (all products combined)</h2>
+            <canvas id="demandPatternChart" height="80"></canvas>
+        </div>
+    </div>
+
+    <h2 class="h6">Latest Forecast Detail</h2>
+    <table class="table table-sm table-hover bg-white">
+        <thead><tr><th>Product</th><th>Branch</th><th>Date</th><th>Predicted Qty</th><th>Model</th><th>MAE</th></tr></thead>
+        <tbody>
+            {% for f in forecasts %}
+            <tr>
+                <td>{{ f.product.name }}</td>
+                <td>{{ f.branch.name }}</td>
+                <td>{{ f.forecast_date }}</td>
+                <td>{{ f.predicted_quantity|floatformat:1 }}</td>
+                <td><span class="badge bg-secondary">{{ f.model_used }}</span></td>
+                <td>{% if f.mae is not None %}{{ f.mae }}{% else %}&mdash;{% endif %}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="6" class="text-center text-muted py-3">No forecasts generated yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+new Chart(document.getElementById("demandPatternChart"), {
+    type: "bar",
+    data: {
+        labels: {{ pattern_labels_json|safe }},
+        datasets: [{
+            label: "Predicted Units",
+            data: {{ pattern_values_json|safe }},
+            backgroundColor: "#0d6efd",
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true } }
+    }
+});
+</script>
+{% endblock %}
