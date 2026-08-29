@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Resource Management - SanServeAll{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h4">AI-Powered Resource Management</h1>
+        <a href="{% url 'forecasting:decision_support' %}" class="btn btn-outline-secondary btn-sm">Decision Support</a>
+    </div>
+    <p class="text-muted small">
+        Commissary-wide material consumption and restocking recommendations
+        (raw materials are stocked at the commissary only, not per branch).
+    </p>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Materials Used (30d)</div>
+                <div class="fs-4 fw-bold">{{ consumption.total_units_used }}</div>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Total Cost</div>
+                <div class="fs-4 fw-bold">&#8369;{{ consumption.total_cost|floatformat:2 }}</div>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Units Produced</div>
+                <div class="fs-4 fw-bold">{{ consumption.total_produced }}</div>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Cost per Unit</div>
+                <div class="fs-4 fw-bold">&#8369;{{ consumption.cost_per_unit_produced|floatformat:2 }}</div>
+            </div></div>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-body">
+                    <h2 class="h6">Material Consumption by Category</h2>
+                    <canvas id="materialPieChart" height="200"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <h2 class="h6">AI-Driven Restocking Recommendations (Materials)</h2>
+            <table class="table table-sm bg-white">
+                <thead><tr><th>Material</th><th>Stock</th><th>Recommend</th></tr></thead>
+                <tbody>
+                    {% for alert in material_alerts %}
+                    <tr class="{% if alert.score.risk_level == 'HIGH' %}table-danger{% else %}table-warning{% endif %}">
+                        <td>{{ alert.score.product.name }}</td>
+                        <td>{{ alert.score.quantity_on_hand }}</td>
+                        <td><strong>+{{ alert.recommended_reorder_quantity }}</strong></td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="3" class="text-center text-muted py-3">No materials currently need restocking.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+new Chart(document.getElementById("materialPieChart"), {
+    type: "pie",
+    data: {
+        labels: {{ category_labels_json|safe }},
+        datasets: [{
+            data: {{ category_values_json|safe }},
+            backgroundColor: ["#0d6efd", "#6610f2", "#d63384", "#fd7e14", "#198754", "#20c997", "#0dcaf0"],
+        }]
+    },
+    options: { responsive: true }
+});
+</script>
+{% endblock %}

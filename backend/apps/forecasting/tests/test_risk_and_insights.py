@@ -85,6 +85,37 @@ class TestComputeAverageDailyDemand:
         avg = compute_average_daily_demand(branch, latte, days_history=30)
         assert avg == pytest.approx(1.0)  # 30 units / 30 days
 
+    def test_material_demand_comes_from_production_consumption_not_sales(self, branch):
+        """The critical fix: materials are never sold via POS -- reading
+        SalesItem for a material would always return zero regardless of
+        real consumption, making it impossible to ever flag a material as
+        at-risk. Demand must come from IngredientUsage instead."""
+        from apps.accounts.models import Branch, Role, User
+        from apps.production.models import IngredientUsage, ProductionRecord
+
+        commissary = Branch.objects.create(name="Commissary", code="COMMISSARY", is_commissary=True)
+        role = Role.objects.create(name=Role.COMMISSARY_STAFF)
+        staff = User.objects.create_user(username="commissary1", password="testpass123", role=role)
+        flour = Product.objects.create(
+            name="Flour (kg)", price="55.00", product_type=Product.ProductType.MATERIAL
+        )
+        cake = Product.objects.create(name="Cake", price="140.00")
+
+        record = ProductionRecord.objects.create(
+            commissary_staff=staff, product=cake, quantity_produced=10
+        )
+        IngredientUsage.objects.create(production_record=record, material=flour, quantity_used=30)
+
+        avg = compute_average_daily_demand(commissary, flour, days_history=30)
+        assert avg == pytest.approx(1.0)  # 30 units used / 30 days
+
+    def test_material_with_zero_production_usage_is_zero_demand(self, branch):
+        material = Product.objects.create(
+            name="Unused Material", price="10.00", product_type=Product.ProductType.MATERIAL
+        )
+        avg = compute_average_daily_demand(branch, material, days_history=30)
+        assert avg == 0.0
+
 
 class TestClassifyInventoryRows:
     def test_empty_queryset_returns_empty_list(self):

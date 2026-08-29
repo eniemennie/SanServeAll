@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}AI Decision Support - SanServeAll{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h4">AI-Powered Decision Support</h1>
+        <div class="d-flex gap-2">
+            <a href="{% url 'forecasting:forecasting_dashboard' %}" class="btn btn-outline-secondary btn-sm">Forecasting</a>
+            <a href="{% url 'forecasting:resource_management_dashboard' %}" class="btn btn-outline-secondary btn-sm">Resource Management</a>
+        </div>
+    </div>
+
+    <form method="get" class="row g-2 mb-3">
+        <div class="col-auto">
+            <select name="branch" class="form-select form-select-sm" onchange="this.form.submit()">
+                <option value="">All Branches</option>
+                {% for b in branches %}
+                <option value="{{ b.pk }}" {% if selected_branch.pk == b.pk %}selected{% endif %}>{{ b.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </form>
+
+    {% if insights %}
+    <div class="mb-4">
+        {% for insight in insights %}
+        <div class="alert alert-warning d-flex justify-content-between align-items-start">
+            <span>{{ insight.message }}</span>
+            <span class="badge {% if insight.generated_by_ai %}bg-primary{% else %}bg-secondary{% endif %} ms-2">
+                {% if insight.generated_by_ai %}AI-Generated{% else %}Template{% endif %}
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <h2 class="h6">Critical Alerts &amp; Restocking Recommendations</h2>
+    <table class="table table-sm table-hover bg-white mb-4">
+        <thead><tr><th>Product</th><th>Branch</th><th>Stock</th><th>Days Left</th><th>Recommended Reorder</th></tr></thead>
+        <tbody>
+            {% for alert in critical_alerts %}
+            <tr class="table-danger">
+                <td>{{ alert.score.product.name }}</td>
+                <td>{{ alert.score.branch.name }}</td>
+                <td>{{ alert.score.quantity_on_hand }}</td>
+                <td>{% if alert.score.days_of_stock_left %}{{ alert.score.days_of_stock_left|floatformat:1 }}{% else %}&mdash;{% endif %}</td>
+                <td><strong>+{{ alert.recommended_reorder_quantity }}</strong> units</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="5" class="text-center text-muted py-3">No critical (high-risk) items right now.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="row g-3">
+        <div class="col-md-6">
+            <h2 class="h6">Slow-Moving Products</h2>
+            <table class="table table-sm bg-white">
+                <thead><tr><th>Product</th><th>Branch</th><th>Avg Daily Demand</th></tr></thead>
+                <tbody>
+                    {% for score in slow_moving_products %}
+                    <tr>
+                        <td>{{ score.product.name }}</td>
+                        <td>{{ score.branch.name }}</td>
+                        <td>{{ score.avg_daily_demand|floatformat:2 }}/day</td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="3" class="text-center text-muted py-3">Not enough data yet.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div class="col-md-6">
+            <h2 class="h6">Peak Hour &amp; Unusual Patterns</h2>
+            {% if peak_hour %}
+            <p class="small">Peak transaction hour: <strong>{{ peak_hour.hour }}:00</strong> ({{ peak_hour.transaction_count }} transactions, last 30 days)</p>
+            {% else %}
+            <p class="small text-muted">Not enough transaction data yet.</p>
+            {% endif %}
+
+            {% for anomaly in anomalies %}
+            <div class="alert alert-info py-2 small">
+                {{ anomaly.product.name }}: sold {{ anomaly.yesterday_units }} yesterday
+                vs. a typical {{ anomaly.baseline_average }} for this day of week
+                ({{ anomaly.deviation_pct }}% deviation)
+            </div>
+            {% empty %}
+            <p class="small text-muted">No unusual patterns detected.</p>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}
