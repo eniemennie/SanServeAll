@@ -50,7 +50,11 @@ def start_scheduler():
     jobstores = {"default": SQLAlchemyJobStore(url=_build_sqlalchemy_url())}
     _scheduler = BackgroundScheduler(jobstores=jobstores, timezone=str(settings.TIME_ZONE))
 
-    from apps.forecasting.jobs import run_forecast_job
+    from apps.forecasting.jobs import (
+        run_forecast_job,
+        run_insight_generation_job,
+        run_risk_classification_job,
+    )
 
     _scheduler.add_job(
         run_forecast_job,
@@ -58,6 +62,24 @@ def start_scheduler():
         hour=2,
         minute=0,
         id="nightly_forecast",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    _scheduler.add_job(
+        run_risk_classification_job,
+        trigger="cron",
+        hour=2,
+        minute=30,  # after the forecast job, so risk scoring can use fresh demand data
+        id="nightly_risk_classification",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    _scheduler.add_job(
+        run_insight_generation_job,
+        trigger="cron",
+        hour=3,
+        minute=0,  # after risk classification, so insights summarize fresh risk scores
+        id="nightly_insight_generation",
         replace_existing=True,
         misfire_grace_time=3600,
     )
