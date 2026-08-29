@@ -75,3 +75,63 @@ def run_forecast_for_all_products(steps=7):
             )
 
     return results
+
+
+def run_risk_classification_for_all_inventory():
+    """Entry point for the risk-classification scheduled job (Row 11.1).
+    Classifies every Inventory row across every branch and saves the
+    results -- the dashboard (Week 11.3) reads these saved rows rather
+    than re-running the classifier on every page load."""
+    from apps.forecasting.ml.risk_classifier import classify_inventory_rows
+    from apps.forecasting.models import InventoryRiskScore
+    from apps.inventory.models import Inventory
+
+    results = classify_inventory_rows(Inventory.objects.select_related("branch", "product").all())
+
+    scores = [
+        InventoryRiskScore(
+            branch=r["inventory"].branch,
+            product=r["inventory"].product,
+            risk_level=r["risk_level"],
+            quantity_on_hand=r["quantity_on_hand"],
+            avg_daily_demand=r["avg_daily_demand"],
+            days_of_stock_left=r["days_of_stock_left"],
+        )
+        for r in results
+    ]
+    InventoryRiskScore.objects.bulk_create(scores)
+    return scores
+
+
+def generate_insights_for_all_branches():
+    """Entry point for the insight-generation scheduled job (Row 11.2).
+    For each branch with at least one high/medium-risk item, generates a
+    stockout-warning insight; runs after risk classification so it has
+    fresh data to summarize, not a stale prior run's results."""
+    from apps.accounts.models import Branch
+    from apps.forecasting.ml.insight_generator import generate_insight
+    from apps.forecasting.models import AIInsight, InventoryRiskScore
+
+    insights = []
+    latest_scores_by_branch = {}
+    for score in InventoryRiskScore.objects.filter(
+        risk_level__in=[InventoryRiskScore.RiskLevel.HIGH, InventoryRiskScore.RiskLevel.MEDIUM]
+    ).select_related("branch", "product"):
+        latest_scores_by_branch.setdefault(score.branch_id, []).append(score)
+
+    for branch_id, scores in latest_scores_by_branch.items():
+        branch = Branch.objects.get(pk=branch_id)
+        at_risk_items = ", ".join(f"{s.product.name} ({s.risk_level})" for s in scores[:5])
+
+        message, generated_by_ai = generate_insight(
+            "STOCKOUT_WARNING", {"branch_name": branch.name, "at_risk_items": at_risk_items}
+        )
+        insight = AIInsight.objects.create(
+            branch=branch,
+            insight_type=AIInsight.InsightType.STOCKOUT_WARNING,
+            message=message,
+            generated_by_ai=generated_by_ai,
+        )
+        insights.append(insight)
+
+    return insights

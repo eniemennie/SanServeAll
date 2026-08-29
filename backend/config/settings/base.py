@@ -104,6 +104,11 @@ KAHERO_BRANCH = os.environ.get("KAHERO_BRANCH", "Alangilan")
 # so the test suite never accidentally fires real scheduled jobs.
 APSCHEDULER_AUTOSTART = True
 
+# Natural-language insight generation (Row 11.2). Absent/empty in local
+# dev by default -- insight_generator.py falls back to a plain template
+# message rather than failing when this isn't configured.
+CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
+
 # Auth flow (Week 3): unauthenticated requests to a login-required view
 # land on the Login/Start Screen; a successful login's default next-step
 # is Branch Selection unless a view overrides get_success_url() itself.
