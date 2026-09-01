@@ -89,13 +89,18 @@ def _template_fallback(insight_type, context):
     raise ValueError(f"Unknown insight_type: {insight_type}")
 
 
-def generate_insight(insight_type, context):
+def generate_insight(insight_type, context, force_template=False):
     """Returns (message: str, generated_by_ai: bool). Never raises --
     any failure in the AI call path falls back to the template, since a
     broken third-party API should never take down the whole insight
-    generation step."""
+    generation step.
+
+    `force_template=True` (set via SystemConfiguration.ai_insights_enabled,
+    Row 12.2) skips the API call entirely regardless of whether a key is
+    configured -- a genuine kill switch for the AI provider, not just a
+    "try it and fall back" path."""
     prompt = _build_prompt(insight_type, context)
-    ai_message = _call_claude_api(prompt)
+    ai_message = None if force_template else _call_claude_api(prompt)
 
     if ai_message:
         return ai_message, True

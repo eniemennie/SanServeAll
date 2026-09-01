@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}System Configuration - SanServeAll{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h4">System Configuration</h1>
+        <a href="{% url 'system_config:system_settings' %}" class="btn btn-outline-secondary btn-sm">System Settings</a>
+    </div>
+
+    {% if error %}
+        <div class="alert alert-danger py-2">{{ error }}</div>
+    {% endif %}
+
+    <div class="card" style="max-width: 560px;">
+        <div class="card-body">
+            <form method="post">
+                {% csrf_token %}
+                <div class="mb-3">
+                    <label class="form-label">Admin Alert Email</label>
+                    <input type="email" name="admin_alert_email" class="form-control"
+                           value="{{ config.admin_alert_email }}"
+                           placeholder="Leave blank to use Django's default ADMINS setting">
+                    <div class="form-text">Where scheduled-job failure alerts are sent.</div>
+                </div>
+
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" name="ai_insights_enabled" id="aiToggle"
+                           {% if config.ai_insights_enabled %}checked{% endif %}>
+                    <label class="form-check-label" for="aiToggle">Enable live AI insight generation</label>
+                    <div class="form-text">
+                        When off, insights always use the plain template message --
+                        no live AI API calls are made at all, even if a key is configured.
+                    </div>
+                </div>
+
+                <div class="row g-2">
+                    <div class="col-md-4">
+                        <label class="form-label">High-Risk Threshold (days)</label>
+                        <input type="number" name="high_risk_days_threshold" min="1" class="form-control"
+                               value="{{ config.high_risk_days_threshold }}">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Medium-Risk Threshold (days)</label>
+                        <input type="number" name="medium_risk_days_threshold" min="1" class="form-control"
+                               value="{{ config.medium_risk_days_threshold }}">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Forecast Window (days)</label>
+                        <input type="number" name="default_forecast_days" min="1" class="form-control"
+                               value="{{ config.default_forecast_days }}">
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary mt-3">Save Configuration</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

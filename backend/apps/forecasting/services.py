@@ -112,6 +112,9 @@ def generate_insights_for_all_branches():
     from apps.accounts.models import Branch
     from apps.forecasting.ml.insight_generator import generate_insight
     from apps.forecasting.models import AIInsight, InventoryRiskScore
+    from apps.system_config.models import SystemConfiguration
+
+    config = SystemConfiguration.load()
 
     insights = []
     latest_scores_by_branch = {}
@@ -125,7 +128,9 @@ def generate_insights_for_all_branches():
         at_risk_items = ", ".join(f"{s.product.name} ({s.risk_level})" for s in scores[:5])
 
         message, generated_by_ai = generate_insight(
-            "STOCKOUT_WARNING", {"branch_name": branch.name, "at_risk_items": at_risk_items}
+            "STOCKOUT_WARNING",
+            {"branch_name": branch.name, "at_risk_items": at_risk_items},
+            force_template=not config.ai_insights_enabled,
         )
         insight = AIInsight.objects.create(
             branch=branch,
