@@ -13,6 +13,7 @@ from django.utils import timezone
 from apps.accounts.models import Branch, Role, User
 from apps.analytics import services
 from apps.inventory.models import Product
+from conftest import verify_otp_for_client
 from apps.pos.models import SalesItem, SalesTransaction
 from apps.production.models import IngredientUsage, ProductionRecord
 
@@ -41,6 +42,7 @@ def owner(branch):
 @pytest.fixture
 def owner_client(client, owner):
     client.force_login(owner)
+    verify_otp_for_client(client, owner)
     return client
 
 

@@ -3,31 +3,28 @@ Views for the Production Module (Week 8): Production Recording and the
 Batch Management Interface (Fig. 3-24).
 
 Restricted to Commissary Staff and Owner/Admin -- branch cashiers have no
-reason to record commissary production.
+reason to record commissary production. Uses the shared role_required
+decorator (Row 12.4) rather than a bespoke inline check, so an Owner/
+Admin reaching these views is correctly required to have completed 2FA
+-- Commissary Staff, who never enroll in 2FA at all, are unaffected,
+since that enforcement is based on the actual logged-in user's role, not
+merely whether Owner/Admin is among a view's allowed roles.
 """
 
-from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.accounts.models import Role
+from apps.accounts.permissions import role_required
 from apps.inventory.models import Product
 from apps.production import services
 from apps.production.models import ProductionRecord
 
 
-def _can_manage_production(user):
-    return bool(user.role and user.role.name in (Role.COMMISSARY_STAFF, Role.OWNER_ADMIN))
-
-
-@login_required
+@role_required(Role.COMMISSARY_STAFF, Role.OWNER_ADMIN)
 def record_production(request):
     """Production Recording -- creates one ProductionRecord plus its
     ingredient usages, atomically deducting materials and crediting the
     finished good's stock at the commissary."""
-    if not _can_manage_production(request.user):
-        raise PermissionDenied("Only commissary staff or Owner/Admin can record production.")
-
     error = None
     materials = Product.objects.filter(product_type=Product.ProductType.MATERIAL, is_active=True)
     finished_goods = Product.objects.filter(
@@ -65,32 +62,24 @@ def record_production(request):
     )
 
 
-@login_required
+@role_required(Role.COMMISSARY_STAFF, Role.OWNER_ADMIN)
 def batch_management(request):
     """Batch Management Interface (Fig. 3-24): list of production
     records with branch (always commissary), ingredient/material,
     quantity, supplier, quality, status -- plus edit/delete actions."""
-    if not _can_manage_production(request.user):
-
-        raise PermissionDenied("Only commissary staff or Owner/Admin can view this page.")
-
     records = ProductionRecord.objects.select_related("product").prefetch_related(
         "ingredient_usages__material"
     )
     return render(request, "production/batch_management.html", {"records": records})
 
 
-@login_required
+@role_required(Role.COMMISSARY_STAFF, Role.OWNER_ADMIN)
 def delete_production_record(request, record_id):
     """Delete action (Fig. 3-24). Deliberately does NOT reverse the
     inventory changes the record originally made -- undoing a completed
     production run's stock effects is a distinct, more consequential
     operation than removing the record of it, and isn't assumed safe to
     do silently as a side effect of a delete click."""
-    if not _can_manage_production(request.user):
-
-        raise PermissionDenied("Only commissary staff or Owner/Admin can delete records.")
-
     record = get_object_or_404(ProductionRecord, pk=record_id)
     if request.method == "POST":
         record.delete()

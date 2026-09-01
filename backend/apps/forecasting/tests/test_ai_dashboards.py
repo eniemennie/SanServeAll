@@ -13,6 +13,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import Branch, Role, User
+from conftest import verify_otp_for_client
 from apps.forecasting import services
 from apps.forecasting.models import Forecast, InventoryRiskScore
 from apps.inventory.models import Product
@@ -43,6 +44,7 @@ def owner():
 @pytest.fixture
 def owner_client(client, owner):
     client.force_login(owner)
+    verify_otp_for_client(client, owner)
     return client
 
 

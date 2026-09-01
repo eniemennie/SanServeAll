@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Save Your Backup Codes - SanServeAll{% endblock %}
+{% block content %}
+<div class="container d-flex align-items-center justify-content-center" style="min-height: 100vh;">
+    <div class="card shadow-sm" style="max-width: 480px; width: 100%;">
+        <div class="card-body p-4">
+            <h1 class="h4 mb-3 text-center">Save Your Backup Codes</h1>
+            <div class="alert alert-warning small">
+                Each code works once. Save them somewhere safe --
+                <strong>this is the only time they'll be shown.</strong>
+                Use one if you ever lose access to your authenticator app.
+            </div>
+
+            <div class="row row-cols-2 g-2 mb-4">
+                {% for code in backup_codes %}
+                <div class="col">
+                    <code class="d-block text-center p-2 bg-light rounded">{{ code }}</code>
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="d-flex gap-2">
+                <button type="button" onclick="window.print()" class="btn btn-outline-secondary w-50">Print</button>
+                <a href="{% url 'accounts:select_branch' %}" class="btn btn-dark w-50">I've Saved These</a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
