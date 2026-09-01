@@ -13,6 +13,7 @@ from django.urls import reverse
 
 from apps.accounts.models import Branch, Role, User
 from apps.inventory.models import Inventory, InventoryTransaction, Product
+from conftest import verify_otp_for_client
 from apps.kahero_integration import services
 from apps.kahero_integration.models import KaheroImportBatch
 from apps.kahero_integration.parsers import ParseError, parse_kahero_file, read_kahero_file
@@ -41,6 +42,7 @@ def owner():
 @pytest.fixture
 def owner_client(client, owner):
     client.force_login(owner)
+    verify_otp_for_client(client, owner)
     return client
 
 

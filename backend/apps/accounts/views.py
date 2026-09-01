@@ -10,12 +10,15 @@ cashier-PIN, and 2FA flow on top of an already-authenticated session.
 """
 
 import base64
+import io
 
+import qrcode
 from django.contrib.auth import authenticate
 from django.contrib.auth import login as auth_login
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.views import View
 from django_otp import login as otp_login
@@ -25,9 +28,11 @@ from django_otp.plugins.otp_totp.models import TOTPDevice
 from apps.accounts.models import Role, User
 from apps.accounts.permissions import role_required
 from apps.accounts.services import (
+    generate_backup_codes,
     get_selectable_branches,
     user_can_select_branch,
     user_requires_cashier_pin,
+    verify_and_consume_backup_code,
     verify_cashier_pin,
 )
 
@@ -136,6 +141,26 @@ def _base32_secret(device):
     return base64.b32encode(device.bin_key).decode("utf-8")
 
 
+@login_required
+def two_factor_qr_code(request):
+    """Renders the current unconfirmed TOTP device's provisioning URI
+    (Row 12.4) as a PNG QR code -- scanning this is far less error-prone
+    than manually typing a 32-character base32 secret, though the manual
+    key is still shown as a fallback for devices that can't scan."""
+    device = TOTPDevice.objects.filter(user=request.user, confirmed=False).first()
+    if device is None:
+        return HttpResponse(status=404)
+
+    qr = qrcode.QRCode(box_size=8, border=2)
+    qr.add_data(device.config_url)
+    qr.make(fit=True)
+    image = qr.make_image(fill_color="black", back_color="white")
+
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    return HttpResponse(buffer.getvalue(), content_type="image/png")
+
+
 class AdminLoginView(View):
     """Admin Login Interface (Fig. 3-18).
 
@@ -177,11 +202,13 @@ class AdminLoginView(View):
 
 
 class TwoFactorSetupView(LoginRequiredMixin, View):
-    """2FA enrollment (Row 17). Shown the first time an Owner/Admin logs in
-    with no confirmed authenticator device yet. Generates (or reuses) an
-    UNCONFIRMED device, shows the manual-entry secret, and only marks it
-    confirmed once the admin proves they actually captured it correctly by
-    submitting a currently-valid code back."""
+    """2FA enrollment (Row 17, finalized Row 12.4). Shown the first time
+    an Owner/Admin logs in with no confirmed authenticator device yet.
+    Generates (or reuses) an UNCONFIRMED device, shows a scannable QR
+    code (plus the manual-entry secret as a fallback), and only marks it
+    confirmed once the admin proves they actually captured it correctly
+    by submitting a currently-valid code back -- at which point a batch
+    of one-time backup codes is generated and shown exactly once."""
 
     template_name = "accounts/two_factor_setup.html"
 
@@ -203,7 +230,10 @@ class TwoFactorSetupView(LoginRequiredMixin, View):
             device.confirmed = True
             device.save()
             otp_login(request, device)
-            return redirect("accounts:select_branch")
+            backup_codes = generate_backup_codes(request.user)
+            return render(
+                request, "accounts/two_factor_backup_codes.html", {"backup_codes": backup_codes}
+            )
 
         error_context = {"error": "Incorrect code. Please try again."}
         if device is not None:
@@ -215,7 +245,10 @@ class TwoFactorSetupView(LoginRequiredMixin, View):
 
 class TwoFactorVerifyView(LoginRequiredMixin, View):
     """2FA verification for an Owner/Admin who already has a confirmed
-    device -- the normal repeat-login path, as opposed to first-time setup."""
+    device -- the normal repeat-login path, as opposed to first-time
+    setup. Accepts either a live TOTP token or a one-time backup code
+    (Row 12.4), so a lost authenticator device doesn't lock an Owner/
+    Admin out of their own account."""
 
     template_name = "accounts/two_factor_verify.html"
 
@@ -228,11 +261,34 @@ class TwoFactorVerifyView(LoginRequiredMixin, View):
             if device.verify_token(token):
                 otp_login(request, device)
                 return redirect("accounts:select_branch")
+
+        if verify_and_consume_backup_code(request.user, token):
+            device = TOTPDevice.objects.filter(user=request.user, confirmed=True).first()
+            if device is not None:
+                otp_login(request, device)
+            return redirect("accounts:select_branch")
+
         return render(
             request,
             self.template_name,
             {"error": "Incorrect code. Please try again."},
         )
+
+
+@otp_required(login_url="accounts:admin_login")
+def regenerate_backup_codes(request):
+    """Lets an already-2FA-verified Owner/Admin invalidate their old
+    backup codes and generate a fresh set (Row 12.4) -- e.g. after using
+    several, or if they suspect an old code sheet was compromised.
+    Requires an ALREADY verified session (not just a role check) since
+    generating a fresh set of recovery credentials is itself a sensitive
+    action."""
+    if request.method == "POST":
+        backup_codes = generate_backup_codes(request.user)
+        return render(
+            request, "accounts/two_factor_backup_codes.html", {"backup_codes": backup_codes}
+        )
+    return render(request, "accounts/two_factor_regenerate_confirm.html")
 
 
 @role_required(Role.OWNER_ADMIN)

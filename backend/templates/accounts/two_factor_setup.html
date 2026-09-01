@@ -15,6 +15,14 @@
                 <div class="alert alert-danger py-2">{{ error }}</div>
             {% endif %}
 
+            <div class="text-center mb-3">
+                <img src="{% url 'accounts:admin_2fa_qr_code' %}" alt="2FA QR code" class="img-fluid" style="max-width: 220px;">
+            </div>
+            <p class="text-muted small text-center">
+                Scan with Google Authenticator, Authy, or a similar app.
+                Can't scan? Enter this key manually instead:
+            </p>
+
             <div class="alert alert-secondary">
                 <div class="small text-muted mb-1">Manual entry key</div>
                 <code class="fs-6">{{ secret }}</code>

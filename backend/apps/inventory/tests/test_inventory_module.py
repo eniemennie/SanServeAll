@@ -10,6 +10,7 @@ from django.urls import reverse
 from apps.accounts.models import Branch, Role, User
 from apps.inventory import services
 from apps.inventory.models import Inventory, InventoryTransaction, Product
+from conftest import verify_otp_for_client
 
 pytestmark = pytest.mark.django_db
 
@@ -41,6 +42,7 @@ def branch_staff(branch):
 @pytest.fixture
 def owner_client(client, owner, branch):
     client.force_login(owner)
+    verify_otp_for_client(client, owner)
     session = client.session
     session["selected_branch_id"] = branch.pk
     session.save()

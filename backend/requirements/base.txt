@@ -12,6 +12,8 @@ django-otp==1.7.0
 python-dotenv==1.2.2
 drf-spectacular==0.30.0
 requests==2.34.2
+qrcode==8.2
+pillow==12.1.1
 
 asgiref==3.12.1
 attrs==26.1.0

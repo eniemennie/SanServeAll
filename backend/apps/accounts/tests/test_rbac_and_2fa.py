@@ -107,6 +107,13 @@ class TestRoleRequiredDecorator:
         rf = RequestFactory()
         request = rf.get("/")
         request.user = admin
+        # RequestFactory bypasses OTPMiddleware entirely -- manually
+        # simulate what it would set on a verified session, since this
+        # test's actual purpose is confirming role_required's ROLE check
+        # specifically, not re-testing OTP enforcement (covered
+        # end-to-end via the real Client in TestAdminDashboardEnforcement
+        # below, and across every OWNER_ADMIN-gated view in other apps).
+        request.user.is_verified = lambda: True
         response = dummy_view(request)
         assert response.status_code == 200
 
@@ -182,8 +189,11 @@ class TestTwoFactorSetup:
         device = TOTPDevice.objects.get(user=admin, confirmed=False)
 
         response = client.post(reverse("accounts:admin_2fa_setup"), {"token": _valid_token(device)})
-        assert response.status_code == 302
-        assert response.url == reverse("accounts:select_branch")
+        # Row 12.4: successful confirmation now shows the one-time backup
+        # codes page (200) before the admin proceeds, rather than
+        # redirecting straight to branch selection.
+        assert response.status_code == 200
+        assert b"Save Your Backup Codes" in response.content
 
         device.refresh_from_db()
         assert device.confirmed is True

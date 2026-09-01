@@ -12,11 +12,14 @@
 
             <form method="post">
                 {% csrf_token %}
-                <input type="text" name="token" inputmode="numeric" pattern="[0-9]*"
-                       maxlength="6" class="form-control form-control-lg text-center mb-3"
+                <input type="text" name="token" inputmode="text"
+                       maxlength="8" class="form-control form-control-lg text-center mb-3"
                        placeholder="000000" required autofocus>
                 <button type="submit" class="btn btn-dark w-100">Verify</button>
             </form>
+            <p class="text-muted small mt-3 mb-0">
+                Lost your device? Enter one of your saved backup codes instead.
+            </p>
         </div>
     </div>
 </div>

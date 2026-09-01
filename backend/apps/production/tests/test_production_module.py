@@ -10,6 +10,7 @@ from apps.accounts.models import Branch, Role, User
 from apps.inventory.models import Inventory, InventoryTransaction, Product
 from apps.production import services
 from apps.production.models import ProductionRecord
+from conftest import verify_otp_for_client
 
 pytestmark = pytest.mark.django_db
 
@@ -217,6 +218,7 @@ class TestBatchManagementView:
         role = Role.objects.create(name=Role.OWNER_ADMIN)
         owner = User.objects.create_user(username="owner1", password="testpass123", role=role)
         client.force_login(owner)
+        verify_otp_for_client(client, owner)
         response = client.get(reverse("production:batch_management"))
         assert response.status_code == 200
 

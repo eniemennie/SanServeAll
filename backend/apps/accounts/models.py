@@ -127,3 +127,30 @@ class CashierPIN(TimestampedModel):
 
     def __str__(self):
         return f"PIN for {self.user}"
+
+
+class TwoFactorBackupCode(models.Model):
+    """One single-use recovery code (Row 12.4), generated in a batch of
+    10 the moment 2FA setup is confirmed. Shown to the Owner/Admin in
+    plaintext exactly once at generation time -- only the hash is ever
+    stored, same PBKDF2 protection as passwords and cashier PINs -- so an
+    admin who loses their authenticator device isn't permanently locked
+    out of their own account.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="backup_codes"
+    )
+    code_hash = models.CharField(max_length=128)
+    used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def set_code(self, raw_code: str) -> None:
+        self.code_hash = make_password(raw_code)
+
+    def check_code(self, raw_code: str) -> bool:
+        return check_password(raw_code, self.code_hash)
+
+    def __str__(self):
+        status = "used" if self.used_at else "unused"
+        return f"Backup code for {self.user} ({status})"

@@ -13,6 +13,7 @@ from django.urls import reverse
 from apps.accounts.models import Role, User
 from apps.forecasting.ml.risk_classifier import rule_based_label
 from apps.system_config.models import BusinessSettings, SystemConfiguration
+from conftest import verify_otp_for_client
 
 pytestmark = pytest.mark.django_db
 
@@ -26,6 +27,7 @@ def owner():
 @pytest.fixture
 def owner_client(client, owner):
     client.force_login(owner)
+    verify_otp_for_client(client, owner)
     return client
 
 

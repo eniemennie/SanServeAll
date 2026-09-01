@@ -7,6 +7,7 @@ one-off manual check.
 """
 
 import pytest
+from django.test import override_settings
 
 from apps.accounts.models import Branch, CashierPIN, Role, User
 
@@ -59,21 +60,33 @@ class TestUser:
         assert user.branch == branch
 
     def test_password_is_hashed_not_plaintext(self):
-        """Confirms Django's default PBKDF2 hasher is active (Phase 3 decision)."""
-        user = User.objects.create_user(username="cashier2", password="testpass123")
-        assert user.password != "testpass123"
-        assert user.password.startswith("pbkdf2_")
+        """Confirms Django's default PBKDF2 hasher is active (Phase 3
+        decision). Explicitly restores the real hasher for this one test
+        -- config/settings/test.py swaps in a fast, weak hasher suite-wide
+        (Row 12.4) purely for test speed, which would otherwise mask
+        exactly the thing this test exists to verify."""
+        with override_settings(
+            PASSWORD_HASHERS=["django.contrib.auth.hashers.PBKDF2PasswordHasher"]
+        ):
+            user = User.objects.create_user(username="cashier2", password="testpass123")
+            assert user.password != "testpass123"
+            assert user.password.startswith("pbkdf2_")
 
 
 class TestCashierPIN:
     def test_set_pin_stores_a_hash_not_plaintext(self):
-        user = User.objects.create_user(username="cashier3", password="testpass123")
-        pin = CashierPIN.objects.create(user=user)
-        pin.set_pin("1234")
-        pin.save()
+        """Same restore-the-real-hasher rationale as
+        test_password_is_hashed_not_plaintext above."""
+        with override_settings(
+            PASSWORD_HASHERS=["django.contrib.auth.hashers.PBKDF2PasswordHasher"]
+        ):
+            user = User.objects.create_user(username="cashier3", password="testpass123")
+            pin = CashierPIN.objects.create(user=user)
+            pin.set_pin("1234")
+            pin.save()
 
-        assert pin.hashed_pin != "1234"
-        assert pin.hashed_pin.startswith("pbkdf2_")
+            assert pin.hashed_pin != "1234"
+            assert pin.hashed_pin.startswith("pbkdf2_")
 
     def test_check_pin_accepts_correct_pin_and_rejects_wrong_pin(self):
         user = User.objects.create_user(username="cashier4", password="testpass123")
