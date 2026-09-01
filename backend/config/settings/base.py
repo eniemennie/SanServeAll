@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     "apps.kahero_integration",
     "apps.analytics",
     "apps.forecasting",
+    "apps.system_config",
 ]
 
 MIDDLEWARE = [

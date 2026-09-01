@@ -14,12 +14,17 @@ from sklearn.tree import DecisionTreeClassifier
 
 from apps.pos.models import SalesItem, SalesTransaction
 
-# Business-rule thresholds for the bootstrap labels. Chosen to be
-# conservative (flagging risk a bit earlier rather than later) -- a false
-# "medium risk" flag costs a manager a few seconds double-checking a
-# shelf; a missed real stockout costs a lost sale.
-HIGH_RISK_DAYS_THRESHOLD = 3
-MEDIUM_RISK_DAYS_THRESHOLD = 10
+
+def _get_risk_thresholds():
+    """Reads the current risk thresholds from SystemConfiguration (Row
+    12.2) -- Owner/Admin can tune these at runtime instead of them being
+    fixed constants, as they were before Week 12. SystemConfiguration's
+    own model field defaults (3/10) are the single source of truth for
+    the fallback values -- not duplicated here."""
+    from apps.system_config.models import SystemConfiguration
+
+    config = SystemConfiguration.load()
+    return config.high_risk_days_threshold, config.medium_risk_days_threshold
 
 
 def compute_average_daily_demand(branch, product, days_history=30):
@@ -80,14 +85,20 @@ def rule_based_label(quantity_on_hand, avg_daily_demand, days_of_stock_left):
     module docstring). Also used directly as the final label whenever a
     fitted classifier isn't available (e.g. only one inventory row exists
     -- scikit-learn's DecisionTreeClassifier needs at least 2 classes
-    represented to fit at all)."""
+    represented to fit at all).
+
+    Thresholds are read from SystemConfiguration (Row 12.2) on every call
+    rather than cached, so an Owner/Admin's change takes effect on the
+    very next scheduled run without a restart."""
     if quantity_on_hand <= 0:
         return "HIGH"
     if days_of_stock_left is None:
         return "LOW"  # no measurable demand -- stock isn't at risk of running out
-    if days_of_stock_left < HIGH_RISK_DAYS_THRESHOLD:
+
+    high_threshold, medium_threshold = _get_risk_thresholds()
+    if days_of_stock_left < high_threshold:
         return "HIGH"
-    if days_of_stock_left < MEDIUM_RISK_DAYS_THRESHOLD:
+    if days_of_stock_left < medium_threshold:
         return "MEDIUM"
     return "LOW"
 

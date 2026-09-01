@@ -16,6 +16,7 @@ urlpatterns = [
     path("production/", include("apps.production.urls")),
     path("analytics/", include("apps.analytics.urls")),
     path("forecasting/", include("apps.forecasting.urls")),
+    path("system-config/", include("apps.system_config.urls")),
 ]
 
 # django-debug-toolbar (development.py-only app) requires its own URLs to
