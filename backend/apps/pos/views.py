@@ -12,7 +12,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.accounts.permissions import pos_unlock_required
 from apps.inventory.models import Product
-from apps.pos import services
+from apps.pos import printing, services
 from apps.pos.models import SalesItem, SalesTransaction
 
 
@@ -134,4 +134,9 @@ def receipt(request, transaction_id):
         branch=request.selected_branch,
         status=SalesTransaction.Status.COMPLETED,
     )
-    return render(request, "pos/receipt.html", {"transaction": completed_transaction})
+    rawbt_url = printing.build_rawbt_print_url(completed_transaction)
+    return render(
+        request,
+        "pos/receipt.html",
+        {"transaction": completed_transaction, "rawbt_url": rawbt_url},
+    )
