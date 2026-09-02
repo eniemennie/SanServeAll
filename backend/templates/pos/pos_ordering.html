@@ -68,10 +68,20 @@
                 <p class="text-muted">No items yet.</p>
                 {% endfor %}
             </div>
-            <div class="d-flex justify-content-between fw-bold fs-5">
+            <div class="d-flex justify-content-between fw-bold fs-5 mb-3">
                 <span>Total</span>
                 <span>₱{{ draft.total_amount }}</span>
             </div>
+            {% if draft.items.exists %}
+            <a href="{% url 'pos:payment' %}" class="btn btn-success btn-lg w-100">
+                Proceed to Payment
+            </a>
+            {% else %}
+            <button type="button" class="btn btn-success btn-lg w-100" disabled>
+                Proceed to Payment
+            </button>
+            <p class="text-muted small text-center mt-2 mb-0">Add an item to continue.</p>
+            {% endif %}
         </div>
     </div>
 </div>

@@ -122,6 +122,23 @@ class TestPosOrdering:
         assert drafts.count() == 1
         assert drafts.first().items.count() == 2
 
+    def test_page_links_to_payment_once_an_item_is_added(self, unlocked_client, product):
+        """Regression test: the ordering screen previously showed a
+        Total but had no actual link anywhere to reach Payment -- a
+        cashier had no way to check out through the real UI at all.
+        Every prior test/walkthrough reached pos:payment directly via
+        reverse() or a hand-built URL, never by clicking through the
+        page itself, which is exactly how this went undetected."""
+        unlocked_client.post(reverse("pos:add_catalog_item"), {"product_id": product.pk})
+        response = unlocked_client.get(reverse("pos:ordering"))
+        assert reverse("pos:payment").encode() in response.content
+        assert b"Proceed to Payment" in response.content
+
+    def test_payment_link_is_disabled_when_cart_is_empty(self, unlocked_client):
+        response = unlocked_client.get(reverse("pos:ordering"))
+        assert b"disabled" in response.content
+        assert b"Add an item to continue" in response.content
+
 
 class TestAddCustomProduct:
     def test_valid_custom_item_is_added_to_draft(self, unlocked_client, cashier, branch):
