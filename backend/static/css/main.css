@@ -1,0 +1,203 @@
+/*
+  SanServeAll design tokens, extracted from Jorge's Cafe UI reference
+  (the manuscript's own screens, not an invented palette -- per the
+  frontend-design skill, a pinned-down visual brief always wins over a
+  generated default).
+
+  Two-tier typography: Fredoka (rounded, friendly) carries the "Jorge's
+  Cafe" brand voice on headings/logo; Inter (clean, businesslike) handles
+  UI text, tables, and numbers -- the operations side of a café that's
+  also a real business tool.
+*/
+
+:root {
+  /* Brand */
+  --jc-orange: #E88B5A;
+  --jc-orange-dark: #D2703F;
+  --jc-sage: #8FA894;
+  --jc-teal: #5C8A99;
+  --jc-navy: #1E2A3A;
+
+  /* Backgrounds */
+  --jc-cream: #F5EFE4;
+  --jc-tan: #EDE1D0;
+  --jc-canvas: #F8F9FA;
+  --jc-white: #FFFFFF;
+
+  /* Status */
+  --jc-critical: #DC5B4E;
+  --jc-low: #E8B54D;
+  --jc-adequate: #5FA87A;
+
+  /* Text */
+  --jc-text: #1E2A3A;
+  --jc-text-muted: #6B7280;
+
+  /* Shape */
+  --jc-radius: 14px;
+  --jc-radius-sm: 10px;
+  --jc-radius-pill: 999px;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  color: var(--jc-text);
+  background-color: var(--jc-canvas);
+}
+
+.jc-display,
+.jc-logo {
+  font-family: 'Fredoka', sans-serif;
+}
+
+/* --- Logo --- */
+.jc-logo {
+  font-weight: 600;
+  line-height: 1;
+}
+.jc-logo .jc-logo-primary { color: var(--jc-teal); }
+.jc-logo .jc-logo-accent { color: var(--jc-orange); }
+.jc-logo .jc-logo-tagline {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.65rem;
+  color: var(--jc-text-muted);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+/* --- Buttons --- */
+.btn-jc-primary {
+  background-color: var(--jc-orange);
+  border-color: var(--jc-orange);
+  color: #fff;
+  font-weight: 500;
+}
+.btn-jc-primary:hover,
+.btn-jc-primary:focus {
+  background-color: var(--jc-orange-dark);
+  border-color: var(--jc-orange-dark);
+  color: #fff;
+}
+.btn-jc-teal {
+  background-color: var(--jc-teal);
+  border-color: var(--jc-teal);
+  color: #fff;
+  font-weight: 500;
+}
+.btn-jc-teal:hover,
+.btn-jc-teal:focus {
+  background-color: #4A7684;
+  border-color: #4A7684;
+  color: #fff;
+}
+.btn-jc-outline {
+  background-color: transparent;
+  border: 1px solid #D8DEE4;
+  color: var(--jc-text);
+  font-weight: 500;
+}
+.btn-jc-outline:hover {
+  background-color: var(--jc-canvas);
+  border-color: #C3CBD3;
+}
+
+/* --- Cards --- */
+.jc-card {
+  background-color: var(--jc-white);
+  border-radius: var(--jc-radius);
+  border: 1px solid #EEF0F2;
+  box-shadow: 0 1px 2px rgba(30, 42, 58, 0.04);
+}
+
+/* Left accent bar -- encodes branch/priority, not decorative (per skill
+   guidance: structural devices should carry real information) */
+.jc-card-accent {
+  border-left: 4px solid var(--jc-orange);
+}
+.jc-card-accent-sage { border-left-color: var(--jc-sage); }
+.jc-card-accent-teal { border-left-color: var(--jc-teal); }
+
+/* --- Badges (status pills) --- */
+.jc-badge {
+  display: inline-block;
+  padding: 0.3rem 0.75rem;
+  border-radius: var(--jc-radius-pill);
+  font-size: 0.8rem;
+  font-weight: 500;
+}
+.jc-badge-critical { background-color: #FCE9E7; color: var(--jc-critical); }
+.jc-badge-low { background-color: #FBF1DC; color: #A9781F; }
+.jc-badge-adequate { background-color: #E3F1E8; color: var(--jc-adequate); }
+.jc-badge-info { background-color: #E5EEF6; color: #3E6B92; }
+
+/* --- Sidebar (admin shell) --- */
+.jc-sidebar {
+  width: 68px;
+  background-color: var(--jc-white);
+  border-right: 1px solid #EEF0F2;
+  min-height: 100vh;
+}
+.jc-sidebar-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--jc-radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--jc-text-muted);
+  margin: 0 auto 8px;
+}
+.jc-sidebar-icon.active {
+  background-color: var(--jc-orange);
+  color: #fff;
+}
+.jc-sidebar-icon:hover:not(.active) {
+  background-color: var(--jc-canvas);
+}
+
+/* --- Top bar --- */
+.jc-topbar {
+  background-color: var(--jc-white);
+  border-bottom: 1px solid #EEF0F2;
+  padding: 0.75rem 1.5rem;
+}
+
+/* --- POS product card (cashier screen) --- */
+.jc-product-card {
+  background-color: var(--jc-tan);
+  border-radius: var(--jc-radius-sm);
+  border: none;
+  padding: 1rem;
+  transition: transform 0.1s ease;
+}
+.jc-product-card:hover {
+  transform: translateY(-2px);
+}
+.jc-product-card .jc-price {
+  color: var(--jc-orange-dark);
+  font-weight: 600;
+}
+
+/* --- Cashier PIN keypad --- */
+.jc-pin-dot {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--jc-radius-sm);
+  background-color: var(--jc-orange);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.jc-pin-dot.empty {
+  background-color: #E9E9E9;
+}
+.jc-pin-key {
+  border: 1px solid #E3E6E9;
+  border-radius: var(--jc-radius-sm);
+  background-color: #fff;
+  font-size: 1.25rem;
+  padding: 1rem;
+}
+.jc-pin-key:hover {
+  background-color: var(--jc-canvas);
+}
