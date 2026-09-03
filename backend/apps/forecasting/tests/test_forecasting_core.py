@@ -167,7 +167,10 @@ class TestRunForecastForProduct:
             _completed_sale(branch, cashier, latte, quantity=5, days_ago=i)
 
         forecasts = services.run_forecast_for_product(branch, latte, steps=7)
-        today = timezone.now().date()
+        # Manila-local date, matching the fix in run_forecast_for_product --
+        # raw timezone.now().date() is UTC and would be wrong for roughly
+        # 8 hours of every day, since Manila is UTC+8.
+        today = timezone.localdate()
         dates = sorted(f.forecast_date for f in forecasts)
         assert dates[0] == today + timedelta(days=1)
         assert dates[-1] == today + timedelta(days=7)

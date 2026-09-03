@@ -24,7 +24,7 @@ def run_forecast_for_product(branch, product, steps=7):
     series = build_daily_sales_series(branch, product)
     result = generate_forecast(series, steps=steps)
 
-    today = timezone.now().date()
+    today = timezone.localdate()
     forecasts = []
     for day_offset, predicted_quantity in enumerate(result["predicted_values"], start=1):
         forecasts.append(
@@ -244,7 +244,7 @@ def detect_unusual_patterns(branch=None, weeks_of_history=4):
     statistical model, just a real comparison against real history."""
     from datetime import timedelta
 
-    yesterday = (timezone.now() - timedelta(days=1)).date()
+    yesterday = timezone.localdate() - timedelta(days=1)
     weekday = yesterday.weekday()
 
     comparison_start = yesterday - timedelta(weeks=weeks_of_history)
