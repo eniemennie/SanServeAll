@@ -6,7 +6,7 @@ the brand mark consistent rather than duplicating markup in every template.
 Usage: {% include "partials/logo.html" %}
 Optional: pass `size` as "sm" (top bars) or omit for default (landing/login).
 {% endcomment %}
-<div class="jc-logo {% if size == 'sm' %}fs-5{% else %}fs-2{% endif %}">
-    <span class="jc-logo-primary">Jorge's</span><span class="jc-logo-accent">Cafe</span>
-    {% if size != 'sm' %}<div class="jc-logo-tagline">{&#39;hor-heh&#39;}</div>{% endif %}
-</div>
+{% load static %}
+<img src="{% static 'images/logo.png' %}" alt="Jorge's Cafe"
+     class="jc-logo-img {% if size == 'sm' %}jc-logo-img-sm{% endif %}">
+

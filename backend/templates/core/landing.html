@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Jorge's Cafe - SanServeAll{% endblock %}
+{% block extra_css %}
+<style>
+    .jc-hero {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: linear-gradient(160deg, #F0D9C0 0%, #E8B98C 45%, #D89468 100%);
+        position: relative;
+        overflow: hidden;
+    }
+    /* A quiet, single decorative moment (per design guidance: spend
+       boldness in one place) -- a soft radial glow behind the logo,
+       evoking warm café lighting without needing a real storefront
+       photo, which the business should supply when ready. */
+    .jc-hero::before {
+        content: "";
+        position: absolute;
+        top: 15%;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 600px;
+        height: 600px;
+        background: radial-gradient(circle, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0) 70%);
+        pointer-events: none;
+    }
+    .jc-hero-content {
+        position: relative;
+        z-index: 1;
+        text-align: center;
+        max-width: 640px;
+        padding: 0 1.5rem;
+    }
+    .jc-hero .jc-logo-img { height: 100px; }
+    .jc-hero-tagline {
+        color: #4A3220;
+        font-size: 1.15rem;
+        line-height: 1.6;
+        margin: 1.75rem 0 2.5rem;
+    }
+</style>
+{% endblock %}
+{% block content %}
+<div class="jc-hero">
+    <div class="jc-hero-content">
+        {% include "partials/logo.html" %}
+        <p class="jc-hero-tagline">
+            Experience the perfect blend of artisanal coffee, fresh pastries, and
+            warm hospitality. Your neighborhood cafe where every cup tells a story.
+        </p>
+        <div class="d-flex gap-3 justify-content-center flex-wrap">
+            <a href="{% url 'accounts:login' %}" class="btn btn-jc-primary btn-lg px-4">Start Shift</a>
+            <a href="{% url 'accounts:admin_login' %}" class="btn btn-jc-teal btn-lg px-4">Sign In</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
