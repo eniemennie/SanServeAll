@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}Cashier Lock - SanServeAll{% endblock %}
+{% block extra_css %}
+<style>
+    body { background-color: var(--jc-cream); }
+    .jc-back-link { color: var(--jc-navy); text-decoration: none; font-weight: 500; }
+    .jc-back-link:hover { color: var(--jc-navy); }
+    .jc-lock-card {
+        background-color: #fff;
+        border-radius: var(--jc-radius);
+        box-shadow: 0 4px 16px rgba(30, 42, 58, 0.08);
+        padding: 3rem;
+    }
+    .jc-avatar-lg {
+        width: 130px;
+        height: 130px;
+        border-radius: 50%;
+        background-color: var(--jc-cream);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 1rem;
+    }
+    .jc-pin-dot {
+        width: 56px;
+        height: 56px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background-color: #E9E9E9;
+    }
+    .jc-pin-dot.filled { background-color: var(--jc-orange); }
+    .jc-pin-dot span {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background-color: #fff;
+        display: none;
+    }
+    .jc-pin-dot.filled span { display: block; }
+    .jc-key {
+        border: 1px solid #E3E6E9;
+        border-radius: 10px;
+        background-color: #fff;
+        font-size: 1.25rem;
+        padding: 1rem;
+        width: 100%;
+    }
+    .jc-key:hover { background-color: var(--jc-canvas); }
+    .jc-key.jc-key-active { border-color: var(--jc-orange); }
+</style>
+{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <a href="{% url 'accounts:select_cashier' %}" class="jc-back-link">&larr; Back</a>
+
+    <div class="text-center mt-3 mb-4">
+        <h1 class="h2 fw-bold" style="color: var(--jc-navy);">Cashier Lock</h1>
+    </div>
+
+    <div class="jc-lock-card mx-auto" style="max-width: 900px;">
+        <div class="row align-items-center">
+            <div class="col-md-5 text-center mb-4 mb-md-0">
+                <div class="jc-avatar-lg">
+                    <svg width="60" height="60" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="12" cy="8" r="4" fill="var(--jc-orange)"/>
+                        <path d="M4 20c0-4.4 3.6-8 8-8s8 3.6 8 8" stroke="var(--jc-orange)" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+                    </svg>
+                </div>
+                <div class="fs-4" style="color: var(--jc-navy); font-weight: 600;">
+                    {{ cashier.get_full_name|default:cashier.username }}
+                </div>
+                <div class="text-muted">Cashier</div>
+            </div>
+
+            <div class="col-md-7">
+                <p class="text-center text-muted mb-2">Enter 4-digit PIN</p>
+                <div class="d-flex justify-content-center gap-2 mb-2">
+                    <div class="jc-pin-dot" id="dot-0"><span></span></div>
+                    <div class="jc-pin-dot" id="dot-1"><span></span></div>
+                    <div class="jc-pin-dot" id="dot-2"><span></span></div>
+                    <div class="jc-pin-dot" id="dot-3"><span></span></div>
+                </div>
+                {% if error %}
+                <p class="text-center text-danger fw-semibold mb-3">{{ error }}</p>
+                {% else %}
+                <div class="mb-3" style="height: 1.5rem;"></div>
+                {% endif %}
+
+                <form method="post" id="pin-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="pin" id="pin-value">
+                    <div class="row row-cols-3 g-2 mx-auto" style="max-width: 340px;">
+                        {% for digit in "123456789" %}
+                        <div class="col"><button type="button" class="jc-key jc-digit-key" data-digit="{{ digit }}">{{ digit }}</button></div>
+                        {% endfor %}
+                        <div class="col"><button type="button" class="jc-key" id="clear-key">Clear</button></div>
+                        <div class="col"><button type="button" class="jc-key jc-digit-key" data-digit="0">0</button></div>
+                        <div class="col"><button type="button" class="jc-key" id="backspace-key">&#9003;</button></div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+(function () {
+    let pin = "";
+    const dots = [0, 1, 2, 3].map(function (i) { return document.getElementById("dot-" + i); });
+    const pinValueInput = document.getElementById("pin-value");
+    const form = document.getElementById("pin-form");
+
+    function render() {
+        dots.forEach(function (dot, i) {
+            dot.classList.toggle("filled", i < pin.length);
+        });
+    }
+
+    document.querySelectorAll(".jc-digit-key").forEach(function (key) {
+        key.addEventListener("click", function () {
+            if (pin.length >= 4) return;
+            pin += key.dataset.digit;
+            render();
+            if (pin.length === 4) {
+                pinValueInput.value = pin;
+                form.submit();
+            }
+        });
+    });
+
+    document.getElementById("clear-key").addEventListener("click", function () {
+        pin = "";
+        render();
+    });
+
+    document.getElementById("backspace-key").addEventListener("click", function () {
+        pin = pin.slice(0, -1);
+        render();
+    });
+})();
+</script>
+{% endblock %}

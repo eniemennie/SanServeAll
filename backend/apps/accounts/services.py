@@ -8,7 +8,9 @@ concerns only, this module holds the actual rules.
 
 import secrets
 import string
+from datetime import timedelta
 
+from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from apps.accounts.models import Branch, CashierPIN, Role, TwoFactorBackupCode
@@ -63,6 +65,72 @@ def verify_cashier_pin(user, raw_pin):
         return False
 
     return pin_record.check_pin(raw_pin)
+
+
+PIN_LOCKOUT_THRESHOLD = 5
+PIN_LOCKOUT_DURATION_MINUTES = 5
+
+
+def get_selectable_cashiers():
+    """Active Branch Staff users, for the tap-to-select entry screen
+    (Row 3 redesign). Deliberately public/pre-auth -- the screen shows
+    only name and branch, not anything more sensitive, matching how a
+    physical shared POS terminal already trusts its own location as the
+    real security boundary, same as most real-world café POS systems."""
+    return (
+        get_user_model()
+        .objects.filter(role__name=Role.BRANCH_STAFF, is_active=True, branch__isnull=False)
+        .select_related("branch", "role")
+        .order_by("first_name", "username")
+    )
+
+
+def verify_cashier_pin_with_lockout(user, raw_pin):
+    """PIN verification for the tap-to-select flow, where the PIN is now
+    the SOLE credential rather than a second factor on an already-
+    password-authenticated session. Tracks failed attempts and applies a
+    temporary lockout after PIN_LOCKOUT_THRESHOLD consecutive failures --
+    a 4-digit PIN alone is genuinely brute-forceable without this.
+
+    Returns (success: bool, error_message: str | None). A locked-out
+    account returns a distinct message (telling a legitimate cashier
+    they're locked out, rather than silently rejecting every attempt
+    with no explanation, is a reasonable usability trade-off here -- this
+    isn't hiding whether an ACCOUNT exists, just how many guesses are
+    left on one).
+    """
+    try:
+        pin_record = user.cashier_pin
+    except CashierPIN.DoesNotExist:
+        return False, "Incorrect PIN. Please try again."
+
+    if not pin_record.is_active:
+        return False, "Incorrect PIN. Please try again."
+
+    if pin_record.is_locked():
+        minutes_left = max(
+            1, int((pin_record.locked_until - timezone.now()).total_seconds() // 60) + 1
+        )
+        return False, f"Too many incorrect attempts. Try again in {minutes_left} minute(s)."
+
+    if pin_record.check_pin(raw_pin):
+        pin_record.failed_attempts = 0
+        pin_record.locked_until = None
+        pin_record.last_used_at = timezone.now()
+        pin_record.save()
+        return True, None
+
+    pin_record.failed_attempts += 1
+    if pin_record.failed_attempts >= PIN_LOCKOUT_THRESHOLD:
+        pin_record.locked_until = timezone.now() + timedelta(minutes=PIN_LOCKOUT_DURATION_MINUTES)
+        pin_record.failed_attempts = 0
+        pin_record.save()
+        return False, (
+            f"Too many incorrect attempts. Try again in " f"{PIN_LOCKOUT_DURATION_MINUTES} minutes."
+        )
+
+    pin_record.save()
+    return False, "Incorrect PIN. Please try again."
 
 
 BACKUP_CODE_COUNT = 10
