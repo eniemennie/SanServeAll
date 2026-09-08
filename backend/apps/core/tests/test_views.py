@@ -29,9 +29,11 @@ class TestLandingPage:
         assert b"images/logo.png" in response.content
         assert b'alt="Jorge' in response.content
 
-    def test_start_shift_links_to_cashier_login(self, client):
+    def test_start_shift_links_to_cashier_selection(self, client):
+        """Start Shift now leads to the tap-to-select cashier flow
+        (Row 3 redesign), not the old username/password login."""
         response = client.get(reverse("core:landing"))
-        assert reverse("accounts:login").encode() in response.content
+        assert reverse("accounts:select_cashier").encode() in response.content
 
     def test_sign_in_links_to_admin_login(self, client):
         response = client.get(reverse("core:landing"))

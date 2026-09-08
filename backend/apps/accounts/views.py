@@ -19,7 +19,7 @@ from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import HttpResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.views import View
 from django_otp import login as otp_login
 from django_otp.decorators import otp_required
@@ -30,10 +30,12 @@ from apps.accounts.permissions import role_required
 from apps.accounts.services import (
     generate_backup_codes,
     get_selectable_branches,
+    get_selectable_cashiers,
     user_can_select_branch,
     user_requires_cashier_pin,
     verify_and_consume_backup_code,
     verify_cashier_pin,
+    verify_cashier_pin_with_lockout,
 )
 
 
@@ -56,6 +58,47 @@ class SanServeAllLogoutView(auth_views.LogoutView):
         request.session.pop("pos_unlocked", None)
         request.session.pop("selected_branch_id", None)
         return super().dispatch(request, *args, **kwargs)
+
+
+class SelectCashierView(View):
+    """Select Cashier screen (Row 3 redesign, Figs. 3-9/3-10 replaced by
+    the reference UI's tap-to-select model). Deliberately public -- no
+    login required to view this list, matching a shared, physically-
+    secured POS terminal where the device itself is the trust boundary,
+    not each visit to this screen."""
+
+    template_name = "accounts/select_cashier.html"
+
+    def get(self, request):
+        cashiers = get_selectable_cashiers()
+        return render(request, self.template_name, {"cashiers": cashiers})
+
+
+class CashierLockView(View):
+    """Cashier Lock (PIN) screen for the tap-to-select flow -- the PIN
+    here is the SOLE credential (Row 3 redesign), not a second factor on
+    an already-authenticated session like the original CashierPinView
+    below. A successful PIN both authenticates the user (calls Django's
+    own login()) and unlocks the POS in one step."""
+
+    template_name = "accounts/cashier_lock.html"
+
+    def get(self, request, user_id):
+        cashier = get_object_or_404(get_selectable_cashiers(), pk=user_id)
+        return render(request, self.template_name, {"cashier": cashier})
+
+    def post(self, request, user_id):
+        cashier = get_object_or_404(get_selectable_cashiers(), pk=user_id)
+        raw_pin = request.POST.get("pin", "")
+
+        success, error = verify_cashier_pin_with_lockout(cashier, raw_pin)
+        if success:
+            auth_login(request, cashier, backend="django.contrib.auth.backends.ModelBackend")
+            request.session["selected_branch_id"] = cashier.branch_id
+            request.session["pos_unlocked"] = True
+            return redirect("pos:ordering")
+
+        return render(request, self.template_name, {"cashier": cashier, "error": error})
 
 
 class BranchSelectionView(LoginRequiredMixin, View):
