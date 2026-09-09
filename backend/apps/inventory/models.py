@@ -29,6 +29,12 @@ class Product(models.Model):
 
     name = models.CharField(max_length=150)
     price = models.DecimalField(max_digits=10, decimal_places=2)
+    # Set only for products with a Large size option (Row 3 redesign,
+    # Product Customization modal) -- `price` above is always the Small/
+    # base price. Left null for products with no size variants at all
+    # (pasta, cakes, etc. -- confirmed by the reference showing "Lasagna"
+    # added to cart with no size noted, unlike "Spanish Latte (Small)").
+    large_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     # MATERIAL rows (flour, sugar, cups, etc. -- Phase 1 SS1.1) are not sold
     # directly through POS; `price` still applies as their unit cost for
     # inventory valuation, just not as a sellable catalog price.
@@ -52,6 +58,27 @@ class Product(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def has_size_options(self):
+        return self.large_price is not None
+
+    # Categories that get the full customization modal (size, sugar
+    # level, add-ons -- Row 3 redesign). Everything else (pasta,
+    # breakfast, desserts, cakes) gets a simpler quantity + discount
+    # flow, matching the reference showing "Lasagna" added with none of
+    # those options shown at all.
+    BEVERAGE_CATEGORIES = {
+        Category.COFFEE,
+        Category.COFFEE_FRAPPE,
+        Category.NON_COFFEE_FRAPPE,
+        Category.SEA_SALT_SERIES,
+        Category.SPECIALTY,
+    }
+
+    @property
+    def is_beverage(self):
+        return self.category in self.BEVERAGE_CATEGORIES
 
 
 class Inventory(models.Model):

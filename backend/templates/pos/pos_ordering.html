@@ -113,12 +113,14 @@
                             {% endif %}
                             <div class="fw-semibold mb-1">{{ product.name }}</div>
                             <div class="jc-price mb-2">₱{{ product.price }}+</div>
-                            <form method="post" action="{% url 'pos:add_catalog_item' %}">
-                                {% csrf_token %}
-                                <input type="hidden" name="product_id" value="{{ product.pk }}">
-                                <input type="hidden" name="quantity" value="1">
-                                <button type="submit" class="btn jc-add-btn btn-sm">Add</button>
-                            </form>
+                            <button type="button" class="btn jc-add-btn btn-sm js-open-customize"
+                                    data-product-id="{{ product.pk }}"
+                                    data-name="{{ product.name }}"
+                                    data-price="{{ product.price }}"
+                                    data-large-price="{{ product.large_price|default_if_none:'' }}"
+                                    data-is-beverage="{{ product.is_beverage|yesno:'1,0' }}">
+                                Add
+                            </button>
                         </div>
                     </div>
                     {% empty %}
@@ -210,6 +212,122 @@
         </div>
     </div>
 </div>
+
+<!-- Product Customization modal (Fig. 3-14, Row 3 redesign): size, sugar
+     level, add-ons, discount -- computed and applied in one step. Shared
+     across all products; populated via JS from the clicked product's
+     data attributes rather than rendering one modal per product. -->
+<div class="modal fade" id="customizeModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="customize-product-name">Product</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" action="{% url 'pos:add_customized_item' %}" id="customize-form">
+                {% csrf_token %}
+                <input type="hidden" name="product_id" id="customize-product-id">
+                <div class="modal-body">
+                    <div id="customize-size-section" class="mb-3 d-none">
+                        <label class="form-label fw-semibold">Size</label>
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <input type="radio" class="btn-check" name="size" id="size-small" value="SMALL" checked>
+                                <label class="btn btn-jc-outline w-100 py-2" for="size-small">
+                                    Small<br><span id="size-small-price" class="jc-price"></span>
+                                </label>
+                            </div>
+                            <div class="col-6">
+                                <input type="radio" class="btn-check" name="size" id="size-large" value="LARGE">
+                                <label class="btn btn-jc-outline w-100 py-2" for="size-large">
+                                    Large<br><span id="size-large-price" class="jc-price"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="customize-sugar-section" class="mb-3 d-none">
+                        <label class="form-label fw-semibold">Sugar Level</label>
+                        <div class="row row-cols-5 g-2">
+                            <div class="col"><input type="radio" class="btn-check" name="sugar_level" id="sugar-0" value="0%"><label class="btn btn-jc-outline w-100 py-2 btn-sm" for="sugar-0">0%</label></div>
+                            <div class="col"><input type="radio" class="btn-check" name="sugar_level" id="sugar-25" value="25%"><label class="btn btn-jc-outline w-100 py-2 btn-sm" for="sugar-25">25%</label></div>
+                            <div class="col"><input type="radio" class="btn-check" name="sugar_level" id="sugar-50" value="50%"><label class="btn btn-jc-outline w-100 py-2 btn-sm" for="sugar-50">50%</label></div>
+                            <div class="col"><input type="radio" class="btn-check" name="sugar_level" id="sugar-75" value="75%"><label class="btn btn-jc-outline w-100 py-2 btn-sm" for="sugar-75">75%</label></div>
+                            <div class="col"><input type="radio" class="btn-check" name="sugar_level" id="sugar-100" value="100%" checked><label class="btn btn-jc-outline w-100 py-2 btn-sm" for="sugar-100">100%</label></div>
+                        </div>
+                    </div>
+
+                    <div id="customize-addons-section" class="mb-3 d-none">
+                        <label class="form-label fw-semibold">Add-ons (Optional)</label>
+                        <div class="row g-2">
+                            {% for addon in addons %}
+                            <div class="col-6">
+                                <input type="checkbox" class="btn-check addon-check" name="addon_ids"
+                                       id="addon-{{ addon.pk }}" value="{{ addon.pk }}" data-price="{{ addon.price }}">
+                                <label class="btn btn-jc-outline w-100 text-start py-2" for="addon-{{ addon.pk }}">
+                                    {{ addon.name }}<br><span class="jc-price">+₱{{ addon.price }}</span>
+                                </label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label fw-semibold">Discounts (Optional)</label>
+                        <label class="form-label small text-muted mb-1">Category</label>
+                        <select name="discount_category" id="discount-category" class="form-select mb-2">
+                            {% for value, label in discount_categories %}
+                            <option value="{{ value }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div id="discount-details" class="mb-2 d-none">
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <label class="form-label small text-muted mb-1">Type</label>
+                                <select name="discount_type" id="discount-type" class="form-select">
+                                    {% for value, label in discount_types %}
+                                    <option value="{{ value }}">{{ label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small text-muted mb-1">Amount</label>
+                                <input type="number" name="discount_amount" id="discount-amount"
+                                       class="form-control" min="0" step="0.01" value="0">
+                            </div>
+                        </div>
+                        <label class="form-label small text-muted mb-1 mt-2">Note</label>
+                        <input type="text" name="note" class="form-control" placeholder="Optional note">
+
+                        <div class="bg-light rounded p-2 mt-2 small" id="discount-breakdown">
+                            <div class="d-flex justify-content-between">
+                                <span>Original Price:</span><span id="breakdown-original">₱0.00</span>
+                            </div>
+                            <div class="d-flex justify-content-between text-danger" id="breakdown-discount-row">
+                                <span>Discount:</span><span id="breakdown-discount">-₱0.00</span>
+                            </div>
+                            <div class="d-flex justify-content-between fw-bold">
+                                <span>Price After Discount:</span><span id="breakdown-final">₱0.00</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <div class="d-flex align-items-center gap-2 w-100">
+                        <button type="button" class="btn btn-jc-outline" id="qty-minus">-</button>
+                        <input type="text" name="quantity" id="customize-qty" class="form-control text-center" value="1" style="max-width: 60px;" readonly>
+                        <button type="button" class="btn btn-jc-outline" id="qty-plus">+</button>
+                        <button type="submit" class="btn btn-jc-primary flex-grow-1" id="customize-add-btn">
+                            ADD ₱0.00
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 {% endblock %}
 {% block extra_js %}
 <script>
@@ -240,6 +358,113 @@
     var addCustomModal = new bootstrap.Modal(document.getElementById("addCustomModal"));
     addCustomModal.show();
     {% endif %}
+})();
+
+(function () {
+    const customizeModalEl = document.getElementById("customizeModal");
+    const customizeModal = new bootstrap.Modal(customizeModalEl);
+    let currentProduct = {};
+    let quantity = 1;
+
+    document.querySelectorAll(".js-open-customize").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            currentProduct = {
+                id: btn.dataset.productId,
+                name: btn.dataset.name,
+                price: parseFloat(btn.dataset.price),
+                largePrice: btn.dataset.largePrice ? parseFloat(btn.dataset.largePrice) : null,
+                isBeverage: btn.dataset.isBeverage === "1",
+            };
+            quantity = 1;
+
+            document.getElementById("customize-product-name").textContent = currentProduct.name;
+            document.getElementById("customize-product-id").value = currentProduct.id;
+            document.getElementById("customize-qty").value = quantity;
+
+            const hasSize = currentProduct.largePrice !== null;
+            document.getElementById("customize-size-section").classList.toggle("d-none", !hasSize);
+            document.getElementById("customize-sugar-section").classList.toggle("d-none", !currentProduct.isBeverage);
+            document.getElementById("customize-addons-section").classList.toggle("d-none", !currentProduct.isBeverage);
+
+            if (hasSize) {
+                document.getElementById("size-small-price").textContent = "\u20b1" + currentProduct.price.toFixed(2);
+                document.getElementById("size-large-price").textContent = "\u20b1" + currentProduct.largePrice.toFixed(2);
+                document.getElementById("size-small").checked = true;
+            }
+            document.querySelectorAll(".addon-check").forEach(function (cb) { cb.checked = false; });
+            document.getElementById("discount-category").value = "NO_DISCOUNT";
+            document.getElementById("discount-amount").value = "0";
+            document.getElementById("discount-details").classList.add("d-none");
+
+            recomputePrice();
+            customizeModal.show();
+        });
+    });
+
+    function getBasePrice() {
+        if (currentProduct.largePrice !== null && document.getElementById("size-large").checked) {
+            return currentProduct.largePrice;
+        }
+        return currentProduct.price;
+    }
+
+    function getAddonTotal() {
+        let total = 0;
+        document.querySelectorAll(".addon-check:checked").forEach(function (cb) {
+            total += parseFloat(cb.dataset.price) || 0;
+        });
+        return total;
+    }
+
+    function recomputePrice() {
+        const base = getBasePrice();
+        const addonTotal = currentProduct.isBeverage ? getAddonTotal() : 0;
+        const priceBeforeDiscount = base + addonTotal;
+
+        const discountCategory = document.getElementById("discount-category").value;
+        const discountType = document.getElementById("discount-type").value;
+        const discountAmount = parseFloat(document.getElementById("discount-amount").value) || 0;
+
+        let discountValue = 0;
+        if (discountCategory !== "NO_DISCOUNT" && discountAmount > 0) {
+            discountValue = discountType === "PERCENT" ? priceBeforeDiscount * (discountAmount / 100) : discountAmount;
+            discountValue = Math.min(discountValue, priceBeforeDiscount);
+        }
+
+        const finalPrice = priceBeforeDiscount - discountValue;
+
+        document.getElementById("breakdown-original").textContent = "\u20b1" + priceBeforeDiscount.toFixed(2);
+        document.getElementById("breakdown-discount").textContent = "-\u20b1" + discountValue.toFixed(2);
+        document.getElementById("breakdown-final").textContent = "\u20b1" + finalPrice.toFixed(2);
+        document.getElementById("customize-add-btn").textContent = "ADD \u20b1" + (finalPrice * quantity).toFixed(2);
+
+        return finalPrice;
+    }
+
+    document.querySelectorAll('input[name="size"]').forEach(function (el) {
+        el.addEventListener("change", recomputePrice);
+    });
+    document.querySelectorAll(".addon-check").forEach(function (el) {
+        el.addEventListener("change", recomputePrice);
+    });
+    document.getElementById("discount-category").addEventListener("change", function () {
+        const isDiscounted = this.value !== "NO_DISCOUNT";
+        document.getElementById("discount-details").classList.toggle("d-none", !isDiscounted);
+        recomputePrice();
+    });
+    document.getElementById("discount-type").addEventListener("change", recomputePrice);
+    document.getElementById("discount-amount").addEventListener("input", recomputePrice);
+
+    document.getElementById("qty-minus").addEventListener("click", function () {
+        quantity = Math.max(1, quantity - 1);
+        document.getElementById("customize-qty").value = quantity;
+        recomputePrice();
+    });
+    document.getElementById("qty-plus").addEventListener("click", function () {
+        quantity += 1;
+        document.getElementById("customize-qty").value = quantity;
+        recomputePrice();
+    });
 })();
 </script>
 {% endblock %}

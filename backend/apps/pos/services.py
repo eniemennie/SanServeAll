@@ -63,6 +63,110 @@ def add_custom_item(draft, name, price):
     )
 
 
+def compute_customized_price(product, size, addon_ids, discount_type, discount_amount):
+    """The real price math behind the Product Customization modal (Row 3
+    redesign): base price (Small/Large) + add-ons, then a discount
+    applied to that subtotal. Returns (final_price, discount_value,
+    price_before_discount) so the view/template can show the same
+    breakdown the reference does (Original Price / Discount / Price
+    After Discount).
+
+    Never lets a discount push the price below zero -- caps at the
+    pre-discount subtotal regardless of what was entered."""
+    from apps.pos.models import AddOn
+
+    base_price = product.price
+    if size == "LARGE" and product.has_size_options:
+        base_price = product.large_price
+
+    addon_total = Decimal("0.00")
+    if addon_ids:
+        addon_total = sum(
+            (a.price for a in AddOn.objects.filter(pk__in=addon_ids, is_active=True)),
+            Decimal("0.00"),
+        )
+
+    price_before_discount = base_price + addon_total
+
+    discount_value = Decimal("0.00")
+    if discount_amount:
+        try:
+            discount_amount = Decimal(str(discount_amount))
+        except (InvalidOperation, TypeError):
+            discount_amount = Decimal("0.00")
+
+        if discount_amount > 0:
+            if discount_type == "PERCENT":
+                discount_value = price_before_discount * (discount_amount / Decimal("100"))
+            else:
+                discount_value = discount_amount
+            # Never let a discount push the price negative
+            discount_value = min(discount_value, price_before_discount)
+
+    final_price = price_before_discount - discount_value
+    return final_price, discount_value, price_before_discount
+
+
+def add_customized_item(
+    draft,
+    product_id,
+    quantity=1,
+    size="",
+    sugar_level="",
+    addon_ids=None,
+    discount_category="",
+    discount_type="",
+    discount_amount=None,
+    note="",
+):
+    """Adds a beverage with full customization (Row 3 redesign, Fig.
+    3-14) as a single step -- unlike the original add_catalog_item +
+    separate customize_item flow, this computes the final per-unit price
+    up front (size, add-ons, discount all applied) and stores every
+    choice in `customizations` for receipt/order-summary display."""
+    from apps.pos.models import AddOn
+
+    try:
+        product = Product.objects.get(pk=product_id, is_active=True)
+    except (Product.DoesNotExist, ValueError, TypeError):
+        return None
+
+    quantity = max(1, int(quantity) if str(quantity).isdigit() else 1)
+    addon_ids = addon_ids or []
+
+    unit_price, discount_value, price_before_discount = compute_customized_price(
+        product, size, addon_ids, discount_type, discount_amount
+    )
+
+    addon_names = list(
+        AddOn.objects.filter(pk__in=addon_ids, is_active=True).values_list("name", flat=True)
+    )
+
+    customizations = {
+        "size": (
+            "Large"
+            if size == "LARGE" and product.has_size_options
+            else ("Small" if product.has_size_options else "")
+        ),
+        "sugar_level": sugar_level,
+        "add_ons": addon_names,
+        "discount_category": (
+            discount_category if discount_category and discount_category != "NO_DISCOUNT" else ""
+        ),
+        "discount_value": str(discount_value) if discount_value else "",
+        "price_before_discount": str(price_before_discount),
+        "note": note,
+    }
+
+    return SalesItem.objects.create(
+        transaction=draft,
+        product=product,
+        unit_price=unit_price,
+        quantity=quantity,
+        customizations=customizations,
+    )
+
+
 def update_item_customization(item, quantity=None, customizations=None):
     """Applies Order Customization changes (Fig. 3-14) to an existing line
     item -- size, sugar level, add-ons, quantity, etc. `customizations` is
