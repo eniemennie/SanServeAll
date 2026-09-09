@@ -96,6 +96,41 @@ class TestPosOrdering:
         assert b"Spanish Latte" in response.content
         assert b"Iced Tea" not in response.content
 
+    def test_category_filters_products(self, unlocked_client, product):
+        """product fixture has no category set (blank) -- confirms
+        filtering by PASTA correctly excludes it."""
+        Product.objects.create(
+            name="Lasagna", price=Decimal("145.00"), category=Product.Category.PASTA
+        )
+        response = unlocked_client.get(reverse("pos:ordering"), {"category": "PASTA"})
+        assert b"Lasagna" in response.content
+        assert b"Spanish Latte" not in response.content
+
+    def test_all_products_shown_when_no_category_selected(self, unlocked_client, product):
+        Product.objects.create(
+            name="Lasagna", price=Decimal("145.00"), category=Product.Category.PASTA
+        )
+        response = unlocked_client.get(reverse("pos:ordering"))
+        assert b"Spanish Latte" in response.content
+        assert b"Lasagna" in response.content
+
+    def test_material_products_never_appear_in_the_pos_catalog(self, unlocked_client):
+        Product.objects.create(
+            name="Flour (kg)", price=Decimal("55.00"), product_type=Product.ProductType.MATERIAL
+        )
+        response = unlocked_client.get(reverse("pos:ordering"))
+        assert b"Flour" not in response.content
+
+    def test_best_seller_badge_shown_for_flagged_products(self, unlocked_client, product):
+        product.is_best_seller = True
+        product.save()
+        response = unlocked_client.get(reverse("pos:ordering"))
+        assert b"Best Seller" in response.content
+
+    def test_best_seller_badge_not_shown_for_unflagged_products(self, unlocked_client, product):
+        response = unlocked_client.get(reverse("pos:ordering"))
+        assert b"Best Seller" not in response.content
+
     def test_adding_catalog_item_creates_a_draft_transaction_and_item(
         self, unlocked_client, product, cashier, branch
     ):
@@ -152,18 +187,27 @@ class TestAddCustomProduct:
         assert item.unit_price == Decimal("85.50")
 
     def test_blank_name_is_rejected(self, unlocked_client):
+        """Row 3 redesign: Add Custom Product is now a modal on the
+        ordering screen, so an invalid submission redirects back with a
+        flash message instead of rendering a standalone error page."""
         response = unlocked_client.post(
             reverse("pos:add_custom_product"), {"name": "  ", "price": "10.00"}
         )
-        assert response.status_code == 200
-        assert b"valid name" in response.content
+        assert response.status_code == 302
+        assert response.url == reverse("pos:ordering")
+
+        follow = unlocked_client.get(response.url)
+        assert b"valid name" in follow.content
 
     def test_negative_price_is_rejected(self, unlocked_client):
         response = unlocked_client.post(
             reverse("pos:add_custom_product"), {"name": "Item", "price": "-5.00"}
         )
-        assert response.status_code == 200
-        assert b"valid name" in response.content
+        assert response.status_code == 302
+        assert response.url == reverse("pos:ordering")
+
+        follow = unlocked_client.get(response.url)
+        assert b"valid name" in follow.content
 
 
 class TestOrderCustomization:

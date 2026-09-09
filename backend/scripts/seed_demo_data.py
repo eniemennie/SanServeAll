@@ -63,19 +63,59 @@ ROLES = [
     },
 ]
 
-# A minimal starter catalog so the POS Ordering Screen (Week 4) has real
-# products to test against ahead of the full Inventory module (Week 6).
-# Categories match the manuscript's own description of Jorge's Café menu
-# (Phase 1 SS1.1: sweets, cakes, pastries, all-day meals, pasta, beverages).
+# A richer starter catalog matching the UI reference's menu (Row 3
+# redesign) -- category assignments are my own reasonable best-effort
+# read of the menu, since the reference screenshots only show the "All"
+# tab view, not which tab each item belongs to. Worth double-checking
+# against the real menu and adjusting via Django admin if any are wrong.
 PRODUCTS = [
-    {"name": "Sans Rival Slice", "price": "150.00"},
-    {"name": "Chocolate Cake Slice", "price": "140.00"},
-    {"name": "Ensaymada", "price": "45.00"},
-    {"name": "Spanish Latte", "price": "125.00"},
-    {"name": "Cappuccino", "price": "115.00"},
-    {"name": "Carbonara", "price": "185.00"},
-    {"name": "Chicken Pesto Pasta", "price": "195.00"},
-    {"name": "Sans Rival Breakfast Plate", "price": "220.00"},
+    # Coffee
+    {"name": "Americano", "price": "75.00", "category": "COFFEE"},
+    {"name": "Cafe Latte", "price": "85.00", "category": "COFFEE"},
+    {"name": "Spanish Latte", "price": "95.00", "category": "COFFEE", "is_best_seller": True},
+    {"name": "Mocha Latte", "price": "95.00", "category": "COFFEE"},
+    {"name": "Cappuccino", "price": "115.00", "category": "COFFEE"},
+    {"name": "Caramel Macchiato", "price": "105.00", "category": "COFFEE"},
+    {"name": "Salted Caramel Macchiato", "price": "110.00", "category": "COFFEE"},
+    # Sea Salt Series
+    {"name": "Sea Salt Latte", "price": "105.00", "category": "SEA_SALT_SERIES"},
+    {
+        "name": "Spanish Sea Salt Latte",
+        "price": "115.00",
+        "category": "SEA_SALT_SERIES",
+        "is_best_seller": True,
+    },
+    {"name": "Matcha Sea Salt Latte", "price": "115.00", "category": "SEA_SALT_SERIES"},
+    {"name": "Biscoff Sea Salt Latte", "price": "120.00", "category": "SEA_SALT_SERIES"},
+    {"name": "Biscoff Latte", "price": "115.00", "category": "SEA_SALT_SERIES"},
+    # Coffee Frappe
+    {"name": "Caramel Macchiato Frappe", "price": "115.00", "category": "COFFEE_FRAPPE"},
+    {
+        "name": "Java Chip Frappe",
+        "price": "115.00",
+        "category": "COFFEE_FRAPPE",
+        "is_best_seller": True,
+    },
+    {"name": "Mocha Frappe", "price": "110.00", "category": "COFFEE_FRAPPE"},
+    {"name": "Cookies & Cream Frappe", "price": "115.00", "category": "COFFEE_FRAPPE"},
+    {"name": "Chocolate Frappe", "price": "105.00", "category": "COFFEE_FRAPPE"},
+    # Non-Coffee Frappe
+    {"name": "Strawberry Cream Frappe", "price": "110.00", "category": "NON_COFFEE_FRAPPE"},
+    {"name": "Matcha Frappe", "price": "115.00", "category": "NON_COFFEE_FRAPPE"},
+    {"name": "Double Dutch Frappe", "price": "110.00", "category": "NON_COFFEE_FRAPPE"},
+    # Specialty
+    {"name": "Matcha Latte", "price": "105.00", "category": "SPECIALTY"},
+    # Breakfast
+    {"name": "Sans Rival Breakfast Plate", "price": "220.00", "category": "BREAKFAST"},
+    # Pasta
+    {"name": "Carbonara", "price": "185.00", "category": "PASTA"},
+    {"name": "Chicken Pesto Pasta", "price": "195.00", "category": "PASTA"},
+    {"name": "Lasagna", "price": "145.00", "category": "PASTA"},
+    # Desserts
+    {"name": "Ensaymada", "price": "45.00", "category": "DESSERTS"},
+    # Cakes
+    {"name": "Sans Rival Slice", "price": "150.00", "category": "CAKES"},
+    {"name": "Chocolate Cake Slice", "price": "140.00", "category": "CAKES"},
 ]
 
 # Starter raw materials (Week 8) so Production has something real to
@@ -121,7 +161,12 @@ def run():
     print("\nSeeding starter product catalog...")
     for data in PRODUCTS:
         product, created = Product.objects.get_or_create(
-            name=data["name"], defaults={"price": data["price"]}
+            name=data["name"],
+            defaults={
+                "price": data["price"],
+                "category": data.get("category", ""),
+                "is_best_seller": data.get("is_best_seller", False),
+            },
         )
         status = "created" if created else "already exists"
         print(f"  [{status}] {product.name} (Php{product.price})")

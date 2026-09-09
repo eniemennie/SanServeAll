@@ -8,6 +8,7 @@ branch selection -> cashier PIN flow) and operate only on the current
 cashier's own DRAFT transaction for their selected branch.
 """
 
+from django.contrib import messages
 from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.accounts.permissions import pos_unlock_required
@@ -22,19 +23,32 @@ def _get_draft(request):
 
 @pos_unlock_required
 def pos_ordering(request):
-    """POS Ordering Screen (Fig. 3-12): product catalog with search, and
-    the current draft order's summary."""
+    """POS Ordering Screen (Fig. 3-12): product catalog with search and
+    category filtering (Row 3 redesign), and the current draft order's
+    summary."""
     query = request.GET.get("q", "").strip()
-    products = Product.objects.filter(is_active=True)
+    category = request.GET.get("category", "").strip()
+
+    products = Product.objects.filter(
+        is_active=True, product_type=Product.ProductType.FINISHED_GOOD
+    )
     if query:
         products = products.filter(name__icontains=query)
+    if category:
+        products = products.filter(category=category)
 
     draft = _get_draft(request)
 
     return render(
         request,
         "pos/pos_ordering.html",
-        {"products": products, "query": query, "draft": draft},
+        {
+            "products": products,
+            "query": query,
+            "selected_category": category,
+            "categories": Product.Category.choices,
+            "draft": draft,
+        },
     )
 
 
@@ -50,16 +64,17 @@ def add_catalog_item(request):
 
 @pos_unlock_required
 def add_custom_product(request):
-    """Add Custom Product Interface (Fig. 3-13)."""
-    error = None
+    """Add Custom Product (Fig. 3-13) -- now a modal on the ordering
+    screen (Row 3 redesign) rather than a separate page, so an invalid
+    submission redirects back to the ordering screen with a flash
+    message instead of rendering a standalone error page."""
     if request.method == "POST":
         draft = _get_draft(request)
         item = services.add_custom_item(draft, request.POST.get("name"), request.POST.get("price"))
         if item is not None:
             return redirect("pos:ordering")
-        error = "Enter a valid name and a non-negative price."
-
-    return render(request, "pos/add_custom_product.html", {"error": error})
+        messages.error(request, "Enter a valid name and a non-negative price.")
+    return redirect("pos:ordering")
 
 
 @pos_unlock_required

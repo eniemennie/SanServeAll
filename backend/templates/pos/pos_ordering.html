@@ -1,88 +1,245 @@
 {% extends "base.html" %}
 {% block title %}POS - SanServeAll{% endblock %}
+{% block extra_css %}
+<style>
+    .jc-pos-topbar {
+        background-color: #fff;
+        border-bottom: 1px solid #EEF0F2;
+        padding: 0.85rem 1.5rem;
+    }
+    .jc-cashier-name { font-weight: 600; color: var(--jc-orange-dark); }
+    .jc-cashier-role { font-size: 0.8rem; color: var(--jc-text-muted); }
+    .jc-branch-label { font-weight: 500; color: var(--jc-text); }
+    .jc-category-tab {
+        border: none;
+        border-radius: var(--jc-radius-pill);
+        padding: 0.45rem 1.1rem;
+        font-size: 0.9rem;
+        font-weight: 500;
+        background-color: var(--jc-sage);
+        color: #fff;
+        opacity: 0.55;
+        text-decoration: none;
+        white-space: nowrap;
+    }
+    .jc-category-tab.active { opacity: 1; background-color: var(--jc-teal); }
+    .jc-category-tab:hover { opacity: 0.85; color: #fff; }
+    .jc-add-btn {
+        background-color: var(--jc-teal);
+        border-color: var(--jc-teal);
+        color: #fff;
+    }
+    .jc-add-btn:hover { background-color: #4A7684; border-color: #4A7684; color: #fff; }
+    .jc-best-seller-badge {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+        background-color: var(--jc-orange-dark);
+        color: #fff;
+        font-size: 0.7rem;
+        font-weight: 600;
+        padding: 0.2rem 0.6rem;
+        border-radius: var(--jc-radius-pill);
+    }
+    .jc-product-tile { position: relative; }
+    .jc-add-custom-tile {
+        border: 2px dashed #D8C9B0;
+        background-color: transparent;
+        border-radius: var(--jc-radius-sm);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        color: var(--jc-text-muted);
+        height: 100%;
+        min-height: 110px;
+        cursor: pointer;
+    }
+    .jc-add-custom-tile:hover { background-color: rgba(232, 139, 90, 0.06); }
+</style>
+{% endblock %}
 {% block content %}
+{% if messages %}
+    {% for message in messages %}
+    <div class="alert alert-danger m-3 mb-0 py-2" role="alert">{{ message }}</div>
+    {% endfor %}
+{% endif %}
+
+<div class="jc-pos-topbar d-flex justify-content-between align-items-center">
+    <div class="d-flex align-items-center gap-3">
+        {% include "partials/logo.html" with size="sm" %}
+        <div>
+            <div class="jc-cashier-name">{{ request.user.get_full_name|default:request.user.username }}</div>
+            <div class="jc-cashier-role">Cashier</div>
+        </div>
+    </div>
+    <div class="jc-branch-label">{{ request.selected_branch.name }}</div>
+    <form method="post" action="{% url 'accounts:logout' %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-jc-outline btn-sm">End Shift</button>
+    </form>
+</div>
+
 <div class="container-fluid py-3">
-    <div class="row">
-        <!-- Product catalog + search (Fig. 3-12) -->
-        <div class="col-md-7">
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <h1 class="h4 mb-0">Order</h1>
-                <a href="{% url 'pos:add_custom_product' %}" class="btn btn-outline-dark btn-sm">
-                    + Custom Item
-                </a>
-            </div>
+    <div class="row g-3">
+        <!-- Product catalog + search (Fig. 3-12, Row 3 redesign) -->
+        <div class="col-lg-7">
+            <div class="jc-card p-3">
+                <input type="text" id="product-search" class="form-control mb-3"
+                       placeholder="Search products..." autocomplete="off">
 
-            <form method="get" class="mb-3">
-                <input type="text" name="q" value="{{ query }}" class="form-control"
-                       placeholder="Search products...">
-            </form>
-
-            <div class="list-group">
-                {% for product in products %}
-                <div class="list-group-item d-flex justify-content-between align-items-center">
-                    <div>
-                        <div>{{ product.name }}</div>
-                        <div class="text-muted small">₱{{ product.price }}</div>
-                    </div>
-                    <form method="post" action="{% url 'pos:add_catalog_item' %}">
-                        {% csrf_token %}
-                        <input type="hidden" name="product_id" value="{{ product.pk }}">
-                        <input type="hidden" name="quantity" value="1">
-                        <button type="submit" class="btn btn-primary btn-sm">Add</button>
-                    </form>
+                <div class="d-flex gap-2 mb-3 overflow-auto pb-1" id="category-tabs">
+                    <a href="?" class="jc-category-tab {% if not selected_category %}active{% endif %}">All</a>
+                    {% for value, label in categories %}
+                    <a href="?category={{ value }}"
+                       class="jc-category-tab {% if selected_category == value %}active{% endif %}">
+                        {{ label }}
+                    </a>
+                    {% endfor %}
                 </div>
-                {% empty %}
-                <p class="text-muted">No products found.</p>
-                {% endfor %}
+
+                <div class="row row-cols-2 row-cols-md-3 row-cols-xl-4 g-3" id="product-grid">
+                    <div class="col">
+                        <div class="jc-add-custom-tile" data-bs-toggle="modal" data-bs-target="#addCustomModal">
+                            <div class="fs-3 mb-1">+</div>
+                            <div>Add Custom</div>
+                        </div>
+                    </div>
+                    {% for product in products %}
+                    <div class="col product-tile-wrap" data-name="{{ product.name|lower }}">
+                        <div class="jc-product-tile jc-product-card h-100">
+                            {% if product.is_best_seller %}
+                            <span class="jc-best-seller-badge">Best Seller</span>
+                            {% endif %}
+                            <div class="fw-semibold mb-1">{{ product.name }}</div>
+                            <div class="jc-price mb-2">₱{{ product.price }}+</div>
+                            <form method="post" action="{% url 'pos:add_catalog_item' %}">
+                                {% csrf_token %}
+                                <input type="hidden" name="product_id" value="{{ product.pk }}">
+                                <input type="hidden" name="quantity" value="1">
+                                <button type="submit" class="btn jc-add-btn btn-sm">Add</button>
+                            </form>
+                        </div>
+                    </div>
+                    {% empty %}
+                    <p class="text-muted">No products found in this category.</p>
+                    {% endfor %}
+                </div>
+                <p class="text-muted small mt-2 mb-0 d-none" id="no-search-results">No products match your search.</p>
             </div>
         </div>
 
         <!-- Order summary (current draft transaction) -->
-        <div class="col-md-5">
-            <h2 class="h5">Current Order</h2>
-            <div class="list-group mb-3">
-                {% for item in draft.items.all %}
-                <div class="list-group-item">
-                    <div class="d-flex justify-content-between">
-                        <div>
-                            <strong>{{ item.display_name }}</strong> &times; {{ item.quantity }}
-                            {% if item.customizations.size or item.customizations.sugar_level %}
-                                <div class="small text-muted">
-                                    {{ item.customizations.size }}
-                                    {% if item.customizations.sugar_level %} &middot; {{ item.customizations.sugar_level }}{% endif %}
-                                </div>
-                            {% endif %}
-                        </div>
-                        <div class="text-end">
-                            <div>₱{{ item.subtotal }}</div>
-                            <a href="{% url 'pos:customize_item' item.pk %}" class="small">Edit</a>
-                            &middot;
-                            <form method="post" action="{% url 'pos:remove_item' item.pk %}" class="d-inline">
-                                {% csrf_token %}
-                                <button type="submit" class="btn btn-link btn-sm p-0 text-danger">Remove</button>
-                            </form>
+        <div class="col-lg-5">
+            <div class="jc-card p-3">
+                <h2 class="h5 mb-3">Current Order</h2>
+                <div class="list-group mb-3">
+                    {% for item in draft.items.all %}
+                    <div class="list-group-item border-0 px-0">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <strong>{{ item.display_name }}</strong> &times; {{ item.quantity }}
+                                {% if item.customizations.size or item.customizations.sugar_level %}
+                                    <div class="small text-muted">
+                                        {{ item.customizations.size }}
+                                        {% if item.customizations.sugar_level %} &middot; {{ item.customizations.sugar_level }}{% endif %}
+                                    </div>
+                                {% endif %}
+                            </div>
+                            <div class="text-end">
+                                <div>₱{{ item.subtotal }}</div>
+                                <a href="{% url 'pos:customize_item' item.pk %}" class="small">Edit</a>
+                                &middot;
+                                <form method="post" action="{% url 'pos:remove_item' item.pk %}" class="d-inline">
+                                    {% csrf_token %}
+                                    <button type="submit" class="btn btn-link btn-sm p-0 text-danger">Remove</button>
+                                </form>
+                            </div>
                         </div>
                     </div>
+                    {% empty %}
+                    <p class="text-muted">No items yet.</p>
+                    {% endfor %}
                 </div>
-                {% empty %}
-                <p class="text-muted">No items yet.</p>
-                {% endfor %}
+                <div class="d-flex justify-content-between fw-bold fs-5 mb-3">
+                    <span>Total</span>
+                    <span>₱{{ draft.total_amount }}</span>
+                </div>
+                {% if draft.items.exists %}
+                <a href="{% url 'pos:payment' %}" class="btn btn-success btn-lg w-100">
+                    Proceed to Payment
+                </a>
+                {% else %}
+                <button type="button" class="btn btn-success btn-lg w-100" disabled>
+                    Proceed to Payment
+                </button>
+                <p class="text-muted small text-center mt-2 mb-0">Add an item to continue.</p>
+                {% endif %}
             </div>
-            <div class="d-flex justify-content-between fw-bold fs-5 mb-3">
-                <span>Total</span>
-                <span>₱{{ draft.total_amount }}</span>
-            </div>
-            {% if draft.items.exists %}
-            <a href="{% url 'pos:payment' %}" class="btn btn-success btn-lg w-100">
-                Proceed to Payment
-            </a>
-            {% else %}
-            <button type="button" class="btn btn-success btn-lg w-100" disabled>
-                Proceed to Payment
-            </button>
-            <p class="text-muted small text-center mt-2 mb-0">Add an item to continue.</p>
-            {% endif %}
         </div>
     </div>
 </div>
+
+<!-- Add Custom Product modal (Fig. 3-13, Row 3 redesign: modal not a separate page) -->
+<div class="modal fade" id="addCustomModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add Custom Product</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" action="{% url 'pos:add_custom_product' %}">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Product Name</label>
+                        <input type="text" name="name" class="form-control" placeholder="Enter product name" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label fw-semibold">Price (₱)</label>
+                        <input type="number" name="price" id="custom-price" class="form-control"
+                               step="0.01" min="0" placeholder="0.00" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-jc-primary w-100" id="custom-add-btn">
+                        Add to Cart - ₱0.00
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+(function () {
+    const searchInput = document.getElementById("product-search");
+    const tiles = document.querySelectorAll(".product-tile-wrap");
+    const noResults = document.getElementById("no-search-results");
+
+    searchInput.addEventListener("input", function () {
+        const term = searchInput.value.trim().toLowerCase();
+        let anyVisible = false;
+        tiles.forEach(function (tile) {
+            const matches = !term || tile.dataset.name.includes(term);
+            tile.classList.toggle("d-none", !matches);
+            if (matches) anyVisible = true;
+        });
+        noResults.classList.toggle("d-none", anyVisible || tiles.length === 0);
+    });
+
+    const priceInput = document.getElementById("custom-price");
+    const addBtn = document.getElementById("custom-add-btn");
+    priceInput.addEventListener("input", function () {
+        const value = parseFloat(priceInput.value) || 0;
+        addBtn.textContent = "Add to Cart - \u20b1" + value.toFixed(2);
+    });
+
+    {% if messages %}
+    var addCustomModal = new bootstrap.Modal(document.getElementById("addCustomModal"));
+    addCustomModal.show();
+    {% endif %}
+})();
+</script>
 {% endblock %}
