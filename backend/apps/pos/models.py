@@ -14,6 +14,46 @@ from django.conf import settings
 from django.db import models
 
 
+class DiscountCategory(models.TextChoices):
+    """Per-item discount categories shown in the Product Customization
+    modal (Row 3 redesign) -- matches the reference's exact dropdown
+    list. Worth confirming the real PH discount-category codes (SC2,
+    PWD2, CSC, CPWD, EMP, SD) with your adviser/BIR requirements, since
+    these carry real legal/tax significance beyond just a UI label."""
+
+    NO_DISCOUNT = "NO_DISCOUNT", "No Discount"
+    SC2 = "SC2", "SC 2"
+    PWD2 = "PWD2", "PWD 2"
+    FAMILY = "FAMILY", "Family"
+    CSC = "CSC", "CSC"
+    CPWD = "CPWD", "CPWD"
+    EMP = "EMP", "EMP"
+    SPECIAL_DISCOUNT = "SPECIAL_DISCOUNT", "Special Discount"
+    SD = "SD", "SD"
+
+
+class DiscountType(models.TextChoices):
+    AMOUNT = "AMOUNT", "Amount (\u20b1)"
+    PERCENT = "PERCENT", "Percent (%)"
+
+
+class AddOn(models.Model):
+    """A priced extra for beverage customization (Row 3 redesign) --
+    global across all beverage products (Extra Espresso Shot, Oat Milk,
+    etc.), not per-product, matching the reference's consistent add-on
+    list regardless of which drink was being customized."""
+
+    name = models.CharField(max_length=100)
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return f"{self.name} (+\u20b1{self.price})"
+
+
 class SalesTransaction(models.Model):
     class Status(models.TextChoices):
         DRAFT = "DRAFT", "Draft"

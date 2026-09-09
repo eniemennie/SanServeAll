@@ -14,7 +14,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from apps.accounts.permissions import pos_unlock_required
 from apps.inventory.models import Product
 from apps.pos import printing, services
-from apps.pos.models import SalesItem, SalesTransaction
+from apps.pos.models import AddOn, DiscountCategory, DiscountType, SalesItem, SalesTransaction
 
 
 def _get_draft(request):
@@ -48,6 +48,9 @@ def pos_ordering(request):
             "selected_category": category,
             "categories": Product.Category.choices,
             "draft": draft,
+            "addons": AddOn.objects.filter(is_active=True),
+            "discount_categories": DiscountCategory.choices,
+            "discount_types": DiscountType.choices,
         },
     )
 
@@ -59,6 +62,30 @@ def add_catalog_item(request):
         services.add_catalog_item(
             draft, request.POST.get("product_id"), request.POST.get("quantity", 1)
         )
+    return redirect("pos:ordering")
+
+
+@pos_unlock_required
+def add_customized_item(request):
+    """Product Customization modal's submit target (Fig. 3-14, Row 3
+    redesign) -- adds the item with size/sugar/add-ons/discount already
+    applied in one step, rather than add-then-edit."""
+    if request.method == "POST":
+        draft = _get_draft(request)
+        item = services.add_customized_item(
+            draft,
+            product_id=request.POST.get("product_id"),
+            quantity=request.POST.get("quantity", 1),
+            size=request.POST.get("size", ""),
+            sugar_level=request.POST.get("sugar_level", ""),
+            addon_ids=request.POST.getlist("addon_ids"),
+            discount_category=request.POST.get("discount_category", ""),
+            discount_type=request.POST.get("discount_type", ""),
+            discount_amount=request.POST.get("discount_amount") or None,
+            note=request.POST.get("note", ""),
+        )
+        if item is None:
+            messages.error(request, "That product could not be added. Please try again.")
     return redirect("pos:ordering")
 
 

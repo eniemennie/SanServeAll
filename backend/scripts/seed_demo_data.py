@@ -16,6 +16,8 @@ Or import and call run() directly from a management shell:
 
 import os
 import sys
+from decimal import Decimal
+
 import django
 
 # Allow running as a standalone script via `python scripts/seed_demo_data.py`
@@ -28,6 +30,7 @@ if not django.apps.apps.ready:
 
 from apps.accounts.models import Branch, Role  # noqa: E402
 from apps.inventory.models import Product  # noqa: E402
+from apps.pos.models import AddOn  # noqa: E402
 
 # Confirmed branch configuration (Phase 2 decision, resolved client
 # contradiction): Alangilan runs KaHero POS / batch-import mode.
@@ -68,6 +71,16 @@ ROLES = [
 # read of the menu, since the reference screenshots only show the "All"
 # tab view, not which tab each item belongs to. Worth double-checking
 # against the real menu and adjusting via Django admin if any are wrong.
+# Global add-ons for beverage customization (Row 3 redesign) -- matches
+# the reference's exact list and prices.
+ADDONS = [
+    {"name": "Extra Espresso Shot", "price": "20.00"},
+    {"name": "Oat Milk", "price": "30.00"},
+    {"name": "Vanilla Syrup", "price": "15.00"},
+    {"name": "Caramel Sauce", "price": "15.00"},
+    {"name": "Condensed Milk", "price": "10.00"},
+]
+
 PRODUCTS = [
     # Coffee
     {"name": "Americano", "price": "75.00", "category": "COFFEE"},
@@ -166,6 +179,11 @@ def run():
                 "price": data["price"],
                 "category": data.get("category", ""),
                 "is_best_seller": data.get("is_best_seller", False),
+                "large_price": (
+                    str(Decimal(data["price"]) + Decimal("10.00"))
+                    if data.get("category", "") in Product.BEVERAGE_CATEGORIES
+                    else None
+                ),
             },
         )
         status = "created" if created else "already exists"
@@ -179,6 +197,14 @@ def run():
         )
         status = "created" if created else "already exists"
         print(f"  [{status}] {material.name} (Php{material.price})")
+
+    print("\nSeeding beverage add-ons...")
+    for data in ADDONS:
+        addon, created = AddOn.objects.get_or_create(
+            name=data["name"], defaults={"price": data["price"]}
+        )
+        status = "created" if created else "already exists"
+        print(f"  [{status}] {addon.name} (+Php{addon.price})")
 
     kahero_count = Branch.objects.filter(is_kahero_branch=True).count()
     assert kahero_count == 1, (
