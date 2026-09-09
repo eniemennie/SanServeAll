@@ -16,6 +16,17 @@ class Product(models.Model):
         FINISHED_GOOD = "FINISHED_GOOD", "Finished Good"
         MATERIAL = "MATERIAL", "Raw Material"
 
+    class Category(models.TextChoices):
+        COFFEE = "COFFEE", "Coffee"
+        COFFEE_FRAPPE = "COFFEE_FRAPPE", "Coffee Frappe"
+        NON_COFFEE_FRAPPE = "NON_COFFEE_FRAPPE", "Non-Coffee Frappe"
+        SEA_SALT_SERIES = "SEA_SALT_SERIES", "Sea Salt Series"
+        SPECIALTY = "SPECIALTY", "Specialty"
+        BREAKFAST = "BREAKFAST", "Breakfast"
+        PASTA = "PASTA", "Pasta"
+        DESSERTS = "DESSERTS", "Desserts"
+        CAKES = "CAKES", "Cakes"
+
     name = models.CharField(max_length=150)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     # MATERIAL rows (flour, sugar, cups, etc. -- Phase 1 SS1.1) are not sold
@@ -24,6 +35,10 @@ class Product(models.Model):
     product_type = models.CharField(
         max_length=32, choices=ProductType.choices, default=ProductType.FINISHED_GOOD
     )
+    # Blank for MATERIAL rows -- categories are a sellable-catalog concept
+    # (Row 3 redesign, POS category tabs), materials aren't browsed there.
+    category = models.CharField(max_length=32, choices=Category.choices, blank=True)
+    is_best_seller = models.BooleanField(default=False)
     # Below this quantity_on_hand, Inventory.is_low_stock flags the item
     # (Row 6.4). Zero means "don't flag" rather than "always flag" -- a
     # product with no threshold configured yet shouldn't spam alerts.

@@ -64,8 +64,8 @@ class TestSeedDemoData:
     def test_creates_starter_finished_goods_catalog(self):
         _run_seed()
         finished_goods = Product.objects.filter(product_type=Product.ProductType.FINISHED_GOOD)
-        assert finished_goods.count() == 8
-        assert finished_goods.filter(is_active=True).count() == 8
+        assert finished_goods.count() == 28
+        assert finished_goods.filter(is_active=True).count() == 28
 
     def test_creates_starter_raw_materials(self):
         _run_seed()
@@ -75,4 +75,4 @@ class TestSeedDemoData:
     def test_running_twice_does_not_duplicate_products(self):
         _run_seed()
         _run_seed()
-        assert Product.objects.count() == 13  # 8 finished goods + 5 materials
+        assert Product.objects.count() == 33  # 28 finished goods + 5 materials
