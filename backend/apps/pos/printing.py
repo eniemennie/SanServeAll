@@ -95,7 +95,7 @@ def build_escpos_receipt(transaction):
 
     lines.append(_safe_ascii("-" * RECEIPT_WIDTH_CHARS) + b"\n")
     lines.append(_BOLD_ON)
-    lines.append(_safe_ascii(_line("TOTAL", f"{currency}{transaction.total_amount}")) + b"\n")
+    lines.append(_safe_ascii(_line("TOTAL", f"{currency}{transaction.grand_total}")) + b"\n")
     lines.append(_BOLD_OFF)
     lines.append(_safe_ascii(_line(transaction.get_payment_method_display(), "")) + b"\n")
     lines.append(_safe_ascii(_line("Paid", f"{currency}{transaction.amount_tendered}")) + b"\n")

@@ -131,31 +131,65 @@
             </div>
         </div>
 
-        <!-- Order summary (current draft transaction) -->
+        <!-- Order summary (current draft transaction, Row 3 redesign) -->
         <div class="col-lg-5">
             <div class="jc-card p-3">
-                <h2 class="h5 mb-3">Current Order</h2>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h2 class="h5 mb-0">Order Summary</h2>
+                    {% if draft.items.exists %}
+                    <form method="post" action="{% url 'pos:clear_draft' %}" class="d-inline">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-link btn-sm p-0 text-danger">Clear All</button>
+                    </form>
+                    {% endif %}
+                </div>
+
+                <p class="fw-semibold small mb-2">Select a dining option</p>
+                <div class="d-flex gap-2 mb-3">
+                    {% for value, label in dining_options %}
+                    <form method="post" action="{% url 'pos:set_dining_option' %}" class="flex-fill">
+                        {% csrf_token %}
+                        <input type="hidden" name="dining_option" value="{{ value }}">
+                        <button type="submit" class="btn w-100 {% if draft.dining_option == value %}btn-jc-primary{% else %}btn-jc-outline{% endif %}">
+                            {{ label }}
+                        </button>
+                    </form>
+                    {% endfor %}
+                </div>
+
                 <div class="list-group mb-3">
                     {% for item in draft.items.all %}
                     <div class="list-group-item border-0 px-0">
                         <div class="d-flex justify-content-between">
                             <div>
-                                <strong>{{ item.display_name }}</strong> &times; {{ item.quantity }}
-                                {% if item.customizations.size or item.customizations.sugar_level %}
-                                    <div class="small text-muted">
-                                        {{ item.customizations.size }}
-                                        {% if item.customizations.sugar_level %} &middot; {{ item.customizations.sugar_level }}{% endif %}
-                                    </div>
+                                <strong>{{ item.display_name }}</strong>
+                                {% if item.customizations.size %}<span class="text-muted">({{ item.customizations.size }})</span>{% endif %}
+                                {% if item.customizations.discount_category %}
+                                    <div class="small" style="color: var(--jc-adequate);">Discount: {{ item.customizations.discount_category }}</div>
                                 {% endif %}
+                                <div class="small text-muted">x {{ item.quantity }}</div>
                             </div>
                             <div class="text-end">
-                                <div>₱{{ item.subtotal }}</div>
-                                <a href="{% url 'pos:customize_item' item.pk %}" class="small">Edit</a>
-                                &middot;
-                                <form method="post" action="{% url 'pos:remove_item' item.pk %}" class="d-inline">
-                                    {% csrf_token %}
-                                    <button type="submit" class="btn btn-link btn-sm p-0 text-danger">Remove</button>
-                                </form>
+                                <div class="d-flex align-items-center justify-content-end gap-2 mb-1">
+                                    <span>₱{{ item.subtotal }}</span>
+                                    <form method="post" action="{% url 'pos:remove_item' item.pk %}" class="d-inline">
+                                        {% csrf_token %}
+                                        <button type="submit" class="btn btn-link btn-sm p-0 text-danger" title="Remove">&#128465;</button>
+                                    </form>
+                                </div>
+                                <div class="d-flex align-items-center gap-1 justify-content-end">
+                                    <form method="post" action="{% url 'pos:update_item_quantity' item.pk %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="quantity" value="{{ item.quantity|add:'-1' }}">
+                                        <button type="submit" class="btn btn-jc-outline btn-sm py-0 px-2">-</button>
+                                    </form>
+                                    <span class="small">{{ item.quantity }}</span>
+                                    <form method="post" action="{% url 'pos:update_item_quantity' item.pk %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="quantity" value="{{ item.quantity|add:'1' }}">
+                                        <button type="submit" class="btn btn-jc-outline btn-sm py-0 px-2">+</button>
+                                    </form>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -163,18 +197,49 @@
                     <p class="text-muted">No items yet.</p>
                     {% endfor %}
                 </div>
-                <div class="d-flex justify-content-between fw-bold fs-5 mb-3">
-                    <span>Total</span>
-                    <span>₱{{ draft.total_amount }}</span>
-                </div>
+
                 {% if draft.items.exists %}
-                <a href="{% url 'pos:payment' %}" class="btn btn-success btn-lg w-100">
-                    Proceed to Payment
-                </a>
-                {% else %}
-                <button type="button" class="btn btn-success btn-lg w-100" disabled>
-                    Proceed to Payment
-                </button>
+                <div class="small mb-3">
+                    <div class="d-flex justify-content-between">
+                        <span>Subtotal</span><span>₱{{ draft.total_amount }}</span>
+                    </div>
+                    {% if draft.item_discounts_total or draft.transaction_discount_value %}
+                    <div class="d-flex justify-content-between" style="color: var(--jc-adequate);">
+                        <span>Discounts Applied</span>
+                        <span>-₱{{ draft.item_discounts_total|add:draft.transaction_discount_value }}</span>
+                    </div>
+                    {% endif %}
+                    <div class="d-flex justify-content-between">
+                        <span>Less VAT ({{ tax_rate_percent|floatformat:0 }}%)</span><span>₱{{ vat_amount }}</span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>VAT Exempt Sales</span><span>₱{{ vat_exclusive }}</span>
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between fw-bold fs-5 mb-3">
+                    <span>Grand Total :</span>
+                    <span style="color: var(--jc-orange-dark);">₱{{ draft.grand_total }}</span>
+                </div>
+                {% endif %}
+
+                <div class="row g-2">
+                    <div class="col-4">
+                        <button type="button" class="btn btn-jc-outline w-100" data-bs-toggle="modal" data-bs-target="#transactionDiscountModal">
+                            % Discount
+                        </button>
+                    </div>
+                    <div class="col-4">
+                        <button type="button" class="btn btn-jc-teal w-100" id="save-order-btn">Save</button>
+                    </div>
+                    <div class="col-4">
+                        {% if draft.items.exists %}
+                        <a href="{% url 'pos:payment' %}" class="btn btn-jc-primary w-100">Payment</a>
+                        {% else %}
+                        <button type="button" class="btn btn-jc-primary w-100" disabled>Payment</button>
+                        {% endif %}
+                    </div>
+                </div>
+                {% if not draft.items.exists %}
                 <p class="text-muted small text-center mt-2 mb-0">Add an item to continue.</p>
                 {% endif %}
             </div>
@@ -328,6 +393,53 @@
         </div>
     </div>
 </div>
+
+<!-- Transaction-wide discount modal (Row 3 redesign, "% Discount") --
+     applies to the whole order, on top of any per-item discounts. -->
+<div class="modal fade" id="transactionDiscountModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Apply Order Discount</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" action="{% url 'pos:apply_transaction_discount' %}">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label small text-muted mb-1">Category</label>
+                        <select name="category" class="form-select">
+                            {% for value, label in discount_categories %}
+                            <option value="{{ value }}" {% if draft.transaction_discount_category == value %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label small text-muted mb-1">Type</label>
+                            <select name="discount_type" class="form-select">
+                                {% for value, label in discount_types %}
+                                <option value="{{ value }}" {% if draft.transaction_discount_type == value %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small text-muted mb-1">Amount</label>
+                            <input type="number" name="amount" class="form-control" min="0" step="0.01"
+                                   value="{{ draft.transaction_discount_amount|default:'0' }}">
+                        </div>
+                    </div>
+                    <p class="text-muted small mt-2 mb-0">
+                        Applies to the whole order, in addition to any per-item discounts already set.
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-jc-primary w-100">Apply Discount</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
 {% endblock %}
 {% block extra_js %}
 <script>
@@ -465,6 +577,25 @@
         document.getElementById("customize-qty").value = quantity;
         recomputePrice();
     });
+})();
+
+(function () {
+    // "Save" -- the draft order already persists to the database on
+    // every add/remove/quantity change, so there's no separate backend
+    // action needed here. This just gives the cashier visible feedback
+    // that the order is safely saved.
+    const saveBtn = document.getElementById("save-order-btn");
+    if (saveBtn) {
+        saveBtn.addEventListener("click", function () {
+            const original = saveBtn.textContent;
+            saveBtn.textContent = "Saved!";
+            saveBtn.disabled = true;
+            setTimeout(function () {
+                saveBtn.textContent = original;
+                saveBtn.disabled = false;
+            }, 1200);
+        });
+    }
 })();
 </script>
 {% endblock %}
