@@ -59,6 +59,19 @@
 </style>
 {% endblock %}
 {% block content %}
+<script>
+// Applied synchronously, before the rest of the page renders, so a
+// saved Dark Theme preference doesn't show a flash of the light theme
+// first while the deferred settings script (at the bottom) loads.
+(function () {
+    try {
+        const stored = JSON.parse(localStorage.getItem("sanserveall_pos_settings"));
+        if (stored && stored.darkTheme) {
+            document.body.classList.add("jc-dark");
+        }
+    } catch (e) { /* ignore -- deferred script below still applies defaults */ }
+})();
+</script>
 {% if messages %}
     {% for message in messages %}
     <div class="alert alert-danger m-3 mb-0 py-2" role="alert">{{ message }}</div>
@@ -74,16 +87,21 @@
         </div>
     </div>
     <div class="jc-branch-label">{{ request.selected_branch.name }}</div>
-    <form method="post" action="{% url 'accounts:logout' %}">
-        {% csrf_token %}
-        <button type="submit" class="btn btn-jc-outline btn-sm">End Shift</button>
-    </form>
+    <div class="d-flex align-items-center gap-2">
+        <button type="button" class="btn btn-jc-outline btn-sm" data-bs-toggle="modal" data-bs-target="#settingsModal" title="Settings">
+            &#9881;
+        </button>
+        <form method="post" action="{% url 'accounts:logout' %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-jc-outline btn-sm">End Shift</button>
+        </form>
+    </div>
 </div>
 
 <div class="container-fluid py-3">
-    <div class="row g-3">
+    <div class="row g-3" id="pos-layout-row">
         <!-- Product catalog + search (Fig. 3-12, Row 3 redesign) -->
-        <div class="col-lg-7">
+        <div class="col-lg-7 jc-catalog-col">
             <div class="jc-card p-3">
                 <input type="text" id="product-search" class="form-control mb-3"
                        placeholder="Search products..." autocomplete="off">
@@ -132,7 +150,7 @@
         </div>
 
         <!-- Order summary (current draft transaction, Row 3 redesign) -->
-        <div class="col-lg-5">
+        <div class="col-lg-5 jc-summary-col">
             <div class="jc-card p-3">
                 <div class="d-flex justify-content-between align-items-center mb-3">
                     <h2 class="h5 mb-0">Order Summary</h2>
@@ -144,17 +162,19 @@
                     {% endif %}
                 </div>
 
-                <p class="fw-semibold small mb-2">Select a dining option</p>
-                <div class="d-flex gap-2 mb-3">
-                    {% for value, label in dining_options %}
-                    <form method="post" action="{% url 'pos:set_dining_option' %}" class="flex-fill">
-                        {% csrf_token %}
-                        <input type="hidden" name="dining_option" value="{{ value }}">
-                        <button type="submit" class="btn w-100 {% if draft.dining_option == value %}btn-jc-primary{% else %}btn-jc-outline{% endif %}">
-                            {{ label }}
-                        </button>
-                    </form>
-                    {% endfor %}
+                <div id="dining-option-section">
+                    <p class="fw-semibold small mb-2">Select a dining option</p>
+                    <div class="d-flex gap-2 mb-3">
+                        {% for value, label in dining_options %}
+                        <form method="post" action="{% url 'pos:set_dining_option' %}" class="flex-fill">
+                            {% csrf_token %}
+                            <input type="hidden" name="dining_option" value="{{ value }}">
+                            <button type="submit" class="btn w-100 {% if draft.dining_option == value %}btn-jc-primary{% else %}btn-jc-outline{% endif %}">
+                                {{ label }}
+                            </button>
+                        </form>
+                        {% endfor %}
+                    </div>
                 </div>
 
                 <div class="list-group mb-3">
@@ -440,6 +460,64 @@
         </div>
     </div>
 </div>
+
+<!-- Settings modal (Row 3 redesign): Dark Theme and Left-handed Mode are
+     genuinely wired up (live preview, persisted per-device via
+     localStorage since these are terminal preferences, not per-user/
+     per-transaction data). View Mode and Item View are persisted but
+     not yet tied to a verified visual change -- no before/after
+     reference was available for those two specifically. -->
+<div class="modal fade" id="settingsModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Settings</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label small text-muted mb-1">View Mode</label>
+                    <select class="form-select" id="setting-view-mode">
+                        <option value="TABLET">Tablet</option>
+                        <option value="DESKTOP">Desktop</option>
+                        <option value="MOBILE">Mobile</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small text-muted mb-1">Item View</label>
+                    <select class="form-select" id="setting-item-view">
+                        <option value="IMAGE">Image</option>
+                        <option value="LIST">List</option>
+                    </select>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <span class="fw-semibold">Dark Theme</span>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="setting-dark-theme">
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <span class="fw-semibold">Left-handed Mode</span>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="setting-left-handed">
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <span class="fw-semibold">Show Order Type</span>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="setting-show-order-type" checked>
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="fw-semibold">Print Receipt</span>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="setting-print-receipt" checked>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 {% block extra_js %}
 <script>
@@ -596,6 +674,74 @@
             }, 1200);
         });
     }
+})();
+
+(function () {
+    // Settings (Row 3 redesign): these are per-device terminal
+    // preferences, not per-user or per-transaction data, so localStorage
+    // is the right tool here -- persists across page loads on this
+    // specific browser/device without needing a server round trip.
+    const STORAGE_KEY = "sanserveall_pos_settings";
+    const defaults = {
+        viewMode: "TABLET",
+        itemView: "IMAGE",
+        darkTheme: false,
+        leftHanded: false,
+        showOrderType: true,
+        printReceipt: true,
+    };
+
+    function loadSettings() {
+        try {
+            const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+            return Object.assign({}, defaults, stored || {});
+        } catch (e) {
+            return Object.assign({}, defaults);
+        }
+    }
+
+    function saveSettings(settings) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    }
+
+    function applySettings(settings) {
+        document.body.classList.toggle("jc-dark", settings.darkTheme);
+        const layoutRow = document.getElementById("pos-layout-row");
+        if (layoutRow) {
+            layoutRow.classList.toggle("jc-left-handed", settings.leftHanded);
+        }
+        const diningSection = document.getElementById("dining-option-section");
+        if (diningSection) {
+            diningSection.classList.toggle("d-none", !settings.showOrderType);
+        }
+    }
+
+    let settings = loadSettings();
+    applySettings(settings);
+
+    // Reflect the loaded settings in the modal's controls once it's
+    // available in the DOM.
+    document.getElementById("setting-view-mode").value = settings.viewMode;
+    document.getElementById("setting-item-view").value = settings.itemView;
+    document.getElementById("setting-dark-theme").checked = settings.darkTheme;
+    document.getElementById("setting-left-handed").checked = settings.leftHanded;
+    document.getElementById("setting-show-order-type").checked = settings.showOrderType;
+    document.getElementById("setting-print-receipt").checked = settings.printReceipt;
+
+    function bindSetting(elementId, key, isCheckbox) {
+        document.getElementById(elementId).addEventListener("change", function () {
+            settings[key] = isCheckbox ? this.checked : this.value;
+            saveSettings(settings);
+            applySettings(settings);
+        });
+    }
+
+    bindSetting("setting-view-mode", "viewMode", false);
+    bindSetting("setting-item-view", "itemView", false);
+    bindSetting("setting-dark-theme", "darkTheme", true);
+    bindSetting("setting-left-handed", "leftHanded", true);
+    bindSetting("setting-show-order-type", "showOrderType", true);
+    bindSetting("setting-print-receipt", "printReceipt", true);
 })();
 </script>
 {% endblock %}

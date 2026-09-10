@@ -52,11 +52,11 @@ body {
 
 /* --- Logo --- */
 .jc-logo-img {
-  height: 60px;
+  height: 72px;
   width: auto;
 }
 .jc-logo-img-sm {
-  height: 30px;
+  height: 34px;
 }
 
 /* --- Buttons --- */
@@ -195,3 +195,68 @@ body {
 .jc-pin-key:hover {
   background-color: var(--jc-canvas);
 }
+
+/* --- Dark Theme (Row 3 redesign, Settings modal) ---
+   Overrides the same custom properties everything else already uses,
+   so every existing component (cards, product tiles, category tabs)
+   adapts automatically without duplicating each rule. Accent colors
+   (orange, teal, sage) stay the same across both themes, matching the
+   reference -- only backgrounds/text/borders change. */
+body.jc-dark {
+  --jc-canvas: #0F1620;
+  --jc-white: #1B2532;
+  --jc-tan: #2A2118;
+  --jc-text: #E8EAED;
+  --jc-text-muted: #9AA5B1;
+  background-color: var(--jc-canvas);
+  color: var(--jc-text);
+}
+body.jc-dark .jc-card,
+body.jc-dark .jc-pos-topbar {
+  background-color: var(--jc-white);
+  border-color: #2C3847;
+}
+body.jc-dark .jc-product-card .jc-price {
+  color: #F0A876;
+}
+body.jc-dark .form-control,
+body.jc-dark .form-select {
+  background-color: #1B2532;
+  border-color: #2C3847;
+  color: var(--jc-text);
+}
+body.jc-dark .form-control::placeholder {
+  color: var(--jc-text-muted);
+}
+body.jc-dark .btn-jc-outline {
+  background-color: transparent;
+  border-color: #3A4657;
+  color: var(--jc-text);
+}
+body.jc-dark .btn-jc-outline:hover {
+  background-color: #232F3E;
+}
+body.jc-dark .list-group-item {
+  background-color: transparent;
+  color: var(--jc-text);
+}
+body.jc-dark .modal-content {
+  background-color: var(--jc-white);
+  color: var(--jc-text);
+}
+body.jc-dark .btn-close {
+  filter: invert(1);
+}
+
+/* --- Left-handed Mode (Row 3 redesign, Settings modal) ---
+   Swaps the product catalog and Order Summary panel positions using
+   Bootstrap's flex order utilities, applied via JS toggling this class
+   on the row container -- no separate template needed for the mirrored
+   layout. */
+.jc-left-handed .jc-catalog-col {
+  order: 2;
+}
+.jc-left-handed .jc-summary-col {
+  order: 1;
+}
+
