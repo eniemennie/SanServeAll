@@ -43,6 +43,21 @@ def pos_ordering(request):
     business_settings = BusinessSettings.load()
     vat_exclusive, vat_amount = draft.vat_breakdown(business_settings.tax_rate_percent)
 
+    # Row 3 redesign: a one-time flag left by a just-completed payment
+    # (see the payment view) -- popped immediately so a page refresh
+    # never re-shows the modal for an old transaction.
+    completed_transaction = None
+    completed_rawbt_url = None
+    completed_transaction_id = request.session.pop("just_completed_transaction_id", None)
+    if completed_transaction_id:
+        completed_transaction = SalesTransaction.objects.filter(
+            pk=completed_transaction_id,
+            cashier=request.user,
+            status=SalesTransaction.Status.COMPLETED,
+        ).first()
+        if completed_transaction:
+            completed_rawbt_url = printing.build_rawbt_print_url(completed_transaction)
+
     return render(
         request,
         "pos/pos_ordering.html",
@@ -60,6 +75,9 @@ def pos_ordering(request):
             "tax_rate_percent": business_settings.tax_rate_percent,
             "currency_symbol": business_settings.currency_symbol,
             "dining_options": SalesTransaction.DiningOption.choices,
+            "business_settings": business_settings,
+            "completed_transaction": completed_transaction,
+            "completed_rawbt_url": completed_rawbt_url,
         },
     )
 
@@ -201,7 +219,15 @@ def payment(request):
                 payment_method=request.POST.get("payment_method"),
                 amount_tendered=request.POST.get("amount_tendered"),
             )
-            return redirect("pos:receipt", transaction_id=draft.pk)
+            # Row 3 redesign: the reference shows a Transaction Complete
+            # modal over the (now-cleared) ordering screen, not a
+            # separate page navigation. A one-time session flag tells
+            # the ordering view to auto-open it for this specific
+            # transaction on the very next request -- the standalone
+            # pos:receipt page/URL still exists separately, for later
+            # re-viewing or reprinting a past transaction by its own URL.
+            request.session["just_completed_transaction_id"] = draft.pk
+            return redirect("pos:ordering")
         except services.PaymentError as exc:
             error = str(exc)
 

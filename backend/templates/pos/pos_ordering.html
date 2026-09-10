@@ -56,6 +56,16 @@
         cursor: pointer;
     }
     .jc-add-custom-tile:hover { background-color: rgba(232, 139, 90, 0.06); }
+
+    /* Printing the Transaction Complete modal (Row 3 redesign) should
+       produce a clean receipt-only printout, not the whole POS page
+       (product grid, cart, other modals) bleeding through. */
+    @media print {
+        body * { visibility: hidden; }
+        #receipt-print-area, #receipt-print-area * { visibility: visible; }
+        #receipt-print-area { position: absolute; top: 0; left: 0; width: 100%; }
+        .jc-print-hide { display: none !important; }
+    }
 </style>
 {% endblock %}
 {% block content %}
@@ -518,6 +528,85 @@
         </div>
     </div>
 </div>
+
+{% if completed_transaction %}
+<!-- Transaction Complete modal (Row 3 redesign, Fig. 3-17) -- shown
+     once, right after a successful payment, over the now-cleared
+     ordering screen. The standalone pos:receipt page/URL still exists
+     separately for re-viewing or reprinting a past transaction later. -->
+<div class="modal fade" id="transactionCompleteModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content" id="receipt-print-area">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <span style="color: var(--jc-adequate);">&#10003;</span> Transaction Complete
+                </h5>
+            </div>
+            <div class="modal-body">
+                <div class="row g-4">
+                    <div class="col-md-5 text-center text-muted d-none d-md-block jc-print-hide">
+                        <div class="fs-1 mb-2">&#128722;</div>
+                        <p>Ordered items will be displayed here.</p>
+                    </div>
+                    <div class="col-md-7">
+                        <div class="border rounded p-3" style="border-style: dashed !important;">
+                            <div class="text-center mb-3">
+                                <div class="fw-bold fs-5">{{ business_settings.business_name }}</div>
+                                <div class="text-muted small">Official Receipt</div>
+                            </div>
+                            <div class="small text-muted mb-2">
+                                {{ completed_transaction.completed_at|date:"F j, Y" }}<br>
+                                {{ completed_transaction.completed_at|date:"h:i:s A" }}
+                            </div>
+                            <hr>
+                            {% for item in completed_transaction.items.all %}
+                            <div class="d-flex justify-content-between mb-1">
+                                <div>
+                                    <div class="fw-semibold">
+                                        {{ item.display_name }}{% if item.customizations.size %} ({{ item.customizations.size }}){% endif %}
+                                    </div>
+                                    <div class="small text-muted">
+                                        {{ business_settings.currency_symbol }}{{ item.unit_price }} x {{ item.quantity }}
+                                        {% if item.customizations.add_ons %}<br>Add-ons: {{ item.customizations.add_ons|join:", " }}{% endif %}
+                                    </div>
+                                </div>
+                                <div>{{ business_settings.currency_symbol }}{{ item.subtotal }}</div>
+                            </div>
+                            {% endfor %}
+                            <hr>
+                            <div class="d-flex justify-content-between">
+                                <span>Subtotal</span><span>{{ business_settings.currency_symbol }}{{ completed_transaction.total_amount }}</span>
+                            </div>
+                            <div class="d-flex justify-content-between fw-bold fs-5 mb-2" style="color: var(--jc-orange-dark);">
+                                <span>Total</span><span>{{ business_settings.currency_symbol }}{{ completed_transaction.grand_total }}</span>
+                            </div>
+                            <div class="d-flex justify-content-between small text-muted">
+                                <span>Payment Method</span><span>{{ completed_transaction.get_payment_method_display }}</span>
+                            </div>
+                            <div class="d-flex justify-content-between small text-muted">
+                                <span>Amount Paid</span><span>{{ business_settings.currency_symbol }}{{ completed_transaction.amount_tendered }}</span>
+                            </div>
+                            <div class="d-flex justify-content-between small text-muted mb-3">
+                                <span>Change</span><span>{{ business_settings.currency_symbol }}{{ completed_transaction.change_due }}</span>
+                            </div>
+                            <p class="text-center small text-muted mb-0">
+                                {{ business_settings.receipt_footer_text }}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer jc-print-hide">
+                <button type="button" class="btn btn-jc-teal" onclick="window.print()">Print</button>
+                {% if completed_rawbt_url %}
+                <a href="{{ completed_rawbt_url }}" class="btn btn-jc-outline">Print via Bluetooth</a>
+                {% endif %}
+                <button type="button" class="btn btn-jc-primary" data-bs-dismiss="modal">Done</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
 {% endblock %}
 {% block extra_js %}
 <script>
@@ -743,5 +832,16 @@
     bindSetting("setting-show-order-type", "showOrderType", true);
     bindSetting("setting-print-receipt", "printReceipt", true);
 })();
+
+{% if completed_transaction %}
+(function () {
+    // Row 3 redesign: shown exactly once, right after a successful
+    // payment -- the server-side session flag that triggers this is
+    // already popped by the time this page rendered, so a refresh
+    // won't reopen it for the same transaction.
+    var completeModal = new bootstrap.Modal(document.getElementById("transactionCompleteModal"));
+    completeModal.show();
+})();
+{% endif %}
 </script>
 {% endblock %}
