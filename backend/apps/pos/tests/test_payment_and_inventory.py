@@ -158,6 +158,38 @@ class TestPaymentView:
         assert response.status_code == 200
         assert b"Spanish Latte" in response.content
 
+    def test_shows_all_three_payment_modes(self, unlocked_client, cashier, branch, product):
+        """Row 3 redesign: the payment page now shows Cash/GCash/Credit
+        Card as real selectable buttons, not just Cash."""
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 1)
+
+        response = unlocked_client.get(reverse("pos:payment"))
+        assert b"Cash" in response.content
+        assert b"GCash" in response.content
+        assert b"Credit Card" in response.content
+
+    def test_shows_the_quick_amount_buttons(self, unlocked_client, cashier, branch, product):
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 1)
+
+        response = unlocked_client.get(reverse("pos:payment"))
+        for expected in (b'data-amount="1"', b'data-amount="500"', b'data-amount="1000"'):
+            assert expected in response.content
+
+    def test_shows_the_grand_total_not_just_subtotal(
+        self, unlocked_client, cashier, branch, product
+    ):
+        """Row 3 redesign: confirms the payment page displays
+        grand_total (post transaction-discount) as the actual amount
+        due, not just the raw subtotal."""
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 1)
+        services.apply_transaction_discount(draft, "SD", "AMOUNT", "20.00")
+
+        response = unlocked_client.get(reverse("pos:payment"))
+        assert str(draft.grand_total).encode() in response.content
+
     def test_successful_payment_redirects_to_receipt(
         self, unlocked_client, cashier, branch, product
     ):
