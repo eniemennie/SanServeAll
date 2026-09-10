@@ -204,3 +204,37 @@ class TestOrderSummaryDisplaysCorrectly:
     def test_no_vat_breakdown_shown_for_empty_cart(self, unlocked_client):
         response = unlocked_client.get(reverse("pos:ordering"))
         assert b"Less VAT" not in response.content
+
+
+class TestSettingsModalMarkup:
+    """Settings (Row 3 redesign) is almost entirely client-side JS/CSS
+    (localStorage persistence, live dark theme and left-handed layout) --
+    real verification for this batch is interactive browser testing, not
+    server-rendered assertions. These just confirm the modal and its
+    hooks are genuinely present in the page for that JS to attach to."""
+
+    def test_settings_gear_icon_present(self, unlocked_client):
+        response = unlocked_client.get(reverse("pos:ordering"))
+        assert b'data-bs-target="#settingsModal"' in response.content
+
+    def test_settings_modal_has_all_six_controls(self, unlocked_client):
+        response = unlocked_client.get(reverse("pos:ordering"))
+        for control_id in (
+            "setting-view-mode",
+            "setting-item-view",
+            "setting-dark-theme",
+            "setting-left-handed",
+            "setting-show-order-type",
+            "setting-print-receipt",
+        ):
+            assert control_id.encode() in response.content
+
+    def test_layout_swap_hooks_present_on_both_columns(self, unlocked_client):
+        response = unlocked_client.get(reverse("pos:ordering"))
+        assert b"jc-catalog-col" in response.content
+        assert b"jc-summary-col" in response.content
+        assert b'id="pos-layout-row"' in response.content
+
+    def test_dining_option_section_has_toggle_hook(self, unlocked_client):
+        response = unlocked_client.get(reverse("pos:ordering"))
+        assert b'id="dining-option-section"' in response.content
