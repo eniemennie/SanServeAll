@@ -38,6 +38,10 @@ def pos_ordering(request):
         products = products.filter(category=category)
 
     draft = _get_draft(request)
+    from apps.system_config.models import BusinessSettings
+
+    business_settings = BusinessSettings.load()
+    vat_exclusive, vat_amount = draft.vat_breakdown(business_settings.tax_rate_percent)
 
     return render(
         request,
@@ -51,6 +55,11 @@ def pos_ordering(request):
             "addons": AddOn.objects.filter(is_active=True),
             "discount_categories": DiscountCategory.choices,
             "discount_types": DiscountType.choices,
+            "vat_exclusive": vat_exclusive,
+            "vat_amount": vat_amount,
+            "tax_rate_percent": business_settings.tax_rate_percent,
+            "currency_symbol": business_settings.currency_symbol,
+            "dining_options": SalesTransaction.DiningOption.choices,
         },
     )
 
@@ -131,6 +140,50 @@ def remove_item(request, item_id):
     if request.method == "POST":
         draft = _get_draft(request)
         services.remove_item(draft, item_id)
+    return redirect("pos:ordering")
+
+
+@pos_unlock_required
+def update_item_quantity(request, item_id):
+    """The quick +/- stepper in the Order Summary (Row 3 redesign)."""
+    if request.method == "POST":
+        draft = _get_draft(request)
+        services.update_item_quantity(draft, item_id, request.POST.get("quantity"))
+    return redirect("pos:ordering")
+
+
+@pos_unlock_required
+def clear_draft(request):
+    """'Clear All' (Row 3 redesign)."""
+    if request.method == "POST":
+        draft = _get_draft(request)
+        services.clear_draft_items(draft)
+    return redirect("pos:ordering")
+
+
+@pos_unlock_required
+def set_dining_option(request):
+    """Dine-in / Take-out toggle (Row 3 redesign)."""
+    if request.method == "POST":
+        draft = _get_draft(request)
+        services.set_dining_option(draft, request.POST.get("dining_option", ""))
+    return redirect("pos:ordering")
+
+
+@pos_unlock_required
+def apply_transaction_discount(request):
+    """'% Discount' button (Row 3 redesign) -- a whole-order discount,
+    layered on top of any per-item discounts already applied."""
+    if request.method == "POST":
+        draft = _get_draft(request)
+        success = services.apply_transaction_discount(
+            draft,
+            category=request.POST.get("category", ""),
+            discount_type=request.POST.get("discount_type", ""),
+            amount=request.POST.get("amount") or None,
+        )
+        if not success:
+            messages.error(request, "Please enter a valid discount amount.")
     return redirect("pos:ordering")
 
 

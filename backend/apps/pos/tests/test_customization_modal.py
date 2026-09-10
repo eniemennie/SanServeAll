@@ -187,7 +187,7 @@ class TestAddCustomizedItemService:
             discount_type="AMOUNT",
             discount_amount="45.00",
         )
-        assert item.customizations["discount_category"] == "SPECIAL_DISCOUNT"
+        assert item.customizations["discount_category"] == "Special Discount"
         assert item.unit_price == Decimal("50.00")  # 95 - 45
 
     def test_no_discount_category_is_not_stored(self, draft, beverage):

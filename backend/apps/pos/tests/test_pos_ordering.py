@@ -163,11 +163,15 @@ class TestPosOrdering:
         cashier had no way to check out through the real UI at all.
         Every prior test/walkthrough reached pos:payment directly via
         reverse() or a hand-built URL, never by clicking through the
-        page itself, which is exactly how this went undetected."""
+        page itself, which is exactly how this went undetected.
+
+        Button text is "Payment" (Row 3 redesign, matching the
+        reference's Order Summary), not "Proceed to Payment" as
+        originally built."""
         unlocked_client.post(reverse("pos:add_catalog_item"), {"product_id": product.pk})
         response = unlocked_client.get(reverse("pos:ordering"))
         assert reverse("pos:payment").encode() in response.content
-        assert b"Proceed to Payment" in response.content
+        assert b"Payment</a>" in response.content
 
     def test_payment_link_is_disabled_when_cart_is_empty(self, unlocked_client):
         response = unlocked_client.get(reverse("pos:ordering"))

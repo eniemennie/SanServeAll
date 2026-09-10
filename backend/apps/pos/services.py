@@ -142,6 +142,9 @@ def add_customized_item(
         AddOn.objects.filter(pk__in=addon_ids, is_active=True).values_list("name", flat=True)
     )
 
+    from apps.pos.models import DiscountCategory
+
+    discount_labels = dict(DiscountCategory.choices)
     customizations = {
         "size": (
             "Large"
@@ -151,7 +154,9 @@ def add_customized_item(
         "sugar_level": sugar_level,
         "add_ons": addon_names,
         "discount_category": (
-            discount_category if discount_category and discount_category != "NO_DISCOUNT" else ""
+            discount_labels.get(discount_category, discount_category)
+            if discount_category and discount_category != "NO_DISCOUNT"
+            else ""
         ),
         "discount_value": str(discount_value) if discount_value else "",
         "price_before_discount": str(price_before_discount),
@@ -194,6 +199,64 @@ def remove_item(draft, item_id):
     return deleted > 0
 
 
+def update_item_quantity(draft, item_id, quantity):
+    """The quick +/- stepper directly in the Order Summary (Row 3
+    redesign) -- distinct from the full Edit/customize flow, this only
+    ever touches quantity. Never lets quantity drop below 1 -- use
+    Remove for that instead, matching the reference's separate trash
+    icon vs. the stepper."""
+    try:
+        quantity = int(quantity)
+    except (TypeError, ValueError):
+        return False
+    if quantity < 1:
+        return False
+
+    updated = SalesItem.objects.filter(pk=item_id, transaction=draft).update(quantity=quantity)
+    return updated > 0
+
+
+def clear_draft_items(draft):
+    """'Clear All' (Row 3 redesign) -- empties the current draft order
+    without discarding the transaction row itself, so the cashier can
+    start over on the same draft rather than orphaning it."""
+    draft.items.all().delete()
+
+
+def set_dining_option(draft, dining_option):
+    """Dine-in / Take-out toggle (Row 3 redesign)."""
+    if dining_option not in SalesTransaction.DiningOption.values:
+        return False
+    draft.dining_option = dining_option
+    draft.save()
+    return True
+
+
+def apply_transaction_discount(draft, category, discount_type, amount):
+    """The '% Discount' button (Row 3 redesign) -- a discount applied to
+    the WHOLE order at once, layered on top of (not instead of) any
+    per-item discounts already applied via the customization modal."""
+    if not category or category == "NO_DISCOUNT":
+        draft.transaction_discount_category = ""
+        draft.transaction_discount_type = ""
+        draft.transaction_discount_amount = None
+        draft.save()
+        return True
+
+    try:
+        amount = Decimal(str(amount))
+    except (InvalidOperation, TypeError):
+        return False
+    if amount < 0:
+        return False
+
+    draft.transaction_discount_category = category
+    draft.transaction_discount_type = discount_type
+    draft.transaction_discount_amount = amount
+    draft.save()
+    return True
+
+
 class PaymentError(Exception):
     """Raised for any reason a payment cannot be completed -- lets the
     view show a specific message rather than a generic failure."""
@@ -218,7 +281,7 @@ def complete_sale_payment(draft, payment_method, amount_tendered):
     except (InvalidOperation, TypeError):
         raise PaymentError("Please enter a valid amount.")
 
-    total = draft.total_amount
+    total = draft.grand_total
     if amount_tendered < total:
         raise PaymentError("Amount tendered is less than the total due.")
 
