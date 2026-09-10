@@ -190,9 +190,14 @@ class TestPaymentView:
         response = unlocked_client.get(reverse("pos:payment"))
         assert str(draft.grand_total).encode() in response.content
 
-    def test_successful_payment_redirects_to_receipt(
+    def test_successful_payment_redirects_to_ordering_with_completion_flag(
         self, unlocked_client, cashier, branch, product
     ):
+        """Row 3 redesign: successful payment now redirects back to the
+        ordering screen (which auto-opens the Transaction Complete modal
+        for this specific transaction), not to the standalone receipt
+        page directly -- that page/URL still exists separately for
+        later re-viewing or reprinting a past transaction."""
         draft = services.get_or_create_draft_transaction(cashier, branch)
         services.add_catalog_item(draft, product.pk, 1)
 
@@ -200,7 +205,29 @@ class TestPaymentView:
             reverse("pos:payment"), {"payment_method": "CASH", "amount_tendered": "200.00"}
         )
         assert response.status_code == 302
-        assert response.url == reverse("pos:receipt", kwargs={"transaction_id": draft.pk})
+        assert response.url == reverse("pos:ordering")
+
+        follow = unlocked_client.get(response.url)
+        assert b'id="transactionCompleteModal"' in follow.content
+        assert b"Spanish Latte" in follow.content
+
+    def test_completion_modal_does_not_reappear_on_a_page_refresh(
+        self, unlocked_client, cashier, branch, product
+    ):
+        """The session flag is a genuine one-time signal -- a page
+        refresh right after must not keep re-showing the modal for an
+        old, already-acknowledged transaction."""
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 1)
+        unlocked_client.post(
+            reverse("pos:payment"), {"payment_method": "CASH", "amount_tendered": "200.00"}
+        )
+
+        first_load = unlocked_client.get(reverse("pos:ordering"))
+        assert b'id="transactionCompleteModal"' in first_load.content
+
+        second_load = unlocked_client.get(reverse("pos:ordering"))
+        assert b'id="transactionCompleteModal"' not in second_load.content
 
     def test_insufficient_payment_shows_error_and_stays_on_page(
         self, unlocked_client, cashier, branch, product
