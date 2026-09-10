@@ -63,7 +63,7 @@ class SalesTransaction(models.Model):
     class PaymentMethod(models.TextChoices):
         CASH = "CASH", "Cash"
         GCASH = "GCASH", "GCash"
-        CARD = "CARD", "Card"
+        CARD = "CARD", "Credit Card"
 
     class DiningOption(models.TextChoices):
         DINE_IN = "DINE_IN", "Dine-in"
