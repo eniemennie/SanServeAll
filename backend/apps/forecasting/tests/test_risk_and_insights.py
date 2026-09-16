@@ -251,3 +251,69 @@ class TestGenerateInsightsForAllBranches:
         insight = AIInsight.objects.get(branch=branch)
         assert insight.insight_type == AIInsight.InsightType.STOCKOUT_WARNING
         assert insight.generated_by_ai is False
+
+
+class TestDemandForecastLabel:
+    """Dashboard Home batch: the High/Medium/Low KPI card label (Fig.
+    3-19). Documented as a heuristic in the service's own docstring --
+    these tests pin down exactly what that heuristic does."""
+
+    def test_no_forecast_data_returns_insufficient_data(self, branch):
+        result = services.get_demand_forecast_label(branch=branch)
+        assert result["label"] == "Insufficient Data"
+
+    def test_predicted_well_above_trailing_average_is_high(self, branch, cashier, latte):
+        from datetime import date, timedelta as td
+
+        from apps.forecasting.models import Forecast
+
+        # Trailing 30-day actual: 1 unit/day average.
+        _sale(branch, cashier, latte, quantity=1, when=timezone.now())
+
+        # Forecast predicts ~2 units/day for the next 7 days -- well
+        # above the +15% "High" threshold.
+        for i in range(7):
+            Forecast.objects.create(
+                branch=branch,
+                product=latte,
+                forecast_date=date.today() + td(days=i + 1),
+                predicted_quantity=2.0,
+                model_used="ARIMA",
+            )
+
+        result = services.get_demand_forecast_label(branch=branch)
+        assert result["label"] == "High"
+        assert result["window_days"] == 7
+
+    def test_predicted_close_to_trailing_average_is_medium(self, branch, cashier, latte):
+        from datetime import date, timedelta as td
+
+        from apps.forecasting.models import Forecast
+
+        # 30 sales of 1 unit each over the trailing 30-day window ->
+        # avg_actual_daily = 30 units / 30 days = 1.0/day.
+        for _ in range(30):
+            _sale(branch, cashier, latte, quantity=1, when=timezone.now())
+
+        # Predicting ~1.0/day for the next day is within the +/-15%
+        # "Medium" band around that same 1.0/day trailing average.
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=date.today() + td(days=1),
+            predicted_quantity=1.0,
+            model_used="ARIMA",
+        )
+
+        result = services.get_demand_forecast_label(branch=branch)
+        assert result["label"] == "Medium"
+
+
+def _sale(branch, cashier, product, quantity, when):
+    txn = SalesTransaction.objects.create(
+        branch=branch, cashier=cashier, status=SalesTransaction.Status.COMPLETED, completed_at=when
+    )
+    SalesItem.objects.create(
+        transaction=txn, product=product, unit_price="10.00", quantity=quantity
+    )
+    return txn

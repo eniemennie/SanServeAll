@@ -5,7 +5,11 @@ sides happen atomically against the SAME Inventory model Week 5/6 already
 built (branch=commissary), rather than a separate stock-tracking system.
 """
 
+from datetime import timedelta
+
 from django.db import transaction as db_transaction
+from django.db.models import Sum
+from django.utils import timezone
 
 from apps.inventory.models import Inventory, InventoryTransaction, Product
 from apps.production.models import IngredientUsage, ProductionRecord
@@ -22,6 +26,24 @@ def get_commissary_branch():
     from apps.accounts.models import Branch
 
     return Branch.objects.filter(is_commissary=True).first()
+
+
+def get_total_output(days=30):
+    """Total units produced across all completed runs in the window --
+    the Dashboard Home Production Output KPI card (Fig. 3-19).
+
+    Deliberately system-wide, not per-branch: ProductionRecord has no
+    branch FK because production genuinely happens only at the single
+    commissary and is distributed to branches afterward (Phase 1 §1.1) --
+    there's no honest way to attribute one production run to one branch.
+    This total is real; it just isn't branch-filterable the way Revenue
+    or Orders are on the same dashboard.
+    """
+    since = timezone.now() - timedelta(days=days)
+    total = ProductionRecord.objects.filter(
+        status=ProductionRecord.Status.COMPLETED, created_at__gte=since
+    ).aggregate(total=Sum("quantity_produced"))["total"]
+    return total or 0
 
 
 def record_production(commissary_staff, product_id, quantity_produced, ingredient_rows, **extra):

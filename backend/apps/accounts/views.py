@@ -11,6 +11,7 @@ cashier-PIN, and 2FA flow on top of an already-authenticated session.
 
 import base64
 import io
+import json
 
 import qrcode
 from django.contrib.auth import authenticate
@@ -37,6 +38,11 @@ from apps.accounts.services import (
     verify_cashier_pin,
     verify_cashier_pin_with_lockout,
 )
+from apps.analytics import services as analytics_services
+from apps.forecasting import services as forecasting_services
+from apps.forecasting.models import AIInsight
+from apps.inventory import services as inventory_services
+from apps.production import services as production_services
 
 
 class SanServeAllLoginView(auth_views.LoginView):
@@ -336,27 +342,90 @@ def regenerate_backup_codes(request):
 
 @role_required(Role.OWNER_ADMIN)
 @otp_required(login_url="accounts:admin_login")
-def admin_dashboard_placeholder(request):
-    """Temporary Owner/Admin landing page. Protected by BOTH role (only
-    OWNER_ADMIN) and OTP verification (must have completed 2FA this
-    session) -- demonstrates the full enforcement chain this batch builds:
-    Admin Login -> 2FA -> Branch Selection -> here.
+def admin_dashboard(request):
+    """Dashboard Home (Fig. 3-19/3-28): Branch Performance, KPI cards,
+    Sales Analytics + Top Products, Resource Monitoring, and the
+    AI-Powered Insights feed. Protected by BOTH role (only OWNER_ADMIN)
+    and OTP verification (must have completed 2FA this session) --
+    demonstrates the full enforcement chain built in the Admin Shell
+    batch: Admin Login -> 2FA -> Branch Selection -> here.
 
-    Now rendered inside admin_base.html (the shared Admin Shell), so it
-    also carries the branch dropdown context every shell-wrapped screen
-    needs. Real dashboard content (Branch Performance, Sales Analytics,
-    etc.) replaces this placeholder body in the next batch -- the shell
-    itself is what this batch delivers.
+    Renamed from admin_dashboard_placeholder now that it renders real
+    content rather than a placeholder; the URL name (accounts:admin_
+    dashboard) is unchanged, so nothing else needed updating for the
+    rename beyond urls.py's own view reference.
+
+    KPI revenue toggles (?additional=/?exclude_discounts=/?exclude_vat=)
+    default to matching the reference screenshot's own default toggle
+    states: Include Additional Sales ON, Exclude Discounts OFF, Exclude
+    VAT OFF.
     """
     branch_id = request.GET.get("branch")
     selected_branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
 
+    include_additional_sales = request.GET.get("additional", "1") == "1"
+    exclude_discounts = request.GET.get("exclude_discounts") == "1"
+    exclude_vat = request.GET.get("exclude_vat") == "1"
+
+    summary = analytics_services.get_sales_summary_with_toggles(
+        branch=selected_branch,
+        include_additional_sales=include_additional_sales,
+        exclude_discounts=exclude_discounts,
+        exclude_vat=exclude_vat,
+    )
+    branch_performance = analytics_services.get_branch_performance()
+    top_products = analytics_services.get_top_products(branch=selected_branch)
+    forecast_label = forecasting_services.get_demand_forecast_label(branch=selected_branch)
+    resource_status = inventory_services.get_resource_status_summary(branch=selected_branch)
+    production_output = production_services.get_total_output()
+    insights = (
+        AIInsight.objects.filter(branch=selected_branch)
+        if selected_branch
+        else AIInsight.objects.all()[:5]
+    )
+    critical_alerts = forecasting_services.get_critical_alerts(selected_branch)
+    slow_moving = forecasting_services.get_slow_moving_products(selected_branch)
+    peak_hour = forecasting_services.get_peak_hour(selected_branch)
+    anomalies = forecasting_services.detect_unusual_patterns(selected_branch)
+
+    if selected_branch:
+        trend = analytics_services.get_weekly_sales_trend(branch=selected_branch)
+        trend_chart = {
+            "week_labels": [t["week_label"] for t in trend],
+            "series": [
+                {
+                    "branch_name": selected_branch.name,
+                    "revenue": [t["revenue"] for t in trend],
+                }
+            ],
+        }
+    else:
+        trend_chart = analytics_services.get_weekly_sales_trend_by_branch()
+
     return render(
         request,
-        "accounts/admin_dashboard_placeholder.html",
+        "accounts/admin_dashboard.html",
         {
             "active_nav": "dashboard",
             "branches": Branch.objects.filter(is_active=True, is_commissary=False),
             "selected_branch": selected_branch,
+            "summary": summary,
+            "branch_performance": branch_performance,
+            "top_products": top_products,
+            "forecast_label": forecast_label,
+            "resource_status": resource_status,
+            "production_output": production_output,
+            "insights": insights,
+            "critical_alerts": critical_alerts,
+            "slow_moving": slow_moving,
+            "peak_hour": peak_hour,
+            "anomalies": anomalies,
+            "trend_chart_json": json.dumps(trend_chart),
+            "top_products_json": json.dumps(
+                [{"name": p["product__name"], "units": p["units_sold"]} for p in top_products]
+            ),
+            "include_additional_sales": include_additional_sales,
+            "exclude_discounts": exclude_discounts,
+            "exclude_vat": exclude_vat,
         },
     )

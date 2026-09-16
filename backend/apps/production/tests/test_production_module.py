@@ -248,3 +248,47 @@ class TestBatchManagementView:
 
         flour_inventory = Inventory.objects.get(branch=commissary, product=flour)
         assert flour_inventory.quantity_on_hand == 45  # still deducted, not restored
+
+
+class TestGetTotalOutput:
+    """Dashboard Home batch: the Production Output KPI card (Fig. 3-19).
+    Deliberately system-wide -- see the service function's own docstring
+    for why a per-branch figure isn't honestly derivable."""
+
+    def test_sums_completed_runs_in_the_window(
+        self, commissary, commissary_staff, cake, flour, sugar
+    ):
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=20,
+            ingredient_rows=[
+                {"material_id": flour.pk, "quantity_used": 5},
+                {"material_id": sugar.pk, "quantity_used": 5},
+            ],
+        )
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=15,
+            ingredient_rows=[
+                {"material_id": flour.pk, "quantity_used": 3},
+                {"material_id": sugar.pk, "quantity_used": 3},
+            ],
+        )
+
+        assert services.get_total_output() == 35
+
+    def test_excludes_non_completed_runs(self, commissary, commissary_staff, cake, flour, sugar):
+        record = services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 2}],
+            status=ProductionRecord.Status.PENDING,
+        )
+        assert record.status == ProductionRecord.Status.PENDING
+        assert services.get_total_output() == 0
+
+    def test_no_production_yet_returns_zero_not_none(self):
+        assert services.get_total_output() == 0

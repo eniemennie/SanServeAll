@@ -13,6 +13,7 @@ from django.utils import timezone
 from apps.inventory.services import get_branch_inventory
 from apps.pos.models import SalesItem, SalesTransaction
 from apps.production.models import IngredientUsage, ProductionRecord
+from apps.system_config.models import BusinessSettings
 
 
 def get_sales_summary(branch=None, days=30):
@@ -75,6 +76,162 @@ def get_weekly_sales_trend(branch=None, weeks=8):
         trend.append({"week_label": week_start.strftime("%b %d"), "revenue": float(revenue)})
 
     return trend
+
+
+def get_weekly_sales_trend_by_branch(weeks=8):
+    """Same window/shape as get_weekly_sales_trend, but broken out per
+    branch -- feeds the Dashboard Home Sales Analytics chart (Fig. 3-19),
+    which plots Batangas/Lipa/Alangilan as three separate lines rather
+    than one aggregate line. Only meaningful for "All Branches"; when a
+    specific branch is selected, the Dashboard reuses the single-line
+    get_weekly_sales_trend instead."""
+    from apps.accounts.models import Branch
+
+    now = timezone.now()
+    branches = list(Branch.objects.filter(is_active=True, is_commissary=False))
+    week_starts = []
+    per_branch_revenue = {b.pk: [] for b in branches}
+
+    for week_offset in range(weeks - 1, -1, -1):
+        week_end = now - timedelta(weeks=week_offset)
+        week_start = week_end - timedelta(weeks=1)
+        week_starts.append(week_start.strftime("%b %d"))
+
+        for b in branches:
+            revenue = SalesItem.objects.filter(
+                transaction__branch=b,
+                transaction__status=SalesTransaction.Status.COMPLETED,
+                transaction__completed_at__gte=week_start,
+                transaction__completed_at__lt=week_end,
+            ).aggregate(total=Sum(F("quantity") * F("unit_price")))["total"] or Decimal("0")
+            per_branch_revenue[b.pk].append(float(revenue))
+
+    return {
+        "week_labels": week_starts,
+        "series": [{"branch_name": b.name, "revenue": per_branch_revenue[b.pk]} for b in branches],
+    }
+
+
+def get_branch_performance(days=30):
+    """Per-branch Revenue / Units Sold / Orders for the Dashboard Home
+    Branch Performance cards (Fig. 3-19's three branch cards).
+
+    NOTE: the reference design's third figure is labeled "Production",
+    but ProductionRecord has no branch FK -- production genuinely is
+    commissary-wide, not per-branch (the manuscript itself describes one
+    centralized commissary distributing to all branches; a single
+    production batch can't honestly be attributed to one branch). Rather
+    than invent a number, Units Sold is used as the real,
+    per-branch-derivable substitute for that third figure.
+    """
+    from apps.accounts.models import Branch
+
+    since = timezone.now() - timedelta(days=days)
+    results = []
+    for branch in Branch.objects.filter(is_active=True, is_commissary=False):
+        transactions = SalesTransaction.objects.filter(
+            branch=branch, status=SalesTransaction.Status.COMPLETED, completed_at__gte=since
+        )
+        agg = SalesItem.objects.filter(transaction__in=transactions).aggregate(
+            revenue=Sum(F("quantity") * F("unit_price")), units=Sum("quantity")
+        )
+        results.append(
+            {
+                "branch": branch,
+                "revenue": agg["revenue"] or Decimal("0"),
+                "units_sold": agg["units"] or 0,
+                "orders": transactions.count(),
+            }
+        )
+    return results
+
+
+def get_sales_summary_with_toggles(
+    branch=None,
+    days=30,
+    include_additional_sales=True,
+    exclude_discounts=False,
+    exclude_vat=False,
+):
+    """Dashboard Home's Total Revenue KPI card (Fig. 3-19), with the
+    three real toggles the reference design shows underneath it:
+
+    - include_additional_sales: SalesItem rows with product=None are
+      off-menu/custom items (Fig. 3-13's "Add Custom Product"). Toggling
+      this off excludes them, counting catalog products only.
+    - exclude_discounts: when on, revenue is the pre-transaction-discount
+      subtotal (item.subtotal sum) rather than the post-discount
+      grand_total-equivalent figure. Per-item discounts (Batch 2's
+      customization modal) are already baked into each item's unit_price
+      and can't be honestly un-applied without the original list price,
+      so this only reverses the transaction-wide discount
+      (SalesTransaction.transaction_discount_*), matching the codebase's
+      own distinction between the two discount types.
+    - exclude_vat: strips the VAT portion out using the real configured
+      tax_rate_percent (BusinessSettings, the same singleton the POS
+      checkout screen uses), via the same VAT-inclusive-price formula as
+      SalesTransaction.vat_breakdown.
+
+    This is a separate function from get_sales_summary rather than added
+    toggles on it, since get_sales_summary is already used (unmodified)
+    by the existing analytics:sales_dashboard screen and its tests --
+    changing its behavior would be a real regression risk for no benefit
+    to that screen, which doesn't have these toggles.
+    """
+    since = timezone.now() - timedelta(days=days)
+    transactions = SalesTransaction.objects.filter(
+        status=SalesTransaction.Status.COMPLETED, completed_at__gte=since
+    ).prefetch_related("items")
+    if branch is not None:
+        transactions = transactions.filter(branch=branch)
+
+    tax_rate = BusinessSettings.load().tax_rate_percent
+    vat_divisor = Decimal("1") + (tax_rate / Decimal("100"))
+
+    total_revenue = Decimal("0.00")
+    total_units = 0
+    transaction_count = 0
+
+    for txn in transactions:
+        items = list(txn.items.all())
+        if not include_additional_sales:
+            items = [i for i in items if i.product_id is not None]
+        if not items and not include_additional_sales:
+            # Every item in this transaction was a custom/off-menu sale
+            # and we're excluding those -- nothing left to count from it.
+            continue
+
+        transaction_count += 1
+        subtotal = sum((i.subtotal for i in items), Decimal("0.00"))
+        total_units += sum(i.quantity for i in items)
+
+        if exclude_discounts:
+            amount = subtotal
+        else:
+            if txn.transaction_discount_amount and txn.transaction_discount_category:
+                if txn.transaction_discount_type == "PERCENT":
+                    discount_value = subtotal * (txn.transaction_discount_amount / Decimal("100"))
+                else:
+                    discount_value = txn.transaction_discount_amount
+                discount_value = min(discount_value, subtotal)
+            else:
+                discount_value = Decimal("0.00")
+            amount = subtotal - discount_value
+
+        if exclude_vat:
+            amount = amount / vat_divisor
+
+        total_revenue += amount
+
+    average_daily_revenue = (total_revenue / days) if days else Decimal("0.00")
+
+    return {
+        "total_revenue": total_revenue.quantize(Decimal("0.01")),
+        "total_transactions": transaction_count,
+        "total_units_sold": total_units,
+        "average_daily_revenue": average_daily_revenue.quantize(Decimal("0.01")),
+        "days": days,
+    }
 
 
 def get_top_products(branch=None, days=30, limit=5):

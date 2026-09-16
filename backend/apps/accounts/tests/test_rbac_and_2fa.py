@@ -257,4 +257,9 @@ class TestAdminDashboardEnforcement:
 
         dashboard_response = client.get(reverse("accounts:admin_dashboard"))
         assert dashboard_response.status_code == 200
-        assert b"Admin Dashboard" in dashboard_response.content
+        # Was "Admin Dashboard" (the old placeholder's own heading) --
+        # updated to the real Dashboard Home content's defining heading
+        # now that the placeholder has been replaced (Dashboard Home
+        # batch). Still verifies the same thing: login -> 2FA -> the
+        # real dashboard actually renders, not just a 200 with any body.
+        assert b"Branch Performance Overview" in dashboard_response.content
