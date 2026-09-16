@@ -1,8 +1,8 @@
 """
 Tests for the Admin Shell (shared topbar + sidebar template every
 Owner/Admin screen extends). Verifies the shell itself renders correctly
-around the existing admin_dashboard_placeholder view -- the placeholder's
-own access-control behavior (role + 2FA gating) is already covered by
+around the real admin_dashboard view (Dashboard Home) -- its own
+access-control behavior (role + 2FA gating) is already covered by
 test_rbac_and_2fa.py and isn't re-tested here.
 """
 

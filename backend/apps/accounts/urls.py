@@ -22,5 +22,5 @@ urlpatterns = [
         views.regenerate_backup_codes,
         name="admin_2fa_regenerate_backup_codes",
     ),
-    path("admin/dashboard/", views.admin_dashboard_placeholder, name="admin_dashboard"),
+    path("admin/dashboard/", views.admin_dashboard, name="admin_dashboard"),
 ]

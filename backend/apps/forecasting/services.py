@@ -379,6 +379,52 @@ def get_weekly_demand_pattern(branch=None):
     ]
 
 
+def get_demand_forecast_label(branch=None):
+    """High/Medium/Low label for the Dashboard Home Demand Forecast KPI
+    card (Fig. 3-19's "Demand Forecast: High, Next 7 days").
+
+    Derived from real data: the ARIMA forecast's average predicted daily
+    units over the upcoming window (get_weekly_demand_pattern), compared
+    against the trailing 30-day actual average daily units sold
+    (apps.analytics.get_sales_summary -- imported lazily here to avoid a
+    module-level circular import between forecasting and analytics).
+
+    Thresholds (>=15% above trailing average -> High, <=15% below ->
+    Low, otherwise Medium) are a straightforward heuristic, not a
+    statistically derived cutoff -- documented as such rather than
+    presented as more rigorous than it is, same spirit as
+    get_forecasting_dashboard_summary's own avg_confidence_pct note.
+    """
+    from apps.analytics.services import get_sales_summary
+
+    pattern = get_weekly_demand_pattern(branch)
+    if not pattern:
+        return {"label": "Insufficient Data", "window_days": 0}
+
+    avg_predicted_daily = sum(p["predicted_total"] for p in pattern) / len(pattern)
+
+    trailing = get_sales_summary(branch=branch, days=30)
+    avg_actual_daily = trailing["total_units_sold"] / 30 if trailing["total_units_sold"] else 0
+
+    if avg_actual_daily == 0:
+        label = "Insufficient Data"
+    else:
+        delta_pct = (avg_predicted_daily - avg_actual_daily) / avg_actual_daily
+        if delta_pct >= 0.15:
+            label = "High"
+        elif delta_pct <= -0.15:
+            label = "Low"
+        else:
+            label = "Medium"
+
+    return {
+        "label": label,
+        "window_days": len(pattern),
+        "avg_predicted_daily": round(avg_predicted_daily, 1),
+        "avg_actual_daily": round(avg_actual_daily, 1),
+    }
+
+
 def get_resource_management_dashboard_data(days=30):
     """Combines Week 9's resource consumption summary with a category
     breakdown (for a pie chart) and restocking recommendations scoped to
