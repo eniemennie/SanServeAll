@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Record Production - SanServeAll{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h4">Record Production</h1>
+        <a href="{% url 'production:batch_management' %}" class="btn btn-outline-secondary btn-sm">View Batches</a>
+    </div>
+
+    {% if error %}
+        <div class="alert alert-danger py-2">{{ error }}</div>
+    {% endif %}
+
+    <form method="post">
+        {% csrf_token %}
+        <div class="card mb-3">
+            <div class="card-body">
+                <h2 class="h6">Finished Good Produced</h2>
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        <select name="product_id" class="form-select" required>
+                            <option value="" selected disabled>Select product</option>
+                            {% for p in finished_goods %}
+                            <option value="{{ p.pk }}">{{ p.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <input type="number" name="quantity_produced" min="1" class="form-control" placeholder="Quantity" required>
+                    </div>
+                    <div class="col-md-3">
+                        <select name="quality" class="form-select">
+                            <option value="PASS" selected>Pass</option>
+                            <option value="FAIL">Fail</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="row g-2 mt-1">
+                    <div class="col-md-6">
+                        <input type="text" name="supplier" class="form-control" placeholder="Supplier (optional)">
+                    </div>
+                    <div class="col-md-6">
+                        <select name="status" class="form-select">
+                            <option value="PENDING">Pending</option>
+                            <option value="IN_PROGRESS">In Progress</option>
+                            <option value="COMPLETED" selected>Completed</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card mb-3">
+            <div class="card-body">
+                <h2 class="h6">Ingredients Used</h2>
+                <p class="text-muted small">Enter the quantity used for each material consumed in this batch (leave blank to skip).</p>
+                {% for material in materials %}
+                <div class="row g-2 align-items-center mb-2">
+                    <div class="col-md-6">
+                        <input type="hidden" name="material_id" value="{{ material.pk }}">
+                        {{ material.name }}
+                    </div>
+                    <div class="col-md-6">
+                        <input type="number" name="quantity_used" min="0" class="form-control form-control-sm" placeholder="Quantity used">
+                    </div>
+                </div>
+                {% empty %}
+                <p class="text-muted">No raw materials in the catalog yet -- add some via Product Inventory Management.</p>
+                {% endfor %}
+            </div>
+        </div>
+
+        <textarea name="notes" class="form-control mb-3" placeholder="Notes (optional)" rows="2"></textarea>
+        <button type="submit" class="btn btn-primary">Record Production</button>
+    </form>
+</div>
+{% endblock %}

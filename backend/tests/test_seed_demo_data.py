@@ -10,6 +10,7 @@ import pytest
 from django.conf import settings
 
 from apps.accounts.models import Branch, Role
+from apps.inventory.models import Product
 
 pytestmark = pytest.mark.django_db
 
@@ -21,14 +22,21 @@ def _run_seed():
 
 
 class TestSeedDemoData:
-    def test_creates_three_branches(self):
+    def test_creates_three_customer_facing_branches_plus_commissary(self):
         _run_seed()
-        assert Branch.objects.count() == 3
+        assert Branch.objects.count() == 4
         assert set(Branch.objects.values_list("code", flat=True)) == {
             "BATANGAS",
             "ALANGILAN",
             "LIPA",
+            "COMMISSARY",
         }
+
+    def test_exactly_one_commissary_branch(self):
+        _run_seed()
+        commissary_branches = Branch.objects.filter(is_commissary=True)
+        assert commissary_branches.count() == 1
+        assert commissary_branches.first().code == "COMMISSARY"
 
     def test_exactly_one_branch_is_kahero_and_matches_settings(self):
         _run_seed()
@@ -45,10 +53,26 @@ class TestSeedDemoData:
     def test_running_twice_does_not_create_duplicates(self):
         _run_seed()
         _run_seed()
-        assert Branch.objects.count() == 3
+        assert Branch.objects.count() == 4
         assert Role.objects.count() == 3
 
     def test_running_twice_keeps_kahero_flag_correct(self):
         _run_seed()
         _run_seed()
         assert Branch.objects.filter(is_kahero_branch=True).count() == 1
+
+    def test_creates_starter_finished_goods_catalog(self):
+        _run_seed()
+        finished_goods = Product.objects.filter(product_type=Product.ProductType.FINISHED_GOOD)
+        assert finished_goods.count() == 28
+        assert finished_goods.filter(is_active=True).count() == 28
+
+    def test_creates_starter_raw_materials(self):
+        _run_seed()
+        materials = Product.objects.filter(product_type=Product.ProductType.MATERIAL)
+        assert materials.count() == 5
+
+    def test_running_twice_does_not_duplicate_products(self):
+        _run_seed()
+        _run_seed()
+        assert Product.objects.count() == 33  # 28 finished goods + 5 materials

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}KaHero Batch Import - SanServeAll{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h4">KaHero Batch Import</h1>
+        <a href="{% url 'kahero:dashboard' %}" class="btn btn-outline-secondary btn-sm">View Batch Dashboard</a>
+    </div>
+
+    <p class="text-muted small">
+        {% if kahero_branch %}
+            Uploads here are ingested for <strong>{{ kahero_branch.name }}</strong>,
+            the branch running the existing KaHero POS.
+        {% else %}
+            No branch is currently configured for KaHero batch imports.
+        {% endif %}
+    </p>
+
+    {% if error %}
+        <div class="alert alert-danger py-2">{{ error }}</div>
+    {% endif %}
+
+    <div class="card" style="max-width: 480px;">
+        <div class="card-body">
+            <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                <div class="mb-3">
+                    <label for="id_file" class="form-label">Sales Export File (.csv or .xlsx)</label>
+                    <input type="file" name="file" id="id_file" class="form-control"
+                           accept=".csv,.xlsx,.xls" required>
+                </div>
+                <button type="submit" class="btn btn-primary w-100">Upload and Process</button>
+            </form>
+        </div>
+    </div>
+
+    <p class="text-muted small mt-3">
+        Expected columns: <code>transaction_date</code>, <code>product_name</code>,
+        <code>quantity</code>, <code>unit_price</code>.
+    </p>
+</div>
+{% endblock %}

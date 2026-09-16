@@ -144,7 +144,7 @@ class TestCashierPin:
         assert response.status_code == 302
         assert response.url == reverse("accounts:select_branch")
 
-    def test_correct_pin_unlocks_and_redirects_to_dashboard(self, client, cashier):
+    def test_correct_pin_unlocks_and_redirects_to_pos(self, client, cashier):
         client.force_login(cashier)
         session = client.session
         session["selected_branch_id"] = cashier.branch_id
@@ -152,7 +152,7 @@ class TestCashierPin:
 
         response = client.post(reverse("accounts:cashier_pin"), {"pin": "1234"})
         assert response.status_code == 302
-        assert response.url == reverse("accounts:dashboard")
+        assert response.url == reverse("pos:ordering")
         assert client.session["pos_unlocked"] is True
 
     def test_incorrect_pin_does_not_unlock(self, client, cashier):

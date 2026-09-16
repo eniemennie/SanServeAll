@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Batch Management - SanServeAll{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h4">Batch Management</h1>
+        <a href="{% url 'production:record' %}" class="btn btn-primary btn-sm">Record New Production</a>
+    </div>
+
+    <table class="table table-sm table-hover bg-white">
+        <thead>
+            <tr>
+                <th>Batch</th>
+                <th>Product</th>
+                <th>Qty Produced</th>
+                <th>Ingredients Used</th>
+                <th>Supplier</th>
+                <th>Quality</th>
+                <th>Status</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for record in records %}
+            <tr>
+                <td>#{{ record.pk }}</td>
+                <td>{{ record.product.name }}</td>
+                <td>{{ record.quantity_produced }}</td>
+                <td>
+                    {% for usage in record.ingredient_usages.all %}
+                        <span class="badge bg-secondary">{{ usage.material.name }}: {{ usage.quantity_used }}</span>
+                    {% endfor %}
+                </td>
+                <td>{{ record.supplier|default:"&mdash;" }}</td>
+                <td>
+                    <span class="badge {% if record.quality == 'PASS' %}bg-success{% else %}bg-danger{% endif %}">
+                        {{ record.get_quality_display }}
+                    </span>
+                </td>
+                <td>{{ record.get_status_display }}</td>
+                <td>
+                    <a href="{% url 'production:delete_record' record.pk %}" class="btn btn-outline-danger btn-sm">Delete</a>
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="8" class="text-center text-muted py-3">No production batches recorded yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

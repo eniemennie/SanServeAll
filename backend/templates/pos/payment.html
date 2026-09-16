@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}Payment - SanServeAll{% endblock %}
+{% block extra_css %}
+<style>
+    body { background-color: var(--jc-canvas); }
+    .jc-payment-card {
+        background-color: #fff;
+        border-radius: var(--jc-radius);
+        box-shadow: 0 4px 16px rgba(30, 42, 58, 0.08);
+    }
+    .jc-amount-input {
+        font-size: 1.75rem;
+        font-weight: 600;
+        text-align: right;
+    }
+    .jc-change-display {
+        font-size: 1.5rem;
+        font-weight: 600;
+        text-align: right;
+        color: var(--jc-sage);
+    }
+    .jc-mode-btn {
+        border: 1px solid #E3E6E9;
+        border-radius: var(--jc-radius-sm);
+        background-color: #fff;
+        padding: 0.75rem;
+        font-weight: 600;
+    }
+    .jc-mode-btn.active {
+        background-color: var(--jc-orange);
+        border-color: var(--jc-orange);
+        color: #fff;
+    }
+    .jc-quick-amount {
+        border: 1px solid #E3E6E9;
+        border-radius: var(--jc-radius-sm);
+        background-color: #fff;
+        padding: 0.9rem;
+        font-weight: 600;
+    }
+    .jc-quick-amount:hover { background-color: var(--jc-canvas); }
+    .jc-quick-clear {
+        border: 1px solid var(--jc-critical);
+        color: var(--jc-critical);
+        border-radius: var(--jc-radius-sm);
+        background-color: #fff;
+        padding: 0.9rem;
+        font-weight: 600;
+    }
+</style>
+{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <div class="jc-payment-card mx-auto" style="max-width: 760px;">
+        <div class="p-4 border-bottom">
+            <h1 class="h4 mb-0">Payment</h1>
+        </div>
+
+        {% if error %}
+        <div class="alert alert-danger m-3 mb-0 py-2">{{ error }}</div>
+        {% endif %}
+
+        <div class="row g-0">
+            <div class="col-md-5 p-4 border-end">
+                <h2 class="h6 text-muted mb-3">Order Summary</h2>
+                <div class="mb-3">
+                    {% for item in draft.items.all %}
+                    <div class="d-flex justify-content-between mb-2">
+                        <div>
+                            <div class="fw-semibold">{{ item.display_name }}</div>
+                            {% if item.customizations.size %}<div class="small text-muted">{{ item.customizations.size }}</div>{% endif %}
+                            {% if item.customizations.add_ons %}<div class="small text-muted">+{{ item.customizations.add_ons|join:", +"|lower }}</div>{% endif %}
+                            <div class="small text-muted">x{{ item.quantity }}</div>
+                        </div>
+                        <div class="text-end">₱{{ item.subtotal }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <hr>
+                <div class="d-flex justify-content-between">
+                    <span>Subtotal</span><span>₱{{ draft.total_amount }}</span>
+                </div>
+                <div class="d-flex justify-content-between fw-bold fs-5" style="color: var(--jc-orange-dark);">
+                    <span>Total</span><span>₱{{ draft.grand_total }}</span>
+                </div>
+            </div>
+
+            <div class="col-md-7 p-4">
+                <form method="post" id="payment-form">
+                    {% csrf_token %}
+                    <input type="hidden" name="payment_method" id="payment-method-input" value="CASH">
+
+                    <label class="form-label fw-semibold small text-muted">Amount</label>
+                    <input type="number" name="amount_tendered" id="amount-input" class="form-control jc-amount-input mb-3"
+                           step="0.01" min="0" required autofocus>
+
+                    <label class="form-label fw-semibold small text-muted">Change</label>
+                    <div class="form-control jc-change-display mb-3" id="change-display">₱0.00</div>
+
+                    <label class="form-label fw-semibold small text-muted">Mode of Payment</label>
+                    <div class="row row-cols-3 g-2 mb-3">
+                        {% for value, label in payment_methods %}
+                        <div class="col">
+                            <button type="button" class="jc-mode-btn w-100 js-payment-mode {% if value == 'CASH' %}active{% endif %}" data-value="{{ value }}">
+                                {{ label }}
+                            </button>
+                        </div>
+                        {% endfor %}
+                    </div>
+
+                    <label class="form-label fw-semibold small text-muted">Quick Amount</label>
+                    <div class="row row-cols-4 g-2 mb-4">
+                        <div class="col"><button type="button" class="jc-quick-amount w-100 js-quick-amount" data-amount="1">1</button></div>
+                        <div class="col"><button type="button" class="jc-quick-amount w-100 js-quick-amount" data-amount="5">5</button></div>
+                        <div class="col"><button type="button" class="jc-quick-amount w-100 js-quick-amount" data-amount="10">10</button></div>
+                        <div class="col"><button type="button" class="jc-quick-amount w-100 js-quick-amount" data-amount="20">20</button></div>
+                        <div class="col"><button type="button" class="jc-quick-amount w-100 js-quick-amount" data-amount="50">50</button></div>
+                        <div class="col"><button type="button" class="jc-quick-amount w-100 js-quick-amount" data-amount="100">100</button></div>
+                        <div class="col"><button type="button" class="jc-quick-amount w-100 js-quick-amount" data-amount="200">200</button></div>
+                        <div class="col"><button type="button" class="jc-quick-amount w-100 js-quick-amount" data-amount="500">500</button></div>
+                        <div class="col"><button type="button" class="jc-quick-amount w-100 js-quick-amount" data-amount="1000">1k</button></div>
+                        <div class="col"><button type="button" class="jc-quick-clear w-100" id="clear-amount">Clear</button></div>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <a href="{% url 'pos:ordering' %}" class="btn btn-jc-outline w-50" style="background-color: var(--jc-sage); color: #fff; border-color: var(--jc-sage);">
+                            &larr; Back
+                        </a>
+                        <button type="submit" class="btn btn-jc-primary w-50">Confirm Payment</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block extra_js %}
+<script>
+(function () {
+    const total = parseFloat("{{ draft.grand_total|default:'0' }}");
+    const amountInput = document.getElementById("amount-input");
+    const changeDisplay = document.getElementById("change-display");
+
+    function recomputeChange() {
+        const amount = parseFloat(amountInput.value) || 0;
+        const change = amount - total;
+        changeDisplay.textContent = "\u20b1" + (change > 0 ? change.toFixed(2) : "0.00");
+        changeDisplay.style.color = change < 0 ? "var(--jc-critical)" : "var(--jc-sage)";
+    }
+    amountInput.addEventListener("input", recomputeChange);
+    recomputeChange();
+
+    document.querySelectorAll(".js-quick-amount").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            const current = parseFloat(amountInput.value) || 0;
+            amountInput.value = (current + parseFloat(btn.dataset.amount)).toFixed(2);
+            recomputeChange();
+        });
+    });
+
+    document.getElementById("clear-amount").addEventListener("click", function () {
+        amountInput.value = "";
+        recomputeChange();
+    });
+
+    const methodInput = document.getElementById("payment-method-input");
+    document.querySelectorAll(".js-payment-mode").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            document.querySelectorAll(".js-payment-mode").forEach(function (b) { b.classList.remove("active"); });
+            btn.classList.add("active");
+            methodInput.value = btn.dataset.value;
+        });
+    });
+})();
+</script>
+{% endblock %}

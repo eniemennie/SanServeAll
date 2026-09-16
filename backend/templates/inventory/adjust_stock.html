@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Adjust Stock - SanServeAll{% endblock %}
+{% block content %}
+<div class="container d-flex align-items-center justify-content-center" style="min-height: 100vh;">
+    <div class="card shadow-sm" style="max-width: 380px; width: 100%;">
+        <div class="card-body p-4">
+            <h1 class="h4 mb-1">Adjust Stock</h1>
+            <p class="text-muted small mb-3">
+                {{ inventory.product.name }} @ {{ inventory.branch.name }}
+                &mdash; currently {{ inventory.quantity_on_hand }} on hand
+            </p>
+
+            {% if error %}
+                <div class="alert alert-danger py-2">{{ error }}</div>
+            {% endif %}
+
+            <form method="post">
+                {% csrf_token %}
+                <div class="mb-3">
+                    <label for="id_delta" class="form-label">
+                        Adjustment (use a negative number to remove stock)
+                    </label>
+                    <input type="number" name="delta" id="id_delta" class="form-control" required autofocus>
+                </div>
+                <div class="d-flex gap-2">
+                    <a href="{% url 'inventory:monitoring' %}" class="btn btn-outline-secondary w-50">Cancel</a>
+                    <button type="submit" class="btn btn-primary w-50">Apply</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

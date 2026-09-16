@@ -11,8 +11,18 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "rest_framework",
+    "django_otp",
+    "django_otp.plugins.otp_totp",
     "apps.core",
     "apps.accounts",
+    "apps.pos",
+    "apps.inventory",
+    "apps.production",
+    "apps.kahero_integration",
+    "apps.analytics",
+    "apps.forecasting",
+    "apps.system_config",
 ]
 
 MIDDLEWARE = [
@@ -21,6 +31,8 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django_otp.middleware.OTPMiddleware",
+    "apps.core.middleware.BranchScopingMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -42,14 +54,45 @@ TEMPLATES = [
     }
 ]
 WSGI_APPLICATION = "config.wsgi.application"
+
 AUTH_USER_MODEL = "accounts.User"
+
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = "Asia/Manila"
 USE_I18N = True
 USE_TZ = True
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+    ],
+}
+
+# KaHero branch configuration (Phase 2/4 decision) -- single source of
+# truth, never hardcode this branch name anywhere else in the codebase.
 KAHERO_BRANCH = os.environ.get("KAHERO_BRANCH", "Alangilan")
+
+# Whether the APScheduler background scheduler (config/scheduler.py)
+# starts automatically when Django starts. False in config/settings/test.py
+# so the test suite never accidentally fires real scheduled jobs.
+APSCHEDULER_AUTOSTART = True
+
+# Natural-language insight generation (Row 11.2). Absent/empty in local
+# dev by default -- insight_generator.py falls back to a plain template
+# message rather than failing when this isn't configured.
+CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
 
 # Auth flow (Week 3): unauthenticated requests to a login-required view
 # land on the Login/Start Screen; a successful login's default next-step
@@ -57,3 +100,12 @@ KAHERO_BRANCH = os.environ.get("KAHERO_BRANCH", "Alangilan")
 LOGIN_URL = "accounts:login"
 LOGIN_REDIRECT_URL = "accounts:select_branch"
 LOGOUT_REDIRECT_URL = "accounts:login"
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {"class": "logging.StreamHandler"},
+    },
+    "root": {"handlers": ["console"], "level": "INFO"},
+}

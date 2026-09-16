@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Product Management - SanServeAll{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h4">Product Inventory Management</h1>
+        <a href="{% url 'inventory:monitoring' %}" class="btn btn-outline-secondary btn-sm">Back to Monitoring</a>
+    </div>
+
+    {% if error %}
+        <div class="alert alert-danger py-2">{{ error }}</div>
+    {% endif %}
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <h2 class="h6">Add Product</h2>
+            <form method="post" class="row g-2 align-items-end">
+                {% csrf_token %}
+                <div class="col-md-4">
+                    <label class="form-label small">Name</label>
+                    <input type="text" name="name" class="form-control form-control-sm" required>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">Price</label>
+                    <input type="number" name="price" step="0.01" min="0" class="form-control form-control-sm" required>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small">Type</label>
+                    <select name="product_type" class="form-select form-select-sm">
+                        {% for value, label in product_types %}
+                        <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">Reorder At</label>
+                    <input type="number" name="reorder_threshold" min="0" value="0" class="form-control form-control-sm">
+                </div>
+                <div class="col-md-1">
+                    <button type="submit" class="btn btn-primary btn-sm w-100">Add</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <table class="table table-sm table-hover bg-white">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Price</th>
+                <th>Reorder At</th>
+                <th>Active</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for product in products %}
+            <tr>
+                <td>{{ product.name }}</td>
+                <td>{{ product.get_product_type_display }}</td>
+                <td>&#8369;{{ product.price }}</td>
+                <td>{{ product.reorder_threshold }}</td>
+                <td>{% if product.is_active %}Yes{% else %}No{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

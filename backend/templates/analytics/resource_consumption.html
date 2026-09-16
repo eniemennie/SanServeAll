@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Resource Consumption - SanServeAll{% endblock %}
+{% block content %}
+<div class="container py-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h1 class="h4">Resource Consumption &amp; Operational Performance</h1>
+        <a href="{% url 'analytics:sales_dashboard' %}" class="btn btn-outline-secondary btn-sm">Back to Dashboard</a>
+    </div>
+
+    <form method="get" class="row g-2 mb-3">
+        <div class="col-auto">
+            <select name="days" class="form-select form-select-sm" onchange="this.form.submit()">
+                <option value="7" {% if days == 7 %}selected{% endif %}>Last 7 days</option>
+                <option value="30" {% if days == 30 %}selected{% endif %}>Last 30 days</option>
+                <option value="90" {% if days == 90 %}selected{% endif %}>Last 90 days</option>
+            </select>
+        </div>
+    </form>
+
+    <h2 class="h6 mt-3">Resource Consumption</h2>
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Total Materials Used</div>
+                <div class="fs-4 fw-bold">{{ consumption.total_units_used }}</div>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Total Material Cost</div>
+                <div class="fs-4 fw-bold">&#8369;{{ consumption.total_cost|floatformat:2 }}</div>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Units Produced</div>
+                <div class="fs-4 fw-bold">{{ consumption.total_produced }}</div>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Cost per Unit Produced</div>
+                <div class="fs-4 fw-bold">&#8369;{{ consumption.cost_per_unit_produced|floatformat:2 }}</div>
+            </div></div>
+        </div>
+    </div>
+
+    <table class="table table-sm table-hover bg-white mb-4">
+        <thead><tr><th>Material</th><th>Total Used</th><th>Total Cost</th></tr></thead>
+        <tbody>
+            {% for m in consumption.by_material %}
+            <tr>
+                <td>{{ m.material__name }}</td>
+                <td>{{ m.total_used }}</td>
+                <td>&#8369;{{ m.total_material_cost|floatformat:2 }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="3" class="text-center text-muted py-3">No production recorded in this window yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h2 class="h6">Operational Performance</h2>
+    <div class="row g-3">
+        <div class="col-md-4">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Batch Completion Rate</div>
+                <div class="fs-4 fw-bold">
+                    {% if operational.completion_rate is not None %}{{ operational.completion_rate|floatformat:1 }}%{% else %}&mdash;{% endif %}
+                </div>
+                <div class="text-muted small">{{ operational.completed_batches }} / {{ operational.total_batches }} batches</div>
+            </div></div>
+        </div>
+        <div class="col-md-4">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Quality Pass Rate</div>
+                <div class="fs-4 fw-bold">
+                    {% if operational.quality_pass_rate is not None %}{{ operational.quality_pass_rate|floatformat:1 }}%{% else %}&mdash;{% endif %}
+                </div>
+                <div class="text-muted small">{{ operational.passed_batches }} / {{ operational.total_batches }} batches</div>
+            </div></div>
+        </div>
+        <div class="col-md-4">
+            <div class="card text-center"><div class="card-body">
+                <div class="text-muted small">Total Batches</div>
+                <div class="fs-4 fw-bold">{{ operational.total_batches }}</div>
+            </div></div>
+        </div>
+    </div>
+    <p class="text-muted small mt-3">
+        Average production time isn't shown -- production records don't
+        currently track a start/end duration distinct from when the
+        record was created, so that figure isn't measured yet.
+    </p>
+</div>
+{% endblock %}

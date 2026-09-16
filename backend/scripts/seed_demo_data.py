@@ -16,6 +16,8 @@ Or import and call run() directly from a management shell:
 
 import os
 import sys
+from decimal import Decimal
+
 import django
 
 # Allow running as a standalone script via `python scripts/seed_demo_data.py`
@@ -27,6 +29,8 @@ if not django.apps.apps.ready:
     django.setup()
 
 from apps.accounts.models import Branch, Role  # noqa: E402
+from apps.inventory.models import Product  # noqa: E402
+from apps.pos.models import AddOn  # noqa: E402
 
 # Confirmed branch configuration (Phase 2 decision, resolved client
 # contradiction): Alangilan runs KaHero POS / batch-import mode.
@@ -36,6 +40,13 @@ BRANCHES = [
     {"name": "Alangilan", "code": "ALANGILAN", "is_kahero_branch": True},
     {"name": "Lipa City", "code": "LIPA", "is_kahero_branch": False},
 ]
+
+# The commissary (Phase 1 SS1.1) is modeled as a Branch row too (Week 8
+# decision -- reuses all existing branch-scoping infrastructure) but is
+# tracked separately from the 3 customer-facing branches above, since it
+# has its own dedicated flag rather than a fourth is_kahero_branch-style
+# entry in that list.
+COMMISSARY = {"name": "Commissary", "code": "COMMISSARY", "is_commissary": True}
 
 ROLES = [
     {
@@ -55,6 +66,82 @@ ROLES = [
     },
 ]
 
+# A richer starter catalog matching the UI reference's menu (Row 3
+# redesign) -- category assignments are my own reasonable best-effort
+# read of the menu, since the reference screenshots only show the "All"
+# tab view, not which tab each item belongs to. Worth double-checking
+# against the real menu and adjusting via Django admin if any are wrong.
+# Global add-ons for beverage customization (Row 3 redesign) -- matches
+# the reference's exact list and prices.
+ADDONS = [
+    {"name": "Extra Espresso Shot", "price": "20.00"},
+    {"name": "Oat Milk", "price": "30.00"},
+    {"name": "Vanilla Syrup", "price": "15.00"},
+    {"name": "Caramel Sauce", "price": "15.00"},
+    {"name": "Condensed Milk", "price": "10.00"},
+]
+
+PRODUCTS = [
+    # Coffee
+    {"name": "Americano", "price": "75.00", "category": "COFFEE"},
+    {"name": "Cafe Latte", "price": "85.00", "category": "COFFEE"},
+    {"name": "Spanish Latte", "price": "95.00", "category": "COFFEE", "is_best_seller": True},
+    {"name": "Mocha Latte", "price": "95.00", "category": "COFFEE"},
+    {"name": "Cappuccino", "price": "115.00", "category": "COFFEE"},
+    {"name": "Caramel Macchiato", "price": "105.00", "category": "COFFEE"},
+    {"name": "Salted Caramel Macchiato", "price": "110.00", "category": "COFFEE"},
+    # Sea Salt Series
+    {"name": "Sea Salt Latte", "price": "105.00", "category": "SEA_SALT_SERIES"},
+    {
+        "name": "Spanish Sea Salt Latte",
+        "price": "115.00",
+        "category": "SEA_SALT_SERIES",
+        "is_best_seller": True,
+    },
+    {"name": "Matcha Sea Salt Latte", "price": "115.00", "category": "SEA_SALT_SERIES"},
+    {"name": "Biscoff Sea Salt Latte", "price": "120.00", "category": "SEA_SALT_SERIES"},
+    {"name": "Biscoff Latte", "price": "115.00", "category": "SEA_SALT_SERIES"},
+    # Coffee Frappe
+    {"name": "Caramel Macchiato Frappe", "price": "115.00", "category": "COFFEE_FRAPPE"},
+    {
+        "name": "Java Chip Frappe",
+        "price": "115.00",
+        "category": "COFFEE_FRAPPE",
+        "is_best_seller": True,
+    },
+    {"name": "Mocha Frappe", "price": "110.00", "category": "COFFEE_FRAPPE"},
+    {"name": "Cookies & Cream Frappe", "price": "115.00", "category": "COFFEE_FRAPPE"},
+    {"name": "Chocolate Frappe", "price": "105.00", "category": "COFFEE_FRAPPE"},
+    # Non-Coffee Frappe
+    {"name": "Strawberry Cream Frappe", "price": "110.00", "category": "NON_COFFEE_FRAPPE"},
+    {"name": "Matcha Frappe", "price": "115.00", "category": "NON_COFFEE_FRAPPE"},
+    {"name": "Double Dutch Frappe", "price": "110.00", "category": "NON_COFFEE_FRAPPE"},
+    # Specialty
+    {"name": "Matcha Latte", "price": "105.00", "category": "SPECIALTY"},
+    # Breakfast
+    {"name": "Sans Rival Breakfast Plate", "price": "220.00", "category": "BREAKFAST"},
+    # Pasta
+    {"name": "Carbonara", "price": "185.00", "category": "PASTA"},
+    {"name": "Chicken Pesto Pasta", "price": "195.00", "category": "PASTA"},
+    {"name": "Lasagna", "price": "145.00", "category": "PASTA"},
+    # Desserts
+    {"name": "Ensaymada", "price": "45.00", "category": "DESSERTS"},
+    # Cakes
+    {"name": "Sans Rival Slice", "price": "150.00", "category": "CAKES"},
+    {"name": "Chocolate Cake Slice", "price": "140.00", "category": "CAKES"},
+]
+
+# Starter raw materials (Week 8) so Production has something real to
+# consume -- matches the manuscript's own ingredient examples (Phase 1
+# SS1.1: flour, sugar, butter, eggs, milk, flavorings).
+MATERIALS = [
+    {"name": "Flour (kg)", "price": "55.00"},
+    {"name": "Sugar (kg)", "price": "60.00"},
+    {"name": "Butter (kg)", "price": "320.00"},
+    {"name": "Eggs (tray)", "price": "210.00"},
+    {"name": "Milk (liter)", "price": "95.00"},
+]
+
 
 def run():
     print("Seeding branches...")
@@ -69,6 +156,13 @@ def run():
             f"is_kahero_branch={branch.is_kahero_branch})"
         )
 
+    print("\nSeeding commissary...")
+    commissary, created = Branch.objects.get_or_create(
+        code=COMMISSARY["code"], defaults={"name": COMMISSARY["name"], "is_commissary": True}
+    )
+    status = "created" if created else "already exists"
+    print(f"  [{status}] {commissary.name} (code={commissary.code})")
+
     print("\nSeeding roles...")
     for data in ROLES:
         role, created = Role.objects.get_or_create(
@@ -76,6 +170,41 @@ def run():
         )
         status = "created" if created else "already exists"
         print(f"  [{status}] {role.get_name_display()}")
+
+    print("\nSeeding starter product catalog...")
+    for data in PRODUCTS:
+        product, created = Product.objects.get_or_create(
+            name=data["name"],
+            defaults={
+                "price": data["price"],
+                "category": data.get("category", ""),
+                "is_best_seller": data.get("is_best_seller", False),
+                "large_price": (
+                    str(Decimal(data["price"]) + Decimal("10.00"))
+                    if data.get("category", "") in Product.BEVERAGE_CATEGORIES
+                    else None
+                ),
+            },
+        )
+        status = "created" if created else "already exists"
+        print(f"  [{status}] {product.name} (Php{product.price})")
+
+    print("\nSeeding starter raw materials...")
+    for data in MATERIALS:
+        material, created = Product.objects.get_or_create(
+            name=data["name"],
+            defaults={"price": data["price"], "product_type": Product.ProductType.MATERIAL},
+        )
+        status = "created" if created else "already exists"
+        print(f"  [{status}] {material.name} (Php{material.price})")
+
+    print("\nSeeding beverage add-ons...")
+    for data in ADDONS:
+        addon, created = AddOn.objects.get_or_create(
+            name=data["name"], defaults={"price": data["price"]}
+        )
+        status = "created" if created else "already exists"
+        print(f"  [{status}] {addon.name} (+Php{addon.price})")
 
     kahero_count = Branch.objects.filter(is_kahero_branch=True).count()
     assert kahero_count == 1, (

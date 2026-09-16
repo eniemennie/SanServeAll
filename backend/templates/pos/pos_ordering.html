@@ -1,0 +1,847 @@
+{% extends "base.html" %}
+{% block title %}POS - SanServeAll{% endblock %}
+{% block extra_css %}
+<style>
+    .jc-pos-topbar {
+        background-color: #fff;
+        border-bottom: 1px solid #EEF0F2;
+        padding: 0.85rem 1.5rem;
+    }
+    .jc-cashier-name { font-weight: 600; color: var(--jc-orange-dark); }
+    .jc-cashier-role { font-size: 0.8rem; color: var(--jc-text-muted); }
+    .jc-branch-label { font-weight: 500; color: var(--jc-text); }
+    .jc-category-tab {
+        border: none;
+        border-radius: var(--jc-radius-pill);
+        padding: 0.45rem 1.1rem;
+        font-size: 0.9rem;
+        font-weight: 500;
+        background-color: var(--jc-sage);
+        color: #fff;
+        opacity: 0.55;
+        text-decoration: none;
+        white-space: nowrap;
+    }
+    .jc-category-tab.active { opacity: 1; background-color: var(--jc-teal); }
+    .jc-category-tab:hover { opacity: 0.85; color: #fff; }
+    .jc-add-btn {
+        background-color: var(--jc-teal);
+        border-color: var(--jc-teal);
+        color: #fff;
+    }
+    .jc-add-btn:hover { background-color: #4A7684; border-color: #4A7684; color: #fff; }
+    .jc-best-seller-badge {
+        position: absolute;
+        top: 0.5rem;
+        right: 0.5rem;
+        background-color: var(--jc-orange-dark);
+        color: #fff;
+        font-size: 0.7rem;
+        font-weight: 600;
+        padding: 0.2rem 0.6rem;
+        border-radius: var(--jc-radius-pill);
+    }
+    .jc-product-tile { position: relative; }
+    .jc-add-custom-tile {
+        border: 2px dashed #D8C9B0;
+        background-color: transparent;
+        border-radius: var(--jc-radius-sm);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        color: var(--jc-text-muted);
+        height: 100%;
+        min-height: 110px;
+        cursor: pointer;
+    }
+    .jc-add-custom-tile:hover { background-color: rgba(232, 139, 90, 0.06); }
+
+    /* Printing the Transaction Complete modal (Row 3 redesign) should
+       produce a clean receipt-only printout, not the whole POS page
+       (product grid, cart, other modals) bleeding through. */
+    @media print {
+        body * { visibility: hidden; }
+        #receipt-print-area, #receipt-print-area * { visibility: visible; }
+        #receipt-print-area { position: absolute; top: 0; left: 0; width: 100%; }
+        .jc-print-hide { display: none !important; }
+    }
+</style>
+{% endblock %}
+{% block content %}
+<script>
+// Applied synchronously, before the rest of the page renders, so a
+// saved Dark Theme preference doesn't show a flash of the light theme
+// first while the deferred settings script (at the bottom) loads.
+(function () {
+    try {
+        const stored = JSON.parse(localStorage.getItem("sanserveall_pos_settings"));
+        if (stored && stored.darkTheme) {
+            document.body.classList.add("jc-dark");
+        }
+    } catch (e) { /* ignore -- deferred script below still applies defaults */ }
+})();
+</script>
+{% if messages %}
+    {% for message in messages %}
+    <div class="alert alert-danger m-3 mb-0 py-2" role="alert">{{ message }}</div>
+    {% endfor %}
+{% endif %}
+
+<div class="jc-pos-topbar d-flex justify-content-between align-items-center">
+    <div class="d-flex align-items-center gap-3">
+        {% include "partials/logo.html" with size="sm" %}
+        <div>
+            <div class="jc-cashier-name">{{ request.user.get_full_name|default:request.user.username }}</div>
+            <div class="jc-cashier-role">Cashier</div>
+        </div>
+    </div>
+    <div class="jc-branch-label">{{ request.selected_branch.name }}</div>
+    <div class="d-flex align-items-center gap-2">
+        <button type="button" class="btn btn-jc-outline btn-sm" data-bs-toggle="modal" data-bs-target="#settingsModal" title="Settings">
+            &#9881;
+        </button>
+        <form method="post" action="{% url 'accounts:logout' %}">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-jc-outline btn-sm">End Shift</button>
+        </form>
+    </div>
+</div>
+
+<div class="container-fluid py-3">
+    <div class="row g-3" id="pos-layout-row">
+        <!-- Product catalog + search (Fig. 3-12, Row 3 redesign) -->
+        <div class="col-lg-7 jc-catalog-col">
+            <div class="jc-card p-3">
+                <input type="text" id="product-search" class="form-control mb-3"
+                       placeholder="Search products..." autocomplete="off">
+
+                <div class="d-flex gap-2 mb-3 overflow-auto pb-1" id="category-tabs">
+                    <a href="?" class="jc-category-tab {% if not selected_category %}active{% endif %}">All</a>
+                    {% for value, label in categories %}
+                    <a href="?category={{ value }}"
+                       class="jc-category-tab {% if selected_category == value %}active{% endif %}">
+                        {{ label }}
+                    </a>
+                    {% endfor %}
+                </div>
+
+                <div class="row row-cols-2 row-cols-md-3 row-cols-xl-4 g-3" id="product-grid">
+                    <div class="col">
+                        <div class="jc-add-custom-tile" data-bs-toggle="modal" data-bs-target="#addCustomModal">
+                            <div class="fs-3 mb-1">+</div>
+                            <div>Add Custom</div>
+                        </div>
+                    </div>
+                    {% for product in products %}
+                    <div class="col product-tile-wrap" data-name="{{ product.name|lower }}">
+                        <div class="jc-product-tile jc-product-card h-100">
+                            {% if product.is_best_seller %}
+                            <span class="jc-best-seller-badge">Best Seller</span>
+                            {% endif %}
+                            <div class="fw-semibold mb-1">{{ product.name }}</div>
+                            <div class="jc-price mb-2">₱{{ product.price }}+</div>
+                            <button type="button" class="btn jc-add-btn btn-sm js-open-customize"
+                                    data-product-id="{{ product.pk }}"
+                                    data-name="{{ product.name }}"
+                                    data-price="{{ product.price }}"
+                                    data-large-price="{{ product.large_price|default_if_none:'' }}"
+                                    data-is-beverage="{{ product.is_beverage|yesno:'1,0' }}">
+                                Add
+                            </button>
+                        </div>
+                    </div>
+                    {% empty %}
+                    <p class="text-muted">No products found in this category.</p>
+                    {% endfor %}
+                </div>
+                <p class="text-muted small mt-2 mb-0 d-none" id="no-search-results">No products match your search.</p>
+            </div>
+        </div>
+
+        <!-- Order summary (current draft transaction, Row 3 redesign) -->
+        <div class="col-lg-5 jc-summary-col">
+            <div class="jc-card p-3">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h2 class="h5 mb-0">Order Summary</h2>
+                    {% if draft.items.exists %}
+                    <form method="post" action="{% url 'pos:clear_draft' %}" class="d-inline">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-link btn-sm p-0 text-danger">Clear All</button>
+                    </form>
+                    {% endif %}
+                </div>
+
+                <div id="dining-option-section">
+                    <p class="fw-semibold small mb-2">Select a dining option</p>
+                    <div class="d-flex gap-2 mb-3">
+                        {% for value, label in dining_options %}
+                        <form method="post" action="{% url 'pos:set_dining_option' %}" class="flex-fill">
+                            {% csrf_token %}
+                            <input type="hidden" name="dining_option" value="{{ value }}">
+                            <button type="submit" class="btn w-100 {% if draft.dining_option == value %}btn-jc-primary{% else %}btn-jc-outline{% endif %}">
+                                {{ label }}
+                            </button>
+                        </form>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div class="list-group mb-3">
+                    {% for item in draft.items.all %}
+                    <div class="list-group-item border-0 px-0">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <strong>{{ item.display_name }}</strong>
+                                {% if item.customizations.size %}<span class="text-muted">({{ item.customizations.size }})</span>{% endif %}
+                                {% if item.customizations.discount_category %}
+                                    <div class="small" style="color: var(--jc-adequate);">Discount: {{ item.customizations.discount_category }}</div>
+                                {% endif %}
+                                <div class="small text-muted">x {{ item.quantity }}</div>
+                            </div>
+                            <div class="text-end">
+                                <div class="d-flex align-items-center justify-content-end gap-2 mb-1">
+                                    <span>₱{{ item.subtotal }}</span>
+                                    <form method="post" action="{% url 'pos:remove_item' item.pk %}" class="d-inline">
+                                        {% csrf_token %}
+                                        <button type="submit" class="btn btn-link btn-sm p-0 text-danger" title="Remove">&#128465;</button>
+                                    </form>
+                                </div>
+                                <div class="d-flex align-items-center gap-1 justify-content-end">
+                                    <form method="post" action="{% url 'pos:update_item_quantity' item.pk %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="quantity" value="{{ item.quantity|add:'-1' }}">
+                                        <button type="submit" class="btn btn-jc-outline btn-sm py-0 px-2">-</button>
+                                    </form>
+                                    <span class="small">{{ item.quantity }}</span>
+                                    <form method="post" action="{% url 'pos:update_item_quantity' item.pk %}">
+                                        {% csrf_token %}
+                                        <input type="hidden" name="quantity" value="{{ item.quantity|add:'1' }}">
+                                        <button type="submit" class="btn btn-jc-outline btn-sm py-0 px-2">+</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% empty %}
+                    <p class="text-muted">No items yet.</p>
+                    {% endfor %}
+                </div>
+
+                {% if draft.items.exists %}
+                <div class="small mb-3">
+                    <div class="d-flex justify-content-between">
+                        <span>Subtotal</span><span>₱{{ draft.total_amount }}</span>
+                    </div>
+                    {% if draft.item_discounts_total or draft.transaction_discount_value %}
+                    <div class="d-flex justify-content-between" style="color: var(--jc-adequate);">
+                        <span>Discounts Applied</span>
+                        <span>-₱{{ draft.item_discounts_total|add:draft.transaction_discount_value }}</span>
+                    </div>
+                    {% endif %}
+                    <div class="d-flex justify-content-between">
+                        <span>Less VAT ({{ tax_rate_percent|floatformat:0 }}%)</span><span>₱{{ vat_amount }}</span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span>VAT Exempt Sales</span><span>₱{{ vat_exclusive }}</span>
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between fw-bold fs-5 mb-3">
+                    <span>Grand Total :</span>
+                    <span style="color: var(--jc-orange-dark);">₱{{ draft.grand_total }}</span>
+                </div>
+                {% endif %}
+
+                <div class="row g-2">
+                    <div class="col-4">
+                        <button type="button" class="btn btn-jc-outline w-100" data-bs-toggle="modal" data-bs-target="#transactionDiscountModal">
+                            % Discount
+                        </button>
+                    </div>
+                    <div class="col-4">
+                        <button type="button" class="btn btn-jc-teal w-100" id="save-order-btn">Save</button>
+                    </div>
+                    <div class="col-4">
+                        {% if draft.items.exists %}
+                        <a href="{% url 'pos:payment' %}" class="btn btn-jc-primary w-100">Payment</a>
+                        {% else %}
+                        <button type="button" class="btn btn-jc-primary w-100" disabled>Payment</button>
+                        {% endif %}
+                    </div>
+                </div>
+                {% if not draft.items.exists %}
+                <p class="text-muted small text-center mt-2 mb-0">Add an item to continue.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Custom Product modal (Fig. 3-13, Row 3 redesign: modal not a separate page) -->
+<div class="modal fade" id="addCustomModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add Custom Product</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" action="{% url 'pos:add_custom_product' %}">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Product Name</label>
+                        <input type="text" name="name" class="form-control" placeholder="Enter product name" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label fw-semibold">Price (₱)</label>
+                        <input type="number" name="price" id="custom-price" class="form-control"
+                               step="0.01" min="0" placeholder="0.00" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-jc-primary w-100" id="custom-add-btn">
+                        Add to Cart - ₱0.00
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Product Customization modal (Fig. 3-14, Row 3 redesign): size, sugar
+     level, add-ons, discount -- computed and applied in one step. Shared
+     across all products; populated via JS from the clicked product's
+     data attributes rather than rendering one modal per product. -->
+<div class="modal fade" id="customizeModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="customize-product-name">Product</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" action="{% url 'pos:add_customized_item' %}" id="customize-form">
+                {% csrf_token %}
+                <input type="hidden" name="product_id" id="customize-product-id">
+                <div class="modal-body">
+                    <div id="customize-size-section" class="mb-3 d-none">
+                        <label class="form-label fw-semibold">Size</label>
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <input type="radio" class="btn-check" name="size" id="size-small" value="SMALL" checked>
+                                <label class="btn btn-jc-outline w-100 py-2" for="size-small">
+                                    Small<br><span id="size-small-price" class="jc-price"></span>
+                                </label>
+                            </div>
+                            <div class="col-6">
+                                <input type="radio" class="btn-check" name="size" id="size-large" value="LARGE">
+                                <label class="btn btn-jc-outline w-100 py-2" for="size-large">
+                                    Large<br><span id="size-large-price" class="jc-price"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="customize-sugar-section" class="mb-3 d-none">
+                        <label class="form-label fw-semibold">Sugar Level</label>
+                        <div class="row row-cols-5 g-2">
+                            <div class="col"><input type="radio" class="btn-check" name="sugar_level" id="sugar-0" value="0%"><label class="btn btn-jc-outline w-100 py-2 btn-sm" for="sugar-0">0%</label></div>
+                            <div class="col"><input type="radio" class="btn-check" name="sugar_level" id="sugar-25" value="25%"><label class="btn btn-jc-outline w-100 py-2 btn-sm" for="sugar-25">25%</label></div>
+                            <div class="col"><input type="radio" class="btn-check" name="sugar_level" id="sugar-50" value="50%"><label class="btn btn-jc-outline w-100 py-2 btn-sm" for="sugar-50">50%</label></div>
+                            <div class="col"><input type="radio" class="btn-check" name="sugar_level" id="sugar-75" value="75%"><label class="btn btn-jc-outline w-100 py-2 btn-sm" for="sugar-75">75%</label></div>
+                            <div class="col"><input type="radio" class="btn-check" name="sugar_level" id="sugar-100" value="100%" checked><label class="btn btn-jc-outline w-100 py-2 btn-sm" for="sugar-100">100%</label></div>
+                        </div>
+                    </div>
+
+                    <div id="customize-addons-section" class="mb-3 d-none">
+                        <label class="form-label fw-semibold">Add-ons (Optional)</label>
+                        <div class="row g-2">
+                            {% for addon in addons %}
+                            <div class="col-6">
+                                <input type="checkbox" class="btn-check addon-check" name="addon_ids"
+                                       id="addon-{{ addon.pk }}" value="{{ addon.pk }}" data-price="{{ addon.price }}">
+                                <label class="btn btn-jc-outline w-100 text-start py-2" for="addon-{{ addon.pk }}">
+                                    {{ addon.name }}<br><span class="jc-price">+₱{{ addon.price }}</span>
+                                </label>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label fw-semibold">Discounts (Optional)</label>
+                        <label class="form-label small text-muted mb-1">Category</label>
+                        <select name="discount_category" id="discount-category" class="form-select mb-2">
+                            {% for value, label in discount_categories %}
+                            <option value="{{ value }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div id="discount-details" class="mb-2 d-none">
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <label class="form-label small text-muted mb-1">Type</label>
+                                <select name="discount_type" id="discount-type" class="form-select">
+                                    {% for value, label in discount_types %}
+                                    <option value="{{ value }}">{{ label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small text-muted mb-1">Amount</label>
+                                <input type="number" name="discount_amount" id="discount-amount"
+                                       class="form-control" min="0" step="0.01" value="0">
+                            </div>
+                        </div>
+                        <label class="form-label small text-muted mb-1 mt-2">Note</label>
+                        <input type="text" name="note" class="form-control" placeholder="Optional note">
+
+                        <div class="bg-light rounded p-2 mt-2 small" id="discount-breakdown">
+                            <div class="d-flex justify-content-between">
+                                <span>Original Price:</span><span id="breakdown-original">₱0.00</span>
+                            </div>
+                            <div class="d-flex justify-content-between text-danger" id="breakdown-discount-row">
+                                <span>Discount:</span><span id="breakdown-discount">-₱0.00</span>
+                            </div>
+                            <div class="d-flex justify-content-between fw-bold">
+                                <span>Price After Discount:</span><span id="breakdown-final">₱0.00</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <div class="d-flex align-items-center gap-2 w-100">
+                        <button type="button" class="btn btn-jc-outline" id="qty-minus">-</button>
+                        <input type="text" name="quantity" id="customize-qty" class="form-control text-center" value="1" style="max-width: 60px;" readonly>
+                        <button type="button" class="btn btn-jc-outline" id="qty-plus">+</button>
+                        <button type="submit" class="btn btn-jc-primary flex-grow-1" id="customize-add-btn">
+                            ADD ₱0.00
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Transaction-wide discount modal (Row 3 redesign, "% Discount") --
+     applies to the whole order, on top of any per-item discounts. -->
+<div class="modal fade" id="transactionDiscountModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Apply Order Discount</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="post" action="{% url 'pos:apply_transaction_discount' %}">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label small text-muted mb-1">Category</label>
+                        <select name="category" class="form-select">
+                            {% for value, label in discount_categories %}
+                            <option value="{{ value }}" {% if draft.transaction_discount_category == value %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label small text-muted mb-1">Type</label>
+                            <select name="discount_type" class="form-select">
+                                {% for value, label in discount_types %}
+                                <option value="{{ value }}" {% if draft.transaction_discount_type == value %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small text-muted mb-1">Amount</label>
+                            <input type="number" name="amount" class="form-control" min="0" step="0.01"
+                                   value="{{ draft.transaction_discount_amount|default:'0' }}">
+                        </div>
+                    </div>
+                    <p class="text-muted small mt-2 mb-0">
+                        Applies to the whole order, in addition to any per-item discounts already set.
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-jc-primary w-100">Apply Discount</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Settings modal (Row 3 redesign): Dark Theme and Left-handed Mode are
+     genuinely wired up (live preview, persisted per-device via
+     localStorage since these are terminal preferences, not per-user/
+     per-transaction data). View Mode and Item View are persisted but
+     not yet tied to a verified visual change -- no before/after
+     reference was available for those two specifically. -->
+<div class="modal fade" id="settingsModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Settings</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label small text-muted mb-1">View Mode</label>
+                    <select class="form-select" id="setting-view-mode">
+                        <option value="TABLET">Tablet</option>
+                        <option value="DESKTOP">Desktop</option>
+                        <option value="MOBILE">Mobile</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small text-muted mb-1">Item View</label>
+                    <select class="form-select" id="setting-item-view">
+                        <option value="IMAGE">Image</option>
+                        <option value="LIST">List</option>
+                    </select>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <span class="fw-semibold">Dark Theme</span>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="setting-dark-theme">
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <span class="fw-semibold">Left-handed Mode</span>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="setting-left-handed">
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <span class="fw-semibold">Show Order Type</span>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="setting-show-order-type" checked>
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center">
+                    <span class="fw-semibold">Print Receipt</span>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="setting-print-receipt" checked>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if completed_transaction %}
+<!-- Transaction Complete modal (Row 3 redesign, Fig. 3-17) -- shown
+     once, right after a successful payment, over the now-cleared
+     ordering screen. The standalone pos:receipt page/URL still exists
+     separately for re-viewing or reprinting a past transaction later. -->
+<div class="modal fade" id="transactionCompleteModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content" id="receipt-print-area">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <span style="color: var(--jc-adequate);">&#10003;</span> Transaction Complete
+                </h5>
+            </div>
+            <div class="modal-body">
+                <div class="row g-4">
+                    <div class="col-md-5 text-center text-muted d-none d-md-block jc-print-hide">
+                        <div class="fs-1 mb-2">&#128722;</div>
+                        <p>Ordered items will be displayed here.</p>
+                    </div>
+                    <div class="col-md-7">
+                        <div class="border rounded p-3" style="border-style: dashed !important;">
+                            <div class="text-center mb-3">
+                                <div class="fw-bold fs-5">{{ business_settings.business_name }}</div>
+                                <div class="text-muted small">Official Receipt</div>
+                            </div>
+                            <div class="small text-muted mb-2">
+                                {{ completed_transaction.completed_at|date:"F j, Y" }}<br>
+                                {{ completed_transaction.completed_at|date:"h:i:s A" }}
+                            </div>
+                            <hr>
+                            {% for item in completed_transaction.items.all %}
+                            <div class="d-flex justify-content-between mb-1">
+                                <div>
+                                    <div class="fw-semibold">
+                                        {{ item.display_name }}{% if item.customizations.size %} ({{ item.customizations.size }}){% endif %}
+                                    </div>
+                                    <div class="small text-muted">
+                                        {{ business_settings.currency_symbol }}{{ item.unit_price }} x {{ item.quantity }}
+                                        {% if item.customizations.add_ons %}<br>Add-ons: {{ item.customizations.add_ons|join:", " }}{% endif %}
+                                    </div>
+                                </div>
+                                <div>{{ business_settings.currency_symbol }}{{ item.subtotal }}</div>
+                            </div>
+                            {% endfor %}
+                            <hr>
+                            <div class="d-flex justify-content-between">
+                                <span>Subtotal</span><span>{{ business_settings.currency_symbol }}{{ completed_transaction.total_amount }}</span>
+                            </div>
+                            <div class="d-flex justify-content-between fw-bold fs-5 mb-2" style="color: var(--jc-orange-dark);">
+                                <span>Total</span><span>{{ business_settings.currency_symbol }}{{ completed_transaction.grand_total }}</span>
+                            </div>
+                            <div class="d-flex justify-content-between small text-muted">
+                                <span>Payment Method</span><span>{{ completed_transaction.get_payment_method_display }}</span>
+                            </div>
+                            <div class="d-flex justify-content-between small text-muted">
+                                <span>Amount Paid</span><span>{{ business_settings.currency_symbol }}{{ completed_transaction.amount_tendered }}</span>
+                            </div>
+                            <div class="d-flex justify-content-between small text-muted mb-3">
+                                <span>Change</span><span>{{ business_settings.currency_symbol }}{{ completed_transaction.change_due }}</span>
+                            </div>
+                            <p class="text-center small text-muted mb-0">
+                                {{ business_settings.receipt_footer_text }}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer jc-print-hide">
+                <button type="button" class="btn btn-jc-teal" onclick="window.print()">Print</button>
+                {% if completed_rawbt_url %}
+                <a href="{{ completed_rawbt_url }}" class="btn btn-jc-outline">Print via Bluetooth</a>
+                {% endif %}
+                <button type="button" class="btn btn-jc-primary" data-bs-dismiss="modal">Done</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+{% block extra_js %}
+<script>
+(function () {
+    const searchInput = document.getElementById("product-search");
+    const tiles = document.querySelectorAll(".product-tile-wrap");
+    const noResults = document.getElementById("no-search-results");
+
+    searchInput.addEventListener("input", function () {
+        const term = searchInput.value.trim().toLowerCase();
+        let anyVisible = false;
+        tiles.forEach(function (tile) {
+            const matches = !term || tile.dataset.name.includes(term);
+            tile.classList.toggle("d-none", !matches);
+            if (matches) anyVisible = true;
+        });
+        noResults.classList.toggle("d-none", anyVisible || tiles.length === 0);
+    });
+
+    const priceInput = document.getElementById("custom-price");
+    const addBtn = document.getElementById("custom-add-btn");
+    priceInput.addEventListener("input", function () {
+        const value = parseFloat(priceInput.value) || 0;
+        addBtn.textContent = "Add to Cart - \u20b1" + value.toFixed(2);
+    });
+
+    {% if messages %}
+    var addCustomModal = new bootstrap.Modal(document.getElementById("addCustomModal"));
+    addCustomModal.show();
+    {% endif %}
+})();
+
+(function () {
+    const customizeModalEl = document.getElementById("customizeModal");
+    const customizeModal = new bootstrap.Modal(customizeModalEl);
+    let currentProduct = {};
+    let quantity = 1;
+
+    document.querySelectorAll(".js-open-customize").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            currentProduct = {
+                id: btn.dataset.productId,
+                name: btn.dataset.name,
+                price: parseFloat(btn.dataset.price),
+                largePrice: btn.dataset.largePrice ? parseFloat(btn.dataset.largePrice) : null,
+                isBeverage: btn.dataset.isBeverage === "1",
+            };
+            quantity = 1;
+
+            document.getElementById("customize-product-name").textContent = currentProduct.name;
+            document.getElementById("customize-product-id").value = currentProduct.id;
+            document.getElementById("customize-qty").value = quantity;
+
+            const hasSize = currentProduct.largePrice !== null;
+            document.getElementById("customize-size-section").classList.toggle("d-none", !hasSize);
+            document.getElementById("customize-sugar-section").classList.toggle("d-none", !currentProduct.isBeverage);
+            document.getElementById("customize-addons-section").classList.toggle("d-none", !currentProduct.isBeverage);
+
+            if (hasSize) {
+                document.getElementById("size-small-price").textContent = "\u20b1" + currentProduct.price.toFixed(2);
+                document.getElementById("size-large-price").textContent = "\u20b1" + currentProduct.largePrice.toFixed(2);
+                document.getElementById("size-small").checked = true;
+            }
+            document.querySelectorAll(".addon-check").forEach(function (cb) { cb.checked = false; });
+            document.getElementById("discount-category").value = "NO_DISCOUNT";
+            document.getElementById("discount-amount").value = "0";
+            document.getElementById("discount-details").classList.add("d-none");
+
+            recomputePrice();
+            customizeModal.show();
+        });
+    });
+
+    function getBasePrice() {
+        if (currentProduct.largePrice !== null && document.getElementById("size-large").checked) {
+            return currentProduct.largePrice;
+        }
+        return currentProduct.price;
+    }
+
+    function getAddonTotal() {
+        let total = 0;
+        document.querySelectorAll(".addon-check:checked").forEach(function (cb) {
+            total += parseFloat(cb.dataset.price) || 0;
+        });
+        return total;
+    }
+
+    function recomputePrice() {
+        const base = getBasePrice();
+        const addonTotal = currentProduct.isBeverage ? getAddonTotal() : 0;
+        const priceBeforeDiscount = base + addonTotal;
+
+        const discountCategory = document.getElementById("discount-category").value;
+        const discountType = document.getElementById("discount-type").value;
+        const discountAmount = parseFloat(document.getElementById("discount-amount").value) || 0;
+
+        let discountValue = 0;
+        if (discountCategory !== "NO_DISCOUNT" && discountAmount > 0) {
+            discountValue = discountType === "PERCENT" ? priceBeforeDiscount * (discountAmount / 100) : discountAmount;
+            discountValue = Math.min(discountValue, priceBeforeDiscount);
+        }
+
+        const finalPrice = priceBeforeDiscount - discountValue;
+
+        document.getElementById("breakdown-original").textContent = "\u20b1" + priceBeforeDiscount.toFixed(2);
+        document.getElementById("breakdown-discount").textContent = "-\u20b1" + discountValue.toFixed(2);
+        document.getElementById("breakdown-final").textContent = "\u20b1" + finalPrice.toFixed(2);
+        document.getElementById("customize-add-btn").textContent = "ADD \u20b1" + (finalPrice * quantity).toFixed(2);
+
+        return finalPrice;
+    }
+
+    document.querySelectorAll('input[name="size"]').forEach(function (el) {
+        el.addEventListener("change", recomputePrice);
+    });
+    document.querySelectorAll(".addon-check").forEach(function (el) {
+        el.addEventListener("change", recomputePrice);
+    });
+    document.getElementById("discount-category").addEventListener("change", function () {
+        const isDiscounted = this.value !== "NO_DISCOUNT";
+        document.getElementById("discount-details").classList.toggle("d-none", !isDiscounted);
+        recomputePrice();
+    });
+    document.getElementById("discount-type").addEventListener("change", recomputePrice);
+    document.getElementById("discount-amount").addEventListener("input", recomputePrice);
+
+    document.getElementById("qty-minus").addEventListener("click", function () {
+        quantity = Math.max(1, quantity - 1);
+        document.getElementById("customize-qty").value = quantity;
+        recomputePrice();
+    });
+    document.getElementById("qty-plus").addEventListener("click", function () {
+        quantity += 1;
+        document.getElementById("customize-qty").value = quantity;
+        recomputePrice();
+    });
+})();
+
+(function () {
+    // "Save" -- the draft order already persists to the database on
+    // every add/remove/quantity change, so there's no separate backend
+    // action needed here. This just gives the cashier visible feedback
+    // that the order is safely saved.
+    const saveBtn = document.getElementById("save-order-btn");
+    if (saveBtn) {
+        saveBtn.addEventListener("click", function () {
+            const original = saveBtn.textContent;
+            saveBtn.textContent = "Saved!";
+            saveBtn.disabled = true;
+            setTimeout(function () {
+                saveBtn.textContent = original;
+                saveBtn.disabled = false;
+            }, 1200);
+        });
+    }
+})();
+
+(function () {
+    // Settings (Row 3 redesign): these are per-device terminal
+    // preferences, not per-user or per-transaction data, so localStorage
+    // is the right tool here -- persists across page loads on this
+    // specific browser/device without needing a server round trip.
+    const STORAGE_KEY = "sanserveall_pos_settings";
+    const defaults = {
+        viewMode: "TABLET",
+        itemView: "IMAGE",
+        darkTheme: false,
+        leftHanded: false,
+        showOrderType: true,
+        printReceipt: true,
+    };
+
+    function loadSettings() {
+        try {
+            const stored = JSON.parse(localStorage.getItem(STORAGE_KEY));
+            return Object.assign({}, defaults, stored || {});
+        } catch (e) {
+            return Object.assign({}, defaults);
+        }
+    }
+
+    function saveSettings(settings) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    }
+
+    function applySettings(settings) {
+        document.body.classList.toggle("jc-dark", settings.darkTheme);
+        const layoutRow = document.getElementById("pos-layout-row");
+        if (layoutRow) {
+            layoutRow.classList.toggle("jc-left-handed", settings.leftHanded);
+        }
+        const diningSection = document.getElementById("dining-option-section");
+        if (diningSection) {
+            diningSection.classList.toggle("d-none", !settings.showOrderType);
+        }
+    }
+
+    let settings = loadSettings();
+    applySettings(settings);
+
+    // Reflect the loaded settings in the modal's controls once it's
+    // available in the DOM.
+    document.getElementById("setting-view-mode").value = settings.viewMode;
+    document.getElementById("setting-item-view").value = settings.itemView;
+    document.getElementById("setting-dark-theme").checked = settings.darkTheme;
+    document.getElementById("setting-left-handed").checked = settings.leftHanded;
+    document.getElementById("setting-show-order-type").checked = settings.showOrderType;
+    document.getElementById("setting-print-receipt").checked = settings.printReceipt;
+
+    function bindSetting(elementId, key, isCheckbox) {
+        document.getElementById(elementId).addEventListener("change", function () {
+            settings[key] = isCheckbox ? this.checked : this.value;
+            saveSettings(settings);
+            applySettings(settings);
+        });
+    }
+
+    bindSetting("setting-view-mode", "viewMode", false);
+    bindSetting("setting-item-view", "itemView", false);
+    bindSetting("setting-dark-theme", "darkTheme", true);
+    bindSetting("setting-left-handed", "leftHanded", true);
+    bindSetting("setting-show-order-type", "showOrderType", true);
+    bindSetting("setting-print-receipt", "printReceipt", true);
+})();
+
+{% if completed_transaction %}
+(function () {
+    // Row 3 redesign: shown exactly once, right after a successful
+    // payment -- the server-side session flag that triggers this is
+    // already popped by the time this page rendered, so a refresh
+    // won't reopen it for the same transaction.
+    var completeModal = new bootstrap.Modal(document.getElementById("transactionCompleteModal"));
+    completeModal.show();
+})();
+{% endif %}
+</script>
+{% endblock %}
