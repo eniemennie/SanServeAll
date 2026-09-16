@@ -124,13 +124,68 @@ body {
 .jc-badge-adequate { background-color: #E3F1E8; color: var(--jc-adequate); }
 .jc-badge-info { background-color: #E5EEF6; color: #3E6B92; }
 
-/* --- Sidebar (admin shell) --- */
+/* --- Sidebar (admin shell) ---
+   Collapses to 68px icon-only (original spec) or expands to 240px with
+   labels, toggled by the hamburger button in admin_base.html. Width
+   transition only -- label opacity/width are handled by .jc-nav-label so
+   text doesn't reflow/wrap mid-animation. */
 .jc-sidebar {
   width: 68px;
   background-color: var(--jc-white);
   border-right: 1px solid #EEF0F2;
-  min-height: 100vh;
+  min-height: calc(100vh - 65px);
+  transition: width 0.18s ease;
 }
+.jc-sidebar[data-expanded="true"] {
+  width: 240px;
+}
+
+.jc-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 46px;
+  padding: 0 13px;
+  border-radius: var(--jc-radius-sm);
+  color: var(--jc-text-muted);
+  text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.jc-sidebar:not([data-expanded="true"]) .jc-nav-item {
+  justify-content: center;
+  width: 44px;
+  padding: 0;
+  margin: 0 auto;
+}
+.jc-nav-item svg { flex-shrink: 0; }
+.jc-nav-label {
+  font-size: 0.9rem;
+  font-weight: 500;
+  opacity: 0;
+  max-width: 0;
+  transition: opacity 0.12s ease;
+}
+.jc-sidebar[data-expanded="true"] .jc-nav-label {
+  opacity: 1;
+  max-width: 180px;
+}
+.jc-nav-item:hover {
+  background-color: var(--jc-canvas);
+  color: var(--jc-text);
+}
+.jc-nav-item.active {
+  background-color: var(--jc-orange);
+  color: #fff;
+}
+.jc-nav-item.active:hover {
+  background-color: var(--jc-orange);
+  color: #fff;
+}
+
+/* Legacy alias -- .jc-sidebar-icon predates the expand/collapse shell and
+   is kept for any in-flight branch still referencing it directly. New
+   admin screens should use .jc-nav-item instead. */
 .jc-sidebar-icon {
   width: 44px;
   height: 44px;
@@ -154,6 +209,15 @@ body {
   background-color: var(--jc-white);
   border-bottom: 1px solid #EEF0F2;
   padding: 0.75rem 1.5rem;
+}
+
+body.jc-dark .jc-sidebar {
+  background-color: var(--jc-white);
+  border-right-color: #2C3847;
+}
+body.jc-dark .jc-nav-item:hover {
+  background-color: #232F3E;
+  color: var(--jc-text);
 }
 
 /* --- POS product card (cashier screen) --- */

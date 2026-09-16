@@ -25,7 +25,7 @@ from django_otp import login as otp_login
 from django_otp.decorators import otp_required
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
-from apps.accounts.models import Role, User
+from apps.accounts.models import Branch, Role, User
 from apps.accounts.permissions import role_required
 from apps.accounts.services import (
     generate_backup_codes,
@@ -340,5 +340,23 @@ def admin_dashboard_placeholder(request):
     """Temporary Owner/Admin landing page. Protected by BOTH role (only
     OWNER_ADMIN) and OTP verification (must have completed 2FA this
     session) -- demonstrates the full enforcement chain this batch builds:
-    Admin Login -> 2FA -> Branch Selection -> here."""
-    return render(request, "accounts/admin_dashboard_placeholder.html")
+    Admin Login -> 2FA -> Branch Selection -> here.
+
+    Now rendered inside admin_base.html (the shared Admin Shell), so it
+    also carries the branch dropdown context every shell-wrapped screen
+    needs. Real dashboard content (Branch Performance, Sales Analytics,
+    etc.) replaces this placeholder body in the next batch -- the shell
+    itself is what this batch delivers.
+    """
+    branch_id = request.GET.get("branch")
+    selected_branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
+
+    return render(
+        request,
+        "accounts/admin_dashboard_placeholder.html",
+        {
+            "active_nav": "dashboard",
+            "branches": Branch.objects.filter(is_active=True, is_commissary=False),
+            "selected_branch": selected_branch,
+        },
+    )

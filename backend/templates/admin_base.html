@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% load static %}
+{% comment %}
+Shared Admin Shell -- topbar (logo, branch selector, user identity, logout)
++ collapsible sidebar nav. Every Owner/Admin screen extends this instead of
+base.html directly, so the chrome is built once here rather than duplicated
+per screen (Dashboard, Batch Logs, Demand Forecasting, Resource Management,
+Reports & Export, Product Availability, Settings).
+
+Required/optional context from the view:
+  active_nav      -- one of: dashboard, batch, forecast, resource, reports,
+                     availability, settings. Highlights the matching nav
+                     item. Omit and nothing is highlighted (fails safe).
+  branches        -- queryset/list of Branch for the dropdown. Falls back
+                     to an empty list if not provided.
+  selected_branch -- the currently selected Branch, or None for "All
+                     Branches". Matches the ?branch=<id> GET-param pattern
+                     already used by analytics/forecasting views, so the
+                     dropdown here is a real filter, not decorative.
+
+Usage in a screen template:
+  {% extends "admin_base.html" %}
+  {% block admin_title %}Dashboard{% endblock %}
+  {% block admin_content %}
+    ...screen markup...
+  {% endblock %}
+{% endcomment %}
+
+{% block title %}{% block admin_title %}Admin{% endblock %} - SanServeAll{% endblock %}
+
+{% block extra_css %}
+{% endblock %}
+
+{% block content %}
+<header class="jc-topbar d-flex align-items-center gap-3">
+  <div class="d-flex align-items-baseline gap-2 flex-shrink-0">
+    {% include "partials/logo.html" with size="sm" %}
+  </div>
+  <div class="d-none d-md-block flex-shrink-0 border-start ps-3 me-2">
+    <div class="jc-display fw-semibold" style="color: var(--jc-orange-dark); font-size: 0.95rem; line-height:1.2;">Casa de Sans Rival</div>
+    <div class="text-muted" style="font-size: 0.75rem;">Enterprise Operations System</div>
+  </div>
+
+  <form method="get" class="mx-auto" style="min-width: 260px; max-width: 340px; width: 100%;" id="jc-branch-form">
+    <select name="branch" class="form-select form-select-sm" onchange="this.form.submit()" aria-label="Select branch">
+      <option value=""{% if not selected_branch %} selected{% endif %}>All Branches</option>
+      {% for b in branches %}
+      <option value="{{ b.pk }}"{% if selected_branch.pk == b.pk %} selected{% endif %}>{{ b.name }}</option>
+      {% endfor %}
+    </select>
+  </form>
+
+  <div class="d-none d-sm-flex align-items-center gap-2 flex-shrink-0">
+    <div class="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0"
+         style="width:38px;height:38px;background-color:var(--jc-orange);color:#fff;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+    </div>
+    <div class="lh-sm">
+      <div class="fw-semibold" style="font-size:0.85rem;">{{ user.get_full_name|default:user.get_username }}</div>
+      <div class="text-muted" style="font-size:0.75rem;">{{ user.email }}</div>
+    </div>
+  </div>
+  <form method="post" action="{% url 'accounts:logout' %}" class="flex-shrink-0">
+    {% csrf_token %}
+    <button type="submit" class="btn btn-link text-decoration-none p-0" style="color: var(--jc-critical); font-size:0.9rem; font-weight:600;">
+      Logout
+    </button>
+  </form>
+</header>
+
+<div class="d-flex align-items-stretch">
+  <nav class="jc-sidebar d-flex flex-column flex-shrink-0" id="jc-sidebar" data-expanded="false">
+    <div class="py-2 d-flex" style="padding-left: 12px;">
+      <button type="button" class="btn btn-link p-2 text-muted" id="jc-sidebar-toggle" aria-label="Toggle sidebar">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+      </button>
+    </div>
+
+    <div class="d-flex flex-column gap-1 px-2 flex-grow-1">
+      <a href="{% url 'accounts:admin_dashboard' %}" class="jc-nav-item {% if active_nav == 'dashboard' %}active{% endif %}">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+        <span class="jc-nav-label">Dashboard</span>
+      </a>
+      <a href="{% url 'production:batch_management' %}" class="jc-nav-item {% if active_nav == 'batch' %}active{% endif %}">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"></path></svg>
+        <span class="jc-nav-label">Batch Logs</span>
+      </a>
+      <a href="{% url 'forecasting:forecasting_dashboard' %}" class="jc-nav-item {% if active_nav == 'forecast' %}active{% endif %}">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+        <span class="jc-nav-label">Demand Forecasting</span>
+      </a>
+      <a href="{% url 'forecasting:resource_management_dashboard' %}" class="jc-nav-item {% if active_nav == 'resource' %}active{% endif %}">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+        <span class="jc-nav-label">Resource Management</span>
+      </a>
+      <a href="{% url 'analytics:sales_dashboard' %}" class="jc-nav-item {% if active_nav == 'reports' %}active{% endif %}">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+        <span class="jc-nav-label">Reports &amp; Export</span>
+      </a>
+      <a href="{% url 'inventory:product_management' %}" class="jc-nav-item {% if active_nav == 'availability' %}active{% endif %}">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2.5 12.5V2.5h10l8.09 8.09a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
+        <span class="jc-nav-label">Product Availability</span>
+      </a>
+    </div>
+
+    <div class="px-2 py-2" style="border-top: 1px solid #EEF0F2;">
+      <a href="{% url 'system_config:system_settings' %}" class="jc-nav-item {% if active_nav == 'settings' %}active{% endif %}">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        <span class="jc-nav-label">Settings</span>
+      </a>
+    </div>
+  </nav>
+
+  <main class="flex-grow-1 min-w-0 p-4">
+    {% block admin_content %}{% endblock %}
+  </main>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  (function () {
+    var sidebar = document.getElementById('jc-sidebar');
+    var toggle = document.getElementById('jc-sidebar-toggle');
+    if (!sidebar || !toggle) return;
+    toggle.addEventListener('click', function () {
+      var expanded = sidebar.getAttribute('data-expanded') === 'true';
+      sidebar.setAttribute('data-expanded', String(!expanded));
+    });
+  })();
+</script>
+{% endblock %}
