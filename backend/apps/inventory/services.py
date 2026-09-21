@@ -26,6 +26,55 @@ def get_branch_inventory(branch, product_type=None, low_stock_only=False):
     return queryset
 
 
+def get_resource_status_summary(branch=None):
+    """Stock-health snapshot for the Dashboard Home Resource Status KPI
+    card (Fig. 3-19) and the Resource Monitoring list underneath it.
+
+    NOTE: the reference design shows four tiers (Critical/Low/Medium/
+    Adequate). Inventory only models three real states (is_out_of_stock,
+    is_low_stock, and Available -- see Inventory.status_label, Fig.
+    3-20/3-32's own three-state badge). Collapsed honestly here rather
+    than inventing an unbacked "Medium" cutoff with no threshold behind
+    it: Critical == is_out_of_stock, Low == is_low_stock, Adequate ==
+    everything else.
+
+    branch=None aggregates across every active, non-commissary branch
+    (the Dashboard's "All Branches" state); a specific branch filters to
+    just that one.
+    """
+    from apps.accounts.models import Branch
+
+    queryset = Inventory.objects.select_related("product", "branch")
+    if branch is not None:
+        queryset = queryset.filter(branch=branch)
+    else:
+        queryset = queryset.filter(
+            branch__in=Branch.objects.filter(is_active=True, is_commissary=False)
+        )
+
+    items = list(queryset)
+    critical_items = [i for i in items if i.is_out_of_stock]
+    low_items = [i for i in items if not i.is_out_of_stock and i.is_low_stock]
+    adequate_items = [i for i in items if not i.is_out_of_stock and not i.is_low_stock]
+    total = len(items)
+    sufficiency_pct = round((len(adequate_items) / total) * 100) if total else 100
+
+    # Critical first, then Low, then Adequate -- matches the reference
+    # design's own ordering for the Resource Monitoring list (Fig. 3-19).
+    ordered_items = critical_items + low_items + adequate_items
+
+    return {
+        "total_items": total,
+        "critical_count": len(critical_items),
+        "critical_items": critical_items,
+        "low_count": len(low_items),
+        "low_items": low_items,
+        "adequate_count": len(adequate_items),
+        "items": ordered_items,
+        "sufficiency_pct": sufficiency_pct,
+    }
+
+
 def get_or_create_inventory_row(branch, product):
     """Ensures a branch has an Inventory row for a product even if no sale
     or adjustment has touched it yet, so it still shows up (at 0) on the

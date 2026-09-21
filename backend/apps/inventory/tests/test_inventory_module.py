@@ -277,3 +277,45 @@ class TestAdjustStockView:
         )
         assert response.status_code == 200
         assert b"below zero" in response.content
+
+
+class TestResourceStatusSummary:
+    """Dashboard Home batch: Resource Status KPI card + Resource
+    Monitoring list (Fig. 3-19). Confirms the honest 3-tier collapse
+    (Critical/Low/Adequate) documented in get_resource_status_summary."""
+
+    def test_collapses_to_three_real_tiers_with_correct_counts(self, branch):
+        critical_product = Product.objects.create(
+            name="Cashew Nuts", price="650.00", reorder_threshold=10
+        )
+        low_product = Product.objects.create(name="Butter", price="280.00", reorder_threshold=10)
+        adequate_product = Product.objects.create(name="Flour", price="45.00", reorder_threshold=10)
+        Inventory.objects.create(branch=branch, product=critical_product, quantity_on_hand=0)
+        Inventory.objects.create(branch=branch, product=low_product, quantity_on_hand=5)
+        Inventory.objects.create(branch=branch, product=adequate_product, quantity_on_hand=50)
+
+        summary = services.get_resource_status_summary(branch=branch)
+
+        assert summary["total_items"] == 3
+        assert summary["critical_count"] == 1
+        assert summary["low_count"] == 1
+        assert summary["adequate_count"] == 1
+        assert summary["sufficiency_pct"] == 33  # 1 of 3 adequate, rounded
+        # Ordering: critical items surface first for the Resource
+        # Monitoring list, matching the reference design's own ordering.
+        assert summary["items"][0].product == critical_product
+
+    def test_all_branches_aggregates_active_non_commissary_only(self, branch):
+        commissary = Branch.objects.create(name="Central Kitchen", code="CK", is_commissary=True)
+        product = Product.objects.create(name="Sugar", price="55.00", reorder_threshold=10)
+        Inventory.objects.create(branch=branch, product=product, quantity_on_hand=50)
+        Inventory.objects.create(branch=commissary, product=product, quantity_on_hand=200)
+
+        summary = services.get_resource_status_summary(branch=None)
+
+        assert summary["total_items"] == 1  # commissary excluded
+
+    def test_empty_inventory_defaults_to_full_sufficiency_not_a_crash(self, branch):
+        summary = services.get_resource_status_summary(branch=branch)
+        assert summary["total_items"] == 0
+        assert summary["sufficiency_pct"] == 100
