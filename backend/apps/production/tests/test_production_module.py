@@ -292,3 +292,64 @@ class TestGetTotalOutput:
 
     def test_no_production_yet_returns_zero_not_none(self):
         assert services.get_total_output() == 0
+
+    def test_shell_context_present(self, commissary_client):
+        response = commissary_client.get(reverse("production:batch_management"))
+        assert response.context["active_nav"] == "batch"
+
+    def test_status_filter_narrows_the_queryset(
+        self, commissary_client, commissary_staff, cake, flour
+    ):
+        pending = services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=5,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 2}],
+            status=ProductionRecord.Status.PENDING,
+        )
+        completed = services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 4}],
+            status=ProductionRecord.Status.COMPLETED,
+        )
+
+        response = commissary_client.get(
+            reverse("production:batch_management"), {"status": "COMPLETED"}
+        )
+        record_ids = {r.pk for r in response.context["records"]}
+        assert record_ids == {completed.pk}
+        assert pending.pk not in record_ids
+
+    def test_stats_reflect_the_real_records(self, commissary_client, commissary_staff, cake, flour):
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=5,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 2}],
+            status=ProductionRecord.Status.COMPLETED,
+            quality=ProductionRecord.Quality.PASS,
+        )
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=3,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 1}],
+            status=ProductionRecord.Status.COMPLETED,
+            quality=ProductionRecord.Quality.FAIL,
+        )
+
+        response = commissary_client.get(reverse("production:batch_management"))
+        stats = response.context["stats"]
+        assert stats["total"] == 2
+        assert stats["completed"] == 2
+        assert stats["total_quantity"] == 8
+        assert stats["quality_rate"] == 50
+
+    def test_no_fabricated_branch_column_in_the_table(self, commissary_client):
+        """Regression guard: ProductionRecord has no branch field (see
+        the view's own docstring for why). The template must not render
+        a per-row branch tag that doesn't correspond to real data."""
+        response = commissary_client.get(reverse("production:batch_management"))
+        assert b"<th>Branch</th>" not in response.content
