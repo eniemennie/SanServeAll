@@ -57,6 +57,7 @@ def forecasting_dashboard(request):
         request,
         "forecasting/forecasting_dashboard.html",
         {
+            "active_nav": "forecast",
             "summary": summary,
             "pattern_labels_json": json.dumps([p["date"] for p in weekly_pattern]),
             "pattern_values_json": json.dumps([p["predicted_total"] for p in weekly_pattern]),

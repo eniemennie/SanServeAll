@@ -360,6 +360,15 @@ class TestForecastingDashboardView:
         response = owner_client.get(reverse("forecasting:forecasting_dashboard"))
         assert b"chart.umd.min.js" in response.content
 
+    def test_shell_context_present(self, owner_client):
+        """Demand Forecasting batch: now extends admin_base.html, which
+        needs active_nav for the sidebar highlight. This screen and AI
+        Insights (decision_support) share the same 'forecast' nav slot
+        since Demand Forecasting is the top-level item and AI Insights
+        is reached as an in-page cross-link from it."""
+        response = owner_client.get(reverse("forecasting:forecasting_dashboard"))
+        assert response.context["active_nav"] == "forecast"
+
 
 class TestResourceManagementDashboardView:
     def test_owner_can_view(self, owner_client):
