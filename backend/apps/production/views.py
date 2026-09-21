@@ -12,6 +12,7 @@ merely whether Owner/Admin is among a view's allowed roles.
 """
 
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 
 from apps.accounts.models import Role
 from apps.accounts.permissions import role_required
@@ -65,12 +66,61 @@ def record_production(request):
 @role_required(Role.COMMISSARY_STAFF, Role.OWNER_ADMIN)
 def batch_management(request):
     """Batch Management Interface (Fig. 3-24): list of production
-    records with branch (always commissary), ingredient/material,
-    quantity, supplier, quality, status -- plus edit/delete actions."""
+    records with product, ingredient/material usage, supplier, quality,
+    status -- plus edit/delete actions.
+
+    NOTE: the reference design's table includes a per-row "Branch"
+    column (Batangas/Alangilan/Lipa tags). ProductionRecord has no
+    branch field at all -- production genuinely happens only at the
+    single commissary (see get_total_output's own docstring from the
+    Dashboard Home batch), so that column isn't rendered here rather
+    than filled with a fabricated value.
+
+    Wrapped in the same Admin Shell as the Owner/Admin screens (matching
+    the reference design) even though Commissary Staff can also reach
+    this view -- there's no separate commissary-facing shell built yet.
+    A Commissary Staff user will see the full sidebar, including links
+    to Owner-only screens that would 403 if clicked; a known, pre-
+    existing gap this batch surfaces but doesn't solve on its own.
+    """
+    status_filter = request.GET.get("status", "")
+    date_filter = request.GET.get("date", "")
+
     records = ProductionRecord.objects.select_related("product").prefetch_related(
         "ingredient_usages__material"
     )
-    return render(request, "production/batch_management.html", {"records": records})
+    if status_filter:
+        records = records.filter(status=status_filter)
+    if date_filter == "today":
+        records = records.filter(created_at__date=timezone.now().date())
+
+    total = records.count()
+    completed = records.filter(status=ProductionRecord.Status.COMPLETED).count()
+    in_progress = records.filter(status=ProductionRecord.Status.IN_PROGRESS).count()
+    pending = records.filter(status=ProductionRecord.Status.PENDING).count()
+    total_quantity = sum(r.quantity_produced for r in records)
+    quality_pass = records.filter(quality=ProductionRecord.Quality.PASS).count()
+    quality_rate = round((quality_pass / total) * 100) if total else 100
+
+    return render(
+        request,
+        "production/batch_management.html",
+        {
+            "active_nav": "batch",
+            "records": records,
+            "status_filter": status_filter,
+            "date_filter": date_filter,
+            "stats": {
+                "total": total,
+                "completed": completed,
+                "in_progress": in_progress,
+                "pending": pending,
+                "total_quantity": total_quantity,
+                "quality_rate": quality_rate,
+            },
+            "status_choices": ProductionRecord.Status.choices,
+        },
+    )
 
 
 @role_required(Role.COMMISSARY_STAFF, Role.OWNER_ADMIN)
