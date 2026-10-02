@@ -59,7 +59,11 @@ class TestAdminShell:
         assert reverse("production:batch_management") in content
         assert reverse("forecasting:forecasting_dashboard") in content
         assert reverse("forecasting:resource_management_dashboard") in content
-        assert reverse("analytics:sales_dashboard") in content
+        # Was analytics:sales_dashboard -- the Reports & Export sidebar
+        # item now points at the dedicated Reports hub instead (Reports
+        # & Export batch), which itself links onward to sales_dashboard/
+        # product_performance/resource_consumption as report tabs.
+        assert reverse("analytics:reports_hub") in content
         assert reverse("inventory:product_management") in content
         assert reverse("system_config:system_settings") in content
 
