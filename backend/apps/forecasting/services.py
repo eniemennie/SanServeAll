@@ -11,7 +11,7 @@ import datetime
 from django.db import models
 from django.utils import timezone
 
-from apps.forecasting.ml.arima_model import generate_forecast
+from apps.forecasting.ml.forecast_model import generate_forecast
 from apps.forecasting.ml.data_prep import build_daily_sales_series
 from apps.forecasting.models import Forecast
 from apps.inventory.models import Product
@@ -146,7 +146,7 @@ def generate_insights_for_all_branches():
 # ---------------------------------------------------------------------
 # Row 11.3: AI-Powered Dashboards -- read-side queries only. Everything
 # below reads data the scheduled jobs above already computed and saved;
-# none of it re-runs ARIMA/the classifier/an AI API call on page load
+# none of it re-runs Holt-Winters/the classifier/an AI API call on page load
 # (Phase 2 decoupling rule).
 # ---------------------------------------------------------------------
 
@@ -339,7 +339,7 @@ def get_forecasting_dashboard_summary(branch=None):
             "products_forecasted": 0,
             "avg_mae": None,
             "avg_confidence_pct": None,
-            "arima_count": 0,
+            "model_count": 0,
             "naive_count": 0,
         }
 
@@ -358,7 +358,7 @@ def get_forecasting_dashboard_summary(branch=None):
         "products_forecasted": len({r.product_id for r in rows}),
         "avg_mae": avg_mae,
         "avg_confidence_pct": avg_confidence_pct,
-        "arima_count": sum(1 for r in rows if r.model_used.startswith("ARIMA")),
+        "model_count": sum(1 for r in rows if r.model_used.startswith("HoltWinters")),
         "naive_count": sum(1 for r in rows if r.model_used == "NAIVE_AVERAGE"),
     }
 
@@ -383,8 +383,8 @@ def get_demand_forecast_label(branch=None):
     """High/Medium/Low label for the Dashboard Home Demand Forecast KPI
     card (Fig. 3-19's "Demand Forecast: High, Next 7 days").
 
-    Derived from real data: the ARIMA forecast's average predicted daily
-    units over the upcoming window (get_weekly_demand_pattern), compared
+    Derived from real data: the Holt-Winters forecast's average predicted
+    daily units over the upcoming window (get_weekly_demand_pattern), compared
     against the trailing 30-day actual average daily units sold
     (apps.analytics.get_sales_summary -- imported lazily here to avoid a
     module-level circular import between forecasting and analytics).

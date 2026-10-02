@@ -59,7 +59,7 @@ def run_forecast_job():
         logger.exception("Forecast job failed entirely")
         _send_failure_alert(
             "SanServeAll: Forecast job failed",
-            "The scheduled ARIMA forecast job raised an unhandled exception. Check logs.",
+            "The scheduled Holt-Winters forecast job raised an unhandled exception. Check logs.",
         )
         raise
 

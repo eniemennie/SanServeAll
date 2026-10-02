@@ -259,7 +259,7 @@ class TestGetLatestForecastBatch:
             product=latte,
             forecast_date=timezone.now().date(),
             predicted_quantity=8.0,
-            model_used="ARIMA(1, 1, 1)",
+            model_used="HoltWinters(seasonal=7)",
         )
 
         batch = list(services.get_latest_forecast_batch(branch))
@@ -280,7 +280,7 @@ class TestGetForecastingDashboardSummary:
             product=latte,
             forecast_date=timezone.now().date(),
             predicted_quantity=8.0,
-            model_used="ARIMA(1, 1, 1)",
+            model_used="HoltWinters(seasonal=7)",
             mae=1.5,
         )
         Forecast.objects.create(
@@ -294,7 +294,7 @@ class TestGetForecastingDashboardSummary:
         summary = services.get_forecasting_dashboard_summary(branch)
         assert summary["predictions_made"] == 2
         assert summary["products_forecasted"] == 2
-        assert summary["arima_count"] == 1
+        assert summary["model_count"] == 1
         assert summary["naive_count"] == 1
         assert summary["avg_mae"] == 1.5
 
@@ -308,14 +308,14 @@ class TestGetWeeklyDemandPattern:
             product=latte,
             forecast_date=target_date,
             predicted_quantity=5.0,
-            model_used="ARIMA(1, 1, 1)",
+            model_used="HoltWinters(seasonal=7)",
         )
         Forecast.objects.create(
             branch=branch,
             product=cake,
             forecast_date=target_date,
             predicted_quantity=3.0,
-            model_used="ARIMA(1, 1, 1)",
+            model_used="HoltWinters(seasonal=7)",
         )
 
         pattern = services.get_weekly_demand_pattern(branch)
