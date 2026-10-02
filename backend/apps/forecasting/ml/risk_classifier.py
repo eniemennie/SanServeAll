@@ -1,16 +1,23 @@
 """
-Inventory risk classification (Row 11.1). See the module docstring on
-InventoryRiskScore for why labels are rule-bootstrapped rather than drawn
-from real historical outcomes -- a real scikit-learn DecisionTreeClassifier
-still does the actual classification, this just explains where its
-training labels come from on a brand-new system with no track record yet.
+Inventory risk classification (Row 11.1): predefined threshold rules
+based on current stock level, average consumption rate, and estimated
+days remaining -- not a trained model (manuscript Chapter 3.6).
+
+NOTE: an earlier version of this module also trained and ran a real
+scikit-learn DecisionTreeClassifier on top of these same rule-derived
+labels (fit and predicted on the same batch of rows), which technically
+contradicted the manuscript's explicit "predefined thresholds...rather
+than a trained classification model" claim. Removed to match what's
+already documented and adviser-approved, rather than carrying code that
+says something different from the paper. The classifier's predictions
+were functionally near-identical to the rule anyway, since it was
+trained on the rule's own output -- this removal has no real behavioral
+impact, only removes the discrepancy.
 """
 
 from datetime import timedelta
 
-import numpy as np
 from django.utils import timezone
-from sklearn.tree import DecisionTreeClassifier
 
 from apps.pos.models import SalesItem, SalesTransaction
 
@@ -81,11 +88,8 @@ def compute_features(inventory):
 
 
 def rule_based_label(quantity_on_hand, avg_daily_demand, days_of_stock_left):
-    """The bootstrap business rule used to generate training labels (see
-    module docstring). Also used directly as the final label whenever a
-    fitted classifier isn't available (e.g. only one inventory row exists
-    -- scikit-learn's DecisionTreeClassifier needs at least 2 classes
-    represented to fit at all).
+    """The one and only classification rule (see module docstring for
+    why there's no trained model backing this).
 
     Thresholds are read from SystemConfiguration (Row 12.2) on every call
     rather than cached, so an Owner/Admin's change takes effect on the
@@ -103,59 +107,21 @@ def rule_based_label(quantity_on_hand, avg_daily_demand, days_of_stock_left):
     return "LOW"
 
 
-def _days_left_as_feature(days_of_stock_left):
-    """scikit-learn needs a numeric value, not None -- a large finite
-    number stands in for "effectively never runs out" without special-
-    casing None throughout the feature matrix."""
-    return days_of_stock_left if days_of_stock_left is not None else 9999.0
-
-
 def classify_inventory_rows(inventory_queryset):
-    """Classifies every Inventory row in the queryset.
+    """Classifies every Inventory row in the queryset using the rule
+    directly (see module docstring) -- no trained model involved.
 
     Returns a list of dicts: {"inventory": ..., "risk_level": ...,
     "avg_daily_demand": ..., "days_of_stock_left": ...}.
-
-    Trains a fresh DecisionTreeClassifier on the SAME batch of rows being
-    classified (features + rule-bootstrapped labels), then predicts on
-    those rows -- appropriate at this data scale (a handful of branches x
-    products), where a separate held-out training set isn't meaningfully
-    different from just using the rule directly, but a real classifier is
-    still what makes the actual prediction.
     """
     rows = list(inventory_queryset)
     if not rows:
         return []
 
-    features = []
-    rule_labels = []
-    raw_features = []  # (quantity_on_hand, avg_daily_demand, days_of_stock_left) for output
-
+    results = []
     for inventory in rows:
         quantity_on_hand, avg_daily_demand, days_of_stock_left = compute_features(inventory)
-        raw_features.append((quantity_on_hand, avg_daily_demand, days_of_stock_left))
-        features.append(
-            [quantity_on_hand, avg_daily_demand, _days_left_as_feature(days_of_stock_left)]
-        )
-        rule_labels.append(rule_based_label(quantity_on_hand, avg_daily_demand, days_of_stock_left))
-
-    X = np.array(features)
-    unique_labels = set(rule_labels)
-
-    if len(unique_labels) < 2:
-        # A DecisionTreeClassifier can't meaningfully fit on a single
-        # class -- every row already has the same rule-based label, so
-        # there's nothing for a classifier to distinguish anyway.
-        predicted_labels = rule_labels
-    else:
-        classifier = DecisionTreeClassifier(max_depth=4, random_state=42)
-        classifier.fit(X, rule_labels)
-        predicted_labels = list(classifier.predict(X))
-
-    results = []
-    for inventory, (quantity_on_hand, avg_daily_demand, days_of_stock_left), risk_level in zip(
-        rows, raw_features, predicted_labels
-    ):
+        risk_level = rule_based_label(quantity_on_hand, avg_daily_demand, days_of_stock_left)
         results.append(
             {
                 "inventory": inventory,

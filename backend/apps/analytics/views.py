@@ -20,19 +20,20 @@ from apps.analytics import services
 
 @role_required(Role.OWNER_ADMIN)
 def reports_hub(request):
-    """Reports & Export hub. The reference design shows four tabs (Sales
-    & Trend Report / Product Performance / Resource Consumption /
-    Operational Performance), but only three real URLs exist --
-    Resource Consumption and Operational Performance are already one
-    combined view (resource_consumption, Fig. 3-30/3-31 together). This
-    is a NEW view that assembles all four real datasets in a single
-    request, with the tabs switched client-side (see extra_js below)
-    rather than inventing a fourth URL that doesn't correspond to
-    anything.
+    """Reports hub. The reference design shows four tabs (Sales & Trend
+    Report / Product Performance / Resource Consumption / Operational
+    Performance), but only three real URLs exist -- Resource Consumption
+    and Operational Performance are already one combined view
+    (resource_consumption, Fig. 3-30/3-31 together). This is a NEW view
+    that assembles all four real datasets in a single request, with the
+    tabs switched client-side (see extra_js below) rather than inventing
+    a fourth URL that doesn't correspond to anything.
 
-    "Export" in the label has no real feature behind it yet -- no
-    CSV/PDF download exists anywhere in this codebase. This view covers
-    viewing/reporting only.
+    Named "Reports," not "Reports & Export" -- no CSV/PDF download
+    exists anywhere in this codebase (adviser compliance review flagged
+    this; rather than build a real export feature under today's time
+    constraints, the label was corrected to match what the screen
+    actually does). This view covers viewing/reporting only.
     """
     days = int(request.GET.get("days", 30))
 

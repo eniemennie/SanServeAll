@@ -5,7 +5,12 @@ Shared Admin Shell -- topbar (logo, branch selector, user identity, logout)
 + collapsible sidebar nav. Every Owner/Admin screen extends this instead of
 base.html directly, so the chrome is built once here rather than duplicated
 per screen (Dashboard, Batch Logs, Demand Forecasting, Resource Management,
-Reports & Export, Product Availability, Settings).
+Reports, Product Availability, Settings).
+
+Nav label is "Reports" (not "Reports & Export") -- no CSV/PDF export
+feature exists anywhere in this codebase; "Export" was dropped from the
+label rather than left promising something unbuilt (adviser compliance
+review, item re: the Reports & Export screen's naming).
 
 Required/optional context from the view:
   active_nav      -- one of: dashboard, batch, forecast, resource, reports,
@@ -101,7 +106,7 @@ Usage in a screen template:
       </a>
       <a href="{% url 'analytics:reports_hub' %}" class="jc-nav-item {% if active_nav == 'reports' %}active{% endif %}">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
-        <span class="jc-nav-label">Reports &amp; Export</span>
+        <span class="jc-nav-label">Reports</span>
       </a>
       <a href="{% url 'inventory:product_management' %}" class="jc-nav-item {% if active_nav == 'availability' %}active{% endif %}">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2.5 12.5V2.5h10l8.09 8.09a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
