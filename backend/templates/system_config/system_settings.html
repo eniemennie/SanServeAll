@@ -1,55 +1,67 @@
-{% extends "base.html" %}
-{% block title %}System Settings - SanServeAll{% endblock %}
-{% block content %}
-<div class="container py-4">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h4">System Settings</h1>
-        <a href="{% url 'system_config:system_configuration' %}" class="btn btn-outline-secondary btn-sm">System Configuration</a>
-    </div>
+{% extends "admin_base.html" %}
+{% block admin_title %}Settings{% endblock %}
+{% block admin_content %}
 
-    {% if error %}
-        <div class="alert alert-danger py-2">{{ error }}</div>
-    {% endif %}
-
-    <div class="card" style="max-width: 560px;">
-        <div class="card-body">
-            <form method="post">
-                {% csrf_token %}
-                <div class="mb-3">
-                    <label class="form-label">Business Name</label>
-                    <input type="text" name="business_name" class="form-control"
-                           value="{{ settings.business_name }}" required>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Business Address</label>
-                    <input type="text" name="business_address" class="form-control"
-                           value="{{ settings.business_address }}">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Contact Phone</label>
-                    <input type="text" name="contact_phone" class="form-control"
-                           value="{{ settings.contact_phone }}">
-                </div>
-                <div class="row g-2">
-                    <div class="col-md-6">
-                        <label class="form-label">Tax Rate (%)</label>
-                        <input type="number" name="tax_rate_percent" step="0.01" min="0" class="form-control"
-                               value="{{ settings.tax_rate_percent }}">
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label">Currency Symbol</label>
-                        <input type="text" name="currency_symbol" maxlength="5" class="form-control"
-                               value="{{ settings.currency_symbol }}">
-                    </div>
-                </div>
-                <div class="mb-3 mt-2">
-                    <label class="form-label">Receipt Footer Text</label>
-                    <input type="text" name="receipt_footer_text" class="form-control"
-                           value="{{ settings.receipt_footer_text }}">
-                </div>
-                <button type="submit" class="btn btn-primary">Save Settings</button>
-            </form>
-        </div>
+<div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+        <h1 class="h5 mb-1">System Settings</h1>
+        <p class="text-muted small mb-0">
+            Business information used on receipts and system-wide displays. Operational
+            thresholds (AI insights, risk levels, alerts) live under System Configuration.
+        </p>
     </div>
+    <a href="{% url 'system_config:system_configuration' %}" class="btn btn-sm btn-outline-secondary">
+        System Configuration &rarr;
+    </a>
 </div>
+
+{% if error %}
+<div class="alert alert-danger py-2">{{ error }}</div>
+{% endif %}
+
+<div class="jc-card p-4" style="max-width: 640px;">
+    <form method="post">
+        {% csrf_token %}
+        <div class="mb-3">
+            <label class="form-label small fw-semibold">Business Name</label>
+            <input type="text" name="business_name" class="form-control" value="{{ settings.business_name }}" required>
+        </div>
+        <div class="mb-3">
+            <label class="form-label small fw-semibold">Business Address</label>
+            <input type="text" name="business_address" class="form-control" value="{{ settings.business_address }}">
+        </div>
+        <div class="mb-3">
+            <label class="form-label small fw-semibold">Contact Phone</label>
+            <input type="text" name="contact_phone" class="form-control" value="{{ settings.contact_phone }}">
+        </div>
+        <div class="row g-3 mb-3">
+            <div class="col-md-6">
+                <label class="form-label small fw-semibold">Tax Rate (%)</label>
+                <input type="number" step="0.01" min="0" name="tax_rate_percent" class="form-control" value="{{ settings.tax_rate_percent }}">
+                <div class="form-text">Used for VAT breakdown on every receipt (checkout, Reports, Dashboard toggles).</div>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label small fw-semibold">Currency Symbol</label>
+                <input type="text" name="currency_symbol" class="form-control" value="{{ settings.currency_symbol }}" maxlength="5">
+            </div>
+        </div>
+        <div class="mb-4">
+            <label class="form-label small fw-semibold">Receipt Footer Text</label>
+            <input type="text" name="receipt_footer_text" class="form-control" value="{{ settings.receipt_footer_text }}">
+        </div>
+        <div class="d-flex gap-2">
+            <button type="submit" class="btn" style="background: var(--jc-orange); color: #fff;">Save Changes</button>
+            <a href="{% url 'system_config:system_settings' %}" class="btn btn-outline-secondary">Cancel</a>
+        </div>
+    </form>
+</div>
+
+<p class="text-muted small mt-3" style="max-width: 640px;">
+    The reference design for this screen (Fig. 3-35) describes notification toggles,
+    dark mode, and other display preferences. Those aren't backed by any real setting
+    here &mdash; dark mode exists only in the POS staff-side Settings panel, and no
+    notification system exists anywhere in the codebase. This screen shows only the
+    fields that are genuinely real and saved.
+</p>
+
 {% endblock %}
