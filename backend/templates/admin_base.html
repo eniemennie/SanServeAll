@@ -69,7 +69,13 @@ Usage in a screen template:
 </header>
 
 <div class="d-flex align-items-stretch">
-  <nav class="jc-sidebar d-flex flex-column flex-shrink-0" id="jc-sidebar" data-expanded="false">
+  {# Defaults to expanded (labels visible) rather than icon-only, per
+     adviser feedback on navigation usability -- every nav item already
+     has a real text label in the markup below; this just makes that the
+     first thing a viewer sees instead of requiring a click to reveal it.
+     Still collapsible via the hamburger toggle for anyone who prefers
+     the icon-only view. #}
+  <nav class="jc-sidebar d-flex flex-column flex-shrink-0" id="jc-sidebar" data-expanded="true">
     <div class="py-2 d-flex" style="padding-left: 12px;">
       <button type="button" class="btn btn-link p-2 text-muted" id="jc-sidebar-toggle" aria-label="Toggle sidebar">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>

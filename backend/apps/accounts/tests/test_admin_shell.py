@@ -90,3 +90,14 @@ class TestAdminShell:
         response = authed_client.get(reverse("accounts:admin_dashboard"))
         content = response.content.decode()
         assert reverse("accounts:logout") in content
+
+    def test_sidebar_defaults_to_expanded_with_labels_visible(self, authed_client):
+        """Adviser feedback (compliance check item 21): icon-only
+        navigation needs labels. Every nav item already carries a real
+        text label in the markup; this confirms the sidebar now defaults
+        to the expanded state so that label is visible without
+        requiring a click, rather than just existing in markup a
+        collapsed sidebar hides by default."""
+        response = authed_client.get(reverse("accounts:admin_dashboard"))
+        content = response.content.decode()
+        assert 'data-expanded="true"' in content
