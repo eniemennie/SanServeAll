@@ -278,7 +278,7 @@ class TestDemandForecastLabel:
                 product=latte,
                 forecast_date=date.today() + td(days=i + 1),
                 predicted_quantity=2.0,
-                model_used="ARIMA",
+                model_used="HoltWinters(seasonal=7)",
             )
 
         result = services.get_demand_forecast_label(branch=branch)
@@ -302,7 +302,7 @@ class TestDemandForecastLabel:
             product=latte,
             forecast_date=date.today() + td(days=1),
             predicted_quantity=1.0,
-            model_used="ARIMA",
+            model_used="HoltWinters(seasonal=7)",
         )
 
         result = services.get_demand_forecast_label(branch=branch)

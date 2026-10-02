@@ -2,7 +2,7 @@
 Views for the AI-Powered Dashboards (Row 11.3): Decision Support
 (Fig. 3-21), Forecasting (Fig. 3-25), and Resource Management
 (Fig. 3-26). All three are read-only over data the scheduled jobs
-(Weeks 10-11) already computed -- none of these views run ARIMA, the
+(Weeks 10-11) already computed -- none of these views run Holt-Winters, the
 risk classifier, or an AI API call on page load.
 
 Owner/Admin only, matching Table 3-2's ownership of the AI/DSS FRs.
