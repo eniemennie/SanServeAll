@@ -319,3 +319,99 @@ class TestResourceStatusSummary:
         summary = services.get_resource_status_summary(branch=branch)
         assert summary["total_items"] == 0
         assert summary["sufficiency_pct"] == 100
+
+
+class TestProductAvailabilityEnhancements:
+    """Product Availability batch: real cross-branch stock, stats,
+    filtering, and the new Quick Sale action, replacing the previous
+    bare catalog-only list."""
+
+    def test_shell_context_present(self, owner_client):
+        response = owner_client.get(reverse("inventory:product_management"))
+        assert response.context["active_nav"] == "availability"
+
+    def test_stats_reflect_real_inventory_across_all_branches(
+        self, owner_client, branch, other_branch
+    ):
+        cashew = Product.objects.create(name="Cashew Nuts", price="650.00", reorder_threshold=10)
+        flour = Product.objects.create(name="Flour", price="45.00", reorder_threshold=10)
+        Inventory.objects.create(branch=branch, product=cashew, quantity_on_hand=0)
+        Inventory.objects.create(branch=other_branch, product=flour, quantity_on_hand=50)
+
+        response = owner_client.get(reverse("inventory:product_management"))
+        stats = response.context["stats"]
+        assert stats["total_products"] == 2
+        assert stats["critical_count"] == 1
+        assert stats["available_count"] == 1
+        assert stats["total_stock"] == 50
+
+    def test_type_filter_narrows_to_materials_only(self, owner_client, branch):
+        cake = Product.objects.create(
+            name="Cake", price="140.00", product_type=Product.ProductType.FINISHED_GOOD
+        )
+        flour = Product.objects.create(
+            name="Flour", price="45.00", product_type=Product.ProductType.MATERIAL
+        )
+        Inventory.objects.create(branch=branch, product=cake, quantity_on_hand=10)
+        Inventory.objects.create(branch=branch, product=flour, quantity_on_hand=20)
+
+        response = owner_client.get(reverse("inventory:product_management"), {"type": "MATERIAL"})
+        product_names = {i.product.name for i in response.context["items"]}
+        assert product_names == {"Flour"}
+
+    def test_search_filters_by_product_name(self, owner_client, branch):
+        latte = Product.objects.create(name="Spanish Latte", price="125.00")
+        muffin = Product.objects.create(name="Blueberry Muffin", price="60.00")
+        Inventory.objects.create(branch=branch, product=latte, quantity_on_hand=10)
+        Inventory.objects.create(branch=branch, product=muffin, quantity_on_hand=10)
+
+        response = owner_client.get(reverse("inventory:product_management"), {"search": "latte"})
+        product_names = {i.product.name for i in response.context["items"]}
+        assert product_names == {"Spanish Latte"}
+
+    def test_quick_sale_reduces_real_stock_and_logs_a_transaction(self, owner_client, branch):
+        product = Product.objects.create(name="Cashew Nuts", price="650.00")
+        inventory = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=10)
+
+        response = owner_client.post(
+            reverse("inventory:quick_sale", args=[inventory.pk]), {"amount": "2"}
+        )
+        assert response.status_code == 302
+        inventory.refresh_from_db()
+        assert inventory.quantity_on_hand == 8
+        assert InventoryTransaction.objects.filter(
+            branch=inventory.branch, product=inventory.product
+        ).exists()
+
+    def test_quick_sale_cannot_go_below_zero(self, owner_client, branch):
+        product = Product.objects.create(name="Cashew Nuts", price="650.00")
+        inventory = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=1)
+
+        owner_client.post(reverse("inventory:quick_sale", args=[inventory.pk]), {"amount": "5"})
+        inventory.refresh_from_db()
+        assert inventory.quantity_on_hand == 1  # unchanged -- adjust_stock rejected it
+
+    def test_quick_sale_redirects_to_safe_internal_next_only(self, owner_client, branch):
+        product = Product.objects.create(name="Cashew Nuts", price="650.00")
+        inventory = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=10)
+
+        malicious = owner_client.post(
+            reverse("inventory:quick_sale", args=[inventory.pk]),
+            {"amount": "1", "next": "https://evil.example.com/"},
+        )
+        assert malicious.url == reverse("inventory:product_management")
+
+        safe = owner_client.post(
+            reverse("inventory:quick_sale", args=[inventory.pk]),
+            {"amount": "1", "next": "/inventory/products/?type=MATERIAL"},
+        )
+        assert safe.url == "/inventory/products/?type=MATERIAL"
+
+    def test_branch_staff_cannot_quick_sale(self, staff_client, branch):
+        product = Product.objects.create(name="Cashew Nuts", price="650.00")
+        inventory = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=10)
+
+        response = staff_client.post(
+            reverse("inventory:quick_sale", args=[inventory.pk]), {"amount": "1"}
+        )
+        assert response.status_code == 403

@@ -1,69 +1,151 @@
-{% extends "base.html" %}
-{% block title %}Product Management - SanServeAll{% endblock %}
-{% block content %}
-<div class="container py-4">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h4">Product Inventory Management</h1>
-        <a href="{% url 'inventory:monitoring' %}" class="btn btn-outline-secondary btn-sm">Back to Monitoring</a>
-    </div>
+{% extends "admin_base.html" %}
+{% block admin_title %}Product Availability{% endblock %}
+{% block admin_content %}
 
-    {% if error %}
-        <div class="alert alert-danger py-2">{{ error }}</div>
-    {% endif %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h5 mb-0">Product Availability</h1>
+</div>
 
-    <div class="card mb-4">
-        <div class="card-body">
-            <h2 class="h6">Add Product</h2>
-            <form method="post" class="row g-2 align-items-end">
-                {% csrf_token %}
-                <div class="col-md-4">
-                    <label class="form-label small">Name</label>
-                    <input type="text" name="name" class="form-control form-control-sm" required>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label small">Price</label>
-                    <input type="number" name="price" step="0.01" min="0" class="form-control form-control-sm" required>
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label small">Type</label>
-                    <select name="product_type" class="form-select form-select-sm">
-                        {% for value, label in product_types %}
-                        <option value="{{ value }}">{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label small">Reorder At</label>
-                    <input type="number" name="reorder_threshold" min="0" value="0" class="form-control form-control-sm">
-                </div>
-                <div class="col-md-1">
-                    <button type="submit" class="btn btn-primary btn-sm w-100">Add</button>
-                </div>
-            </form>
+<div class="row g-3 mb-4">
+    <div class="col">
+        <div class="jc-card p-3 text-center">
+            <div class="text-muted small">Total Products</div>
+            <div class="fs-4 fw-bold">{{ stats.total_products }}</div>
         </div>
     </div>
-
-    <table class="table table-sm table-hover bg-white">
-        <thead>
-            <tr>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Price</th>
-                <th>Reorder At</th>
-                <th>Active</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for product in products %}
-            <tr>
-                <td>{{ product.name }}</td>
-                <td>{{ product.get_product_type_display }}</td>
-                <td>&#8369;{{ product.price }}</td>
-                <td>{{ product.reorder_threshold }}</td>
-                <td>{% if product.is_active %}Yes{% else %}No{% endif %}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="col">
+        <div class="jc-card p-3 text-center">
+            <div class="text-muted small">Available</div>
+            <div class="fs-4 fw-bold" style="color: var(--jc-adequate);">{{ stats.available_count }}</div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="jc-card p-3 text-center">
+            <div class="text-muted small">Low Stock</div>
+            <div class="fs-4 fw-bold">{{ stats.low_count }}</div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="jc-card p-3 text-center">
+            <div class="text-muted small">Out of Stock</div>
+            <div class="fs-4 fw-bold" style="color: var(--jc-critical);">{{ stats.critical_count }}</div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="jc-card p-3 text-center">
+            <div class="text-muted small">Total Stock</div>
+            <div class="fs-4 fw-bold">{{ stats.total_stock }}</div>
+        </div>
+    </div>
+    <div class="col">
+        <div class="jc-card p-3 text-center">
+            <div class="text-muted small">Stock Value</div>
+            <div class="fs-4 fw-bold">&#8369;{{ stats.stock_value|floatformat:0 }}</div>
+        </div>
+    </div>
 </div>
+
+<div class="d-flex gap-2 mb-3">
+    <a href="?type=" class="btn btn-sm {% if not selected_type %}jc-tab-active{% else %}btn-outline-secondary{% endif %}">Finished Products</a>
+    <a href="?type=MATERIAL" class="btn btn-sm {% if selected_type == 'MATERIAL' %}jc-tab-active{% else %}btn-outline-secondary{% endif %}">Raw Materials</a>
+</div>
+
+<div class="jc-card p-3 mb-4">
+    <form method="get" class="row g-2 align-items-end">
+        <input type="hidden" name="type" value="{{ selected_type }}">
+        <div class="col-md-4">
+            <input type="text" name="search" value="{{ search }}" class="form-control form-control-sm" placeholder="Search products...">
+        </div>
+        <div class="col-md-3">
+            <select name="branch" class="form-select form-select-sm">
+                <option value="">All Branches</option>
+                {% for b in branches %}
+                <option value="{{ b.pk }}" {% if selected_branch.pk == b.pk %}selected{% endif %}>{{ b.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2">
+            <button type="submit" class="btn btn-sm btn-outline-secondary w-100">Filter</button>
+        </div>
+        <div class="col-md-3 text-end">
+            <span class="text-muted small">Showing {{ items|length }} item{{ items|length|pluralize }}</span>
+        </div>
+    </form>
+</div>
+
+{% if error %}
+<div class="alert alert-danger py-2">{{ error }}</div>
+{% endif %}
+
+<div class="row g-3 mb-4">
+    {% for item in items %}
+    <div class="col-md-3">
+        <div class="jc-card p-3 h-100">
+            <span class="jc-badge {% if item.is_out_of_stock %}jc-badge-critical{% elif item.is_low_stock %}jc-badge-low{% else %}jc-badge-adequate{% endif %} mb-2">
+                {{ item.status_label }}
+            </span>
+            <div class="d-flex justify-content-between">
+                <div class="fw-semibold">{{ item.product.name }}</div>
+                <div class="fw-semibold">&#8369;{{ item.product.price }}</div>
+            </div>
+            <div class="text-muted small mb-2">{{ item.product.get_product_type_display }} &middot; {{ item.branch.name }}</div>
+            <div class="jc-card p-2 mb-2" style="background: var(--jc-canvas);">
+                <div class="d-flex justify-content-between">
+                    <span class="text-muted small">Current Stock:</span>
+                    <span class="fw-bold">{{ item.quantity_on_hand }}</span>
+                </div>
+            </div>
+            <div class="text-muted small mb-1">Quick Sale:</div>
+            <div class="d-flex gap-1 mb-2">
+                {% for n in quick_sale_amounts %}
+                <form method="post" action="{% url 'inventory:quick_sale' item.pk %}" class="flex-fill">
+                    {% csrf_token %}
+                    <input type="hidden" name="amount" value="{{ n }}">
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <button type="submit" class="btn btn-outline-secondary btn-sm w-100" {% if item.quantity_on_hand < n %}disabled{% endif %}>-{{ n }}</button>
+                </form>
+                {% endfor %}
+            </div>
+            <a href="{% url 'inventory:adjust_stock' item.pk %}" class="btn btn-sm w-100" style="background: var(--jc-orange); color: #fff;">Manual Adjustment</a>
+        </div>
+    </div>
+    {% empty %}
+    <div class="col-12 text-muted text-center py-4">No products match this filter yet.</div>
+    {% endfor %}
+</div>
+
+<div class="jc-card p-3">
+    <div class="fw-semibold mb-2">Add Product</div>
+    <form method="post" class="row g-2 align-items-end">
+        {% csrf_token %}
+        <div class="col-md-4">
+            <label class="form-label small">Name</label>
+            <input type="text" name="name" class="form-control form-control-sm" required>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small">Price</label>
+            <input type="number" name="price" step="0.01" min="0" class="form-control form-control-sm" required>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small">Type</label>
+            <select name="product_type" class="form-select form-select-sm">
+                {% for value, label in product_types %}
+                <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small">Reorder At</label>
+            <input type="number" name="reorder_threshold" min="0" value="0" class="form-control form-control-sm">
+        </div>
+        <div class="col-md-1">
+            <button type="submit" class="btn btn-sm w-100" style="background: var(--jc-orange); color: #fff;">Add</button>
+        </div>
+    </form>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<style>.jc-tab-active { background: var(--jc-orange); color: #fff; }</style>
 {% endblock %}
