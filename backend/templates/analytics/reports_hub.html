@@ -1,0 +1,215 @@
+{% extends "admin_base.html" %}
+{% block admin_title %}Reports &amp; Export{% endblock %}
+{% block admin_content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h5 mb-0">Reports</h1>
+    <form method="get" style="max-width: 200px;">
+        <input type="hidden" name="branch" value="{{ selected_branch.pk|default:'' }}">
+        <select name="days" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="7" {% if days == 7 %}selected{% endif %}>Last 7 Days</option>
+            <option value="30" {% if days == 30 %}selected{% endif %}>Last 30 Days</option>
+            <option value="90" {% if days == 90 %}selected{% endif %}>Last 90 Days</option>
+        </select>
+    </form>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-md-3">
+        <button type="button" class="jc-card p-3 w-100 text-start border-0 report-tab-btn active" data-tab="sales">
+            <div class="fw-semibold">Sales &amp; Trend Report</div>
+        </button>
+    </div>
+    <div class="col-md-3">
+        <button type="button" class="jc-card p-3 w-100 text-start border-0 report-tab-btn" data-tab="products">
+            <div class="fw-semibold">Product Performance</div>
+        </button>
+    </div>
+    <div class="col-md-3">
+        <button type="button" class="jc-card p-3 w-100 text-start border-0 report-tab-btn" data-tab="resources">
+            <div class="fw-semibold">Resource Consumption</div>
+        </button>
+    </div>
+    <div class="col-md-3">
+        <button type="button" class="jc-card p-3 w-100 text-start border-0 report-tab-btn" data-tab="operational">
+            <div class="fw-semibold">Operational Performance</div>
+        </button>
+    </div>
+</div>
+
+<p class="text-muted small mb-3">Showing data for: <strong>Last {{ days }} Days</strong></p>
+
+<div id="panel-sales" class="report-panel">
+    <div class="row g-3 mb-3">
+        <div class="col-md-4">
+            <div class="jc-card p-3 text-center">
+                <div class="text-muted small">Total Revenue</div>
+                <div class="fs-4 fw-bold">&#8369;{{ sales_summary.total_revenue|floatformat:2 }}</div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="jc-card p-3 text-center">
+                <div class="text-muted small">Avg Daily Revenue</div>
+                <div class="fs-4 fw-bold">&#8369;{{ sales_summary.average_daily_revenue|floatformat:2 }}</div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="jc-card p-3 text-center">
+                <div class="text-muted small">Total Units Sold</div>
+                <div class="fs-4 fw-bold">{{ sales_summary.total_units_sold }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="jc-card p-3">
+        <div class="fw-semibold mb-2">Sales &amp; Trend Analysis</div>
+        <canvas id="salesTrendChart" height="90"></canvas>
+    </div>
+</div>
+
+<div id="panel-products" class="report-panel d-none">
+    <div class="jc-card p-3 mb-3">
+        <canvas id="productPerformanceChart" height="90"></canvas>
+    </div>
+    <div class="jc-card p-3">
+        <table class="table table-sm mb-0">
+            <thead><tr><th>Product</th><th>This Period</th><th>Previous Period</th><th>Growth</th></tr></thead>
+            <tbody>
+                {% for row in product_performance %}
+                <tr>
+                    <td>{{ row.product_name }}</td>
+                    <td>{{ row.current_units }}</td>
+                    <td>{{ row.previous_units }}</td>
+                    <td>
+                        {% if row.growth_rate is None %}
+                        <span class="jc-badge jc-badge-info">New</span>
+                        {% elif row.growth_rate > 0 %}
+                        <span class="jc-badge jc-badge-adequate">+{{ row.growth_rate|floatformat:1 }}%</span>
+                        {% else %}
+                        <span class="jc-badge jc-badge-critical">{{ row.growth_rate|floatformat:1 }}%</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="4" class="text-center text-muted py-3">No sales data in either period yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div id="panel-resources" class="report-panel d-none">
+    <div class="row g-3 mb-3">
+        <div class="col-md-3">
+            <div class="jc-card p-3 text-center">
+                <div class="text-muted small">Materials Used</div>
+                <div class="fs-4 fw-bold">{{ consumption.total_units_used }}</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="jc-card p-3 text-center">
+                <div class="text-muted small">Material Cost</div>
+                <div class="fs-4 fw-bold">&#8369;{{ consumption.total_cost|floatformat:2 }}</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="jc-card p-3 text-center">
+                <div class="text-muted small">Units Produced</div>
+                <div class="fs-4 fw-bold">{{ consumption.total_produced }}</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="jc-card p-3 text-center">
+                <div class="text-muted small">Cost per Unit</div>
+                <div class="fs-4 fw-bold">&#8369;{{ consumption.cost_per_unit_produced|floatformat:2 }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="jc-card p-3">
+        <table class="table table-sm mb-0">
+            <thead><tr><th>Material</th><th>Total Used</th><th>Total Cost</th></tr></thead>
+            <tbody>
+                {% for m in consumption.by_material %}
+                <tr>
+                    <td>{{ m.material__name }}</td>
+                    <td>{{ m.total_used }}</td>
+                    <td>&#8369;{{ m.total_material_cost|floatformat:2 }}</td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="3" class="text-center text-muted py-3">No production recorded in this window yet.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div id="panel-operational" class="report-panel d-none">
+    <div class="row g-3">
+        <div class="col-md-4">
+            <div class="jc-card p-3 text-center">
+                <div class="text-muted small">Batch Completion Rate</div>
+                <div class="fs-4 fw-bold">
+                    {% if operational.completion_rate is not None %}{{ operational.completion_rate|floatformat:1 }}%{% else %}&mdash;{% endif %}
+                </div>
+                <div class="text-muted small">{{ operational.completed_batches }} / {{ operational.total_batches }} batches</div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="jc-card p-3 text-center">
+                <div class="text-muted small">Quality Pass Rate</div>
+                <div class="fs-4 fw-bold">
+                    {% if operational.quality_pass_rate is not None %}{{ operational.quality_pass_rate|floatformat:1 }}%{% else %}&mdash;{% endif %}
+                </div>
+                <div class="text-muted small">{{ operational.passed_batches }} / {{ operational.total_batches }} batches</div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="jc-card p-3 text-center">
+                <div class="text-muted small">Total Batches</div>
+                <div class="fs-4 fw-bold">{{ operational.total_batches }}</div>
+            </div>
+        </div>
+    </div>
+    <p class="text-muted small mt-3">
+        Average production time and staff efficiency aren't shown &mdash; production records don't track a
+        start/end duration or per-staff timing, so those figures aren't measured yet, not just hidden.
+    </p>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+    document.querySelectorAll(".report-tab-btn").forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            document.querySelectorAll(".report-tab-btn").forEach(function (b) { b.classList.remove("active"); });
+            document.querySelectorAll(".report-panel").forEach(function (p) { p.classList.add("d-none"); });
+            btn.classList.add("active");
+            document.getElementById("panel-" + btn.dataset.tab).classList.remove("d-none");
+        });
+    });
+
+    new Chart(document.getElementById("salesTrendChart"), {
+        type: "line",
+        data: {
+            labels: {{ trend_labels_json|safe }},
+            datasets: [{ label: "Revenue (\u20b1)", data: {{ trend_revenue_json|safe }}, borderColor: "#D2703F", tension: 0.3 }]
+        },
+        options: { responsive: true, scales: { y: { beginAtZero: true } } }
+    });
+
+    new Chart(document.getElementById("productPerformanceChart"), {
+        type: "bar",
+        data: {
+            labels: {{ product_names_json|safe }},
+            datasets: [{ label: "Units This Period", data: {{ product_units_json|safe }}, backgroundColor: "#D2703F" }]
+        },
+        options: { responsive: true, plugins: { legend: { display: false } } }
+    });
+})();
+</script>
+<style>
+.report-tab-btn.active { border-color: var(--jc-orange) !important; box-shadow: inset 0 0 0 1px var(--jc-orange); }
+</style>
+{% endblock %}

@@ -19,6 +19,55 @@ from apps.analytics import services
 
 
 @role_required(Role.OWNER_ADMIN)
+def reports_hub(request):
+    """Reports & Export hub. The reference design shows four tabs (Sales
+    & Trend Report / Product Performance / Resource Consumption /
+    Operational Performance), but only three real URLs exist --
+    Resource Consumption and Operational Performance are already one
+    combined view (resource_consumption, Fig. 3-30/3-31 together). This
+    is a NEW view that assembles all four real datasets in a single
+    request, with the tabs switched client-side (see extra_js below)
+    rather than inventing a fourth URL that doesn't correspond to
+    anything.
+
+    "Export" in the label has no real feature behind it yet -- no
+    CSV/PDF download exists anywhere in this codebase. This view covers
+    viewing/reporting only.
+    """
+    days = int(request.GET.get("days", 30))
+
+    branch_id = request.GET.get("branch")
+    selected_branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
+
+    sales_summary = services.get_sales_summary(branch=selected_branch, days=days)
+    trend = services.get_weekly_sales_trend(branch=selected_branch)
+    product_performance_rows = services.get_product_performance(days=days)
+    consumption = services.get_resource_consumption_summary(days=days)
+    operational = services.get_operational_performance_summary(days=days)
+
+    return render(
+        request,
+        "analytics/reports_hub.html",
+        {
+            "active_nav": "reports",
+            "branches": Branch.objects.filter(is_active=True, is_commissary=False),
+            "selected_branch": selected_branch,
+            "days": days,
+            "sales_summary": sales_summary,
+            "product_performance": product_performance_rows,
+            "consumption": consumption,
+            "operational": operational,
+            "trend_labels_json": json.dumps([t["week_label"] for t in trend]),
+            "trend_revenue_json": json.dumps([float(t["revenue"]) for t in trend]),
+            "product_names_json": json.dumps([r["product_name"] for r in product_performance_rows]),
+            "product_units_json": json.dumps(
+                [r["current_units"] for r in product_performance_rows]
+            ),
+        },
+    )
+
+
+@role_required(Role.OWNER_ADMIN)
 def sales_dashboard(request):
     """Analytics Dashboard + Sales Analytics combined (Fig. 3-19, 3-28).
     Optional branch filter via ?branch=<id>, matching the Branch Filter

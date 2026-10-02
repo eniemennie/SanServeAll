@@ -411,3 +411,51 @@ class TestWeeklySalesTrendByBranch:
         assert len(result["week_labels"]) == 8
         for series in result["series"]:
             assert len(series["revenue"]) == 8
+
+
+class TestReportsHubView:
+    """Reports & Export batch: the new hub combining all four real
+    report datasets (Sales & Trend, Product Performance, Resource
+    Consumption, Operational Performance) into one request."""
+
+    def test_owner_can_view(self, owner_client):
+        response = owner_client.get(reverse("analytics:reports_hub"))
+        assert response.status_code == 200
+
+    def test_non_owner_cannot_view(self, client, cashier):
+        client.force_login(cashier)
+        response = client.get(reverse("analytics:reports_hub"))
+        assert response.status_code == 403
+
+    def test_shell_context_present(self, owner_client):
+        response = owner_client.get(reverse("analytics:reports_hub"))
+        assert response.context["active_nav"] == "reports"
+        assert "branches" in response.context
+
+    def test_all_four_real_datasets_present_in_context(self, owner_client, branch, cashier, latte):
+        _completed_sale(
+            branch, cashier, latte, quantity=2, unit_price="125.00", amount_tendered="300.00"
+        )
+
+        response = owner_client.get(reverse("analytics:reports_hub"))
+        assert set(response.context["sales_summary"].keys()) >= {
+            "total_revenue",
+            "total_units_sold",
+        }
+        assert isinstance(response.context["product_performance"], list)
+        assert "total_cost" in response.context["consumption"]
+        assert "completion_rate" in response.context["operational"]
+
+    def test_days_filter_is_honored(self, owner_client, branch, cashier, latte):
+        response = owner_client.get(reverse("analytics:reports_hub"), {"days": 7})
+        assert response.context["days"] == 7
+
+    def test_no_fourth_url_invented_for_operational_performance(self):
+        """Regression guard for the real routing decision this batch
+        made: Operational Performance is a tab within reports_hub, not
+        a URL of its own -- there's no analytics:operational_performance
+        anywhere, by design."""
+        from django.urls import NoReverseMatch
+
+        with pytest.raises(NoReverseMatch):
+            reverse("analytics:operational_performance")
