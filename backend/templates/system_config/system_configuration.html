@@ -1,59 +1,76 @@
-{% extends "base.html" %}
-{% block title %}System Configuration - SanServeAll{% endblock %}
-{% block content %}
-<div class="container py-4">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h4">System Configuration</h1>
-        <a href="{% url 'system_config:system_settings' %}" class="btn btn-outline-secondary btn-sm">System Settings</a>
+{% extends "admin_base.html" %}
+{% block admin_title %}System Configuration{% endblock %}
+{% block admin_content %}
+
+<div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+        <h1 class="h5 mb-1">System Configuration</h1>
+        <p class="text-muted small mb-0">
+            Operational thresholds that drive the AI/forecasting screens &mdash; previously
+            hardcoded, now genuinely configurable at runtime.
+        </p>
     </div>
-
-    {% if error %}
-        <div class="alert alert-danger py-2">{{ error }}</div>
-    {% endif %}
-
-    <div class="card" style="max-width: 560px;">
-        <div class="card-body">
-            <form method="post">
-                {% csrf_token %}
-                <div class="mb-3">
-                    <label class="form-label">Admin Alert Email</label>
-                    <input type="email" name="admin_alert_email" class="form-control"
-                           value="{{ config.admin_alert_email }}"
-                           placeholder="Leave blank to use Django's default ADMINS setting">
-                    <div class="form-text">Where scheduled-job failure alerts are sent.</div>
-                </div>
-
-                <div class="form-check form-switch mb-3">
-                    <input class="form-check-input" type="checkbox" name="ai_insights_enabled" id="aiToggle"
-                           {% if config.ai_insights_enabled %}checked{% endif %}>
-                    <label class="form-check-label" for="aiToggle">Enable live AI insight generation</label>
-                    <div class="form-text">
-                        When off, insights always use the plain template message --
-                        no live AI API calls are made at all, even if a key is configured.
-                    </div>
-                </div>
-
-                <div class="row g-2">
-                    <div class="col-md-4">
-                        <label class="form-label">High-Risk Threshold (days)</label>
-                        <input type="number" name="high_risk_days_threshold" min="1" class="form-control"
-                               value="{{ config.high_risk_days_threshold }}">
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label">Medium-Risk Threshold (days)</label>
-                        <input type="number" name="medium_risk_days_threshold" min="1" class="form-control"
-                               value="{{ config.medium_risk_days_threshold }}">
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label">Forecast Window (days)</label>
-                        <input type="number" name="default_forecast_days" min="1" class="form-control"
-                               value="{{ config.default_forecast_days }}">
-                    </div>
-                </div>
-
-                <button type="submit" class="btn btn-primary mt-3">Save Configuration</button>
-            </form>
-        </div>
-    </div>
+    <a href="{% url 'system_config:system_settings' %}" class="btn btn-sm btn-outline-secondary">
+        &larr; System Settings
+    </a>
 </div>
+
+{% if error %}
+<div class="alert alert-danger py-2">{{ error }}</div>
+{% endif %}
+
+<div class="jc-card p-4" style="max-width: 640px;">
+    <form method="post">
+        {% csrf_token %}
+
+        <div class="form-check form-switch mb-4">
+            <input class="form-check-input" type="checkbox" name="ai_insights_enabled" id="aiEnabled"
+                   {% if config.ai_insights_enabled %}checked{% endif %}>
+            <label class="form-check-label fw-semibold" for="aiEnabled">AI Insights Enabled</label>
+            <div class="form-text">
+                When off, insight generation always uses the template fallback &mdash; no live
+                AI API calls are made at all, regardless of whether an API key is configured.
+            </div>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label small fw-semibold">Admin Alert Email</label>
+            <input type="email" name="admin_alert_email" class="form-control" value="{{ config.admin_alert_email }}"
+                   placeholder="Falls back to Django's ADMINS setting if left blank">
+        </div>
+
+        <div class="row g-3 mb-3">
+            <div class="col-md-6">
+                <label class="form-label small fw-semibold">High-Risk Threshold (days)</label>
+                <input type="number" min="1" name="high_risk_days_threshold" class="form-control" value="{{ config.high_risk_days_threshold }}">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label small fw-semibold">Medium-Risk Threshold (days)</label>
+                <input type="number" min="1" name="medium_risk_days_threshold" class="form-control" value="{{ config.medium_risk_days_threshold }}">
+            </div>
+        </div>
+        <p class="text-muted small">
+            High-risk threshold must stay lower than medium-risk, or nothing could ever be classified as medium risk.
+        </p>
+
+        <div class="mb-4">
+            <label class="form-label small fw-semibold">Default Forecast Window (days)</label>
+            <input type="number" min="1" name="default_forecast_days" class="form-control" value="{{ config.default_forecast_days }}" style="max-width: 200px;">
+        </div>
+
+        <div class="d-flex gap-2">
+            <button type="submit" class="btn" style="background: var(--jc-orange); color: #fff;">Save Changes</button>
+            <a href="{% url 'system_config:system_configuration' %}" class="btn btn-outline-secondary">Cancel</a>
+        </div>
+    </form>
+</div>
+
+<p class="text-muted small mt-3" style="max-width: 640px;">
+    The reference design for this screen (Fig. 3-36) describes automatic backups, data
+    retention, language settings, and a 2FA toggle. None of those are configurable here:
+    backups run via a separate script (<code>scripts/backup_media_and_db.sh</code>), there's
+    no language/i18n infrastructure, and 2FA is mandatory for Owner/Admin by design, not a
+    toggle. This screen shows only the settings that genuinely exist and take effect.
+</p>
+
 {% endblock %}
