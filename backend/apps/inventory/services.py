@@ -6,6 +6,53 @@ low-stock detection, and manual stock adjustment.
 from apps.inventory.models import Inventory, InventoryTransaction, Product
 
 
+def get_product_availability(branch=None, product_type=None, search=""):
+    """Product Availability screen (Fig. 3-34), enhanced beyond the bare
+    catalog list product_management previously showed: real per-branch
+    stock across all branches (or one, via the shared shell's branch
+    dropdown), plus the stat summary the reference design shows (Total
+    Products/Available/Low Stock/Out of Stock/Total Stock/Stock Value).
+
+    Deliberately reuses Inventory (not just Product) so stock numbers
+    are real, not fabricated -- a Product with no Inventory row anywhere
+    genuinely has no stock to report, and isn't included here.
+    """
+    from apps.accounts.models import Branch
+
+    queryset = Inventory.objects.select_related("product", "branch")
+    if branch is not None:
+        queryset = queryset.filter(branch=branch)
+    else:
+        queryset = queryset.filter(
+            branch__in=Branch.objects.filter(is_active=True, is_commissary=False)
+        )
+    if product_type:
+        queryset = queryset.filter(product__product_type=product_type)
+    if search:
+        queryset = queryset.filter(product__name__icontains=search)
+
+    items = list(queryset.order_by("product__name"))
+
+    total_products = len({i.product_id for i in items})
+    critical_items = [i for i in items if i.is_out_of_stock]
+    low_items = [i for i in items if not i.is_out_of_stock and i.is_low_stock]
+    available_items = [i for i in items if not i.is_out_of_stock and not i.is_low_stock]
+    total_stock = sum(i.quantity_on_hand for i in items)
+    stock_value = sum(i.quantity_on_hand * i.product.price for i in items)
+
+    return {
+        "items": items,
+        "stats": {
+            "total_products": total_products,
+            "available_count": len(available_items),
+            "low_count": len(low_items),
+            "critical_count": len(critical_items),
+            "total_stock": total_stock,
+            "stock_value": stock_value,
+        },
+    }
+
+
 def get_branch_inventory(branch, product_type=None, low_stock_only=False):
     """Returns Inventory rows for a branch, optionally filtered by product
     type (Fig. 3-32 Finished Goods vs. Fig. 3-33 Materials share one
