@@ -16,3 +16,8 @@ DATABASES = {
 }
 
 MIDDLEWARE.insert(1, "whitenoise.middleware.WhiteNoiseMiddleware")  # noqa: F405
+
+# Same reasoning as production.py's CSRF_TRUSTED_ORIGINS -- without this,
+# every POST form submission gets a CSRF 403 once DEBUG=False and the
+# site is reached over HTTPS, which it will be on any real host.
+CSRF_TRUSTED_ORIGINS = [f"https://{host}" for host in ALLOWED_HOSTS if host]
