@@ -102,7 +102,7 @@ class TestAIInsightsToggle:
     def test_disabled_toggle_never_calls_the_api_even_with_a_key_configured(self, settings):
         from apps.forecasting.ml.insight_generator import generate_insight
 
-        settings.CLAUDE_API_KEY = "fake-key-that-would-otherwise-be-used"
+        settings.GEMINI_API_KEY = "fake-key-that-would-otherwise-be-used"
         with patch("apps.forecasting.ml.insight_generator.requests.post") as mock_post:
             message, generated_by_ai = generate_insight(
                 "STOCKOUT_WARNING",
