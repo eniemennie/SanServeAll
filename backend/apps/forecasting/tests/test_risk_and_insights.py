@@ -163,7 +163,7 @@ class TestRunRiskClassificationForAllInventory:
 
 class TestInsightGenerator:
     def test_no_api_key_falls_back_to_template(self, settings):
-        settings.CLAUDE_API_KEY = ""
+        settings.GEMINI_API_KEY = ""
         message, generated_by_ai = generate_insight(
             "STOCKOUT_WARNING",
             {"branch_name": "Lipa City", "at_risk_items": "Spanish Latte (HIGH)"},
@@ -173,10 +173,16 @@ class TestInsightGenerator:
         assert "Spanish Latte" in message
 
     def test_successful_api_call_returns_ai_generated_true(self, settings):
-        settings.CLAUDE_API_KEY = "fake-test-key"
+        settings.GEMINI_API_KEY = "fake-test-key"
         mock_response = MagicMock()
         mock_response.json.return_value = {
-            "content": [{"text": "Lipa City is low on Spanish Latte -- restock soon."}]
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [{"text": "Lipa City is low on Spanish Latte -- restock soon."}]
+                    }
+                }
+            ]
         }
         mock_response.raise_for_status.return_value = None
 
@@ -192,7 +198,7 @@ class TestInsightGenerator:
         assert message == "Lipa City is low on Spanish Latte -- restock soon."
 
     def test_api_failure_falls_back_to_template_not_an_exception(self, settings):
-        settings.CLAUDE_API_KEY = "fake-test-key"
+        settings.GEMINI_API_KEY = "fake-test-key"
         with patch(
             "apps.forecasting.ml.insight_generator.requests.post",
             side_effect=ConnectionError("network unreachable"),
@@ -212,7 +218,7 @@ class TestInsightGenerator:
 
 class TestGenerateInsightsForAllBranches:
     def test_only_generates_for_branches_with_at_risk_items(self, branch, latte, settings):
-        settings.CLAUDE_API_KEY = ""
+        settings.GEMINI_API_KEY = ""
         healthy_branch = Branch.objects.create(name="Batangas City", code="BATANGAS")
 
         InventoryRiskScore.objects.create(
@@ -238,7 +244,7 @@ class TestGenerateInsightsForAllBranches:
         assert healthy_branch.pk not in branch_ids
 
     def test_creates_a_stockout_warning_insight(self, branch, latte, settings):
-        settings.CLAUDE_API_KEY = ""
+        settings.GEMINI_API_KEY = ""
         InventoryRiskScore.objects.create(
             branch=branch,
             product=latte,

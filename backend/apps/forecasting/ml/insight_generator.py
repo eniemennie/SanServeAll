@@ -1,9 +1,21 @@
 """
 Natural-language insight generation (Row 11.2): converts numeric
 forecast/risk output into readable recommendations, per Table 3-2's
-FR-04. Uses the raw HTTP API via `requests` rather than the anthropic/
-openai SDK packages -- one fewer dependency, and this only needs a single
-simple request/response, not the SDK's full feature surface.
+FR-04. Uses the raw HTTP API via `requests` rather than Google's SDK --
+one fewer dependency, and this only needs a single simple
+request/response, not the SDK's full feature surface.
+
+Uses the Gemini API (free tier via Google AI Studio -- no credit card,
+no expiration) rather than a paid provider, since this system's actual
+usage (a handful of one-sentence calls per night, see
+generate_insights_for_all_branches) is nowhere near the free tier's rate
+limits, and a capstone project with no maintenance budget shouldn't
+carry an ongoing paid dependency for this. Only aggregated, non-
+identifying data is ever sent (branch names, product names, computed
+risk levels -- never raw transactions or PII, matching the Responsible
+Use of AI data-minimization commitment already made elsewhere), which
+keeps the free tier's "prompts may be used to improve Google's
+products" caveat low-risk for this specific use case.
 
 Falls back to a plain, clearly-labeled template message when no API key
 is configured or the API call fails -- the Decision Support System must
@@ -20,8 +32,14 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
-CLAUDE_MODEL = "claude-sonnet-4-6"
+# Gemini's model lineup moves fast -- if this specific model is ever
+# retired, Google's deprecations page (ai.google.dev/gemini-api/docs/
+# deprecations) is the place to check for its replacement. Flash (not
+# Pro) deliberately chosen: free-tier eligible, and this task (one plain
+# sentence from a short structured summary) doesn't need a larger model.
+GEMINI_API_URL = (
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+)
 REQUEST_TIMEOUT_SECONDS = 15
 
 
@@ -46,31 +64,29 @@ def _build_prompt(insight_type, context):
     raise ValueError(f"Unknown insight_type: {insight_type}")
 
 
-def _call_claude_api(prompt):
-    api_key = getattr(settings, "CLAUDE_API_KEY", None)
+def _call_gemini_api(prompt):
+    api_key = getattr(settings, "GEMINI_API_KEY", None)
     if not api_key:
         return None
 
     try:
         response = requests.post(
-            CLAUDE_API_URL,
+            GEMINI_API_URL,
             headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
+                "x-goog-api-key": api_key,
                 "content-type": "application/json",
             },
             json={
-                "model": CLAUDE_MODEL,
-                "max_tokens": 150,
-                "messages": [{"role": "user", "content": prompt}],
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "generationConfig": {"maxOutputTokens": 150},
             },
             timeout=REQUEST_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
         data = response.json()
-        return data["content"][0]["text"].strip()
+        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
     except Exception:
-        logger.exception("Claude API call failed; falling back to template message.")
+        logger.exception("Gemini API call failed; falling back to template message.")
         return None
 
 
@@ -100,7 +116,7 @@ def generate_insight(insight_type, context, force_template=False):
     configured -- a genuine kill switch for the AI provider, not just a
     "try it and fall back" path."""
     prompt = _build_prompt(insight_type, context)
-    ai_message = None if force_template else _call_claude_api(prompt)
+    ai_message = None if force_template else _call_gemini_api(prompt)
 
     if ai_message:
         return ai_message, True
