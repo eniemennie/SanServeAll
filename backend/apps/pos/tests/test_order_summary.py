@@ -90,7 +90,13 @@ class TestGrandTotalAndDiscountMath:
         assert draft.grand_total == Decimal("100.00")  # 125 - 20%
 
     def test_transaction_discount_never_pushes_grand_total_negative(self, draft, item):
-        services.apply_transaction_discount(draft, "SD", "AMOUNT", "9999.00")
+        # The service now rejects an over-total discount outright (see
+        # TestInvalidDiscountInput), so set the fields directly to keep
+        # exercising the model's own safety cap -- still the second layer
+        # of defense if items are removed after a valid discount was applied.
+        draft.transaction_discount_category = "SD"
+        draft.transaction_discount_type = "AMOUNT"
+        draft.transaction_discount_amount = Decimal("9999.00")
         assert draft.grand_total == Decimal("0.00")
 
     def test_no_discount_category_means_no_transaction_discount(self, draft, item):
@@ -187,6 +193,61 @@ class TestApplyTransactionDiscountView:
         )
         follow = unlocked_client.get(response.url)
         assert b"valid discount amount" in follow.content
+
+
+class TestInvalidDiscountInput:
+    """Negative tests: bad discount input must be rejected and leave the
+    order untouched. Found by negative testing during Lab Activity 2 -- a
+    percent over 100 (or a fixed amount over the order total) used to be
+    accepted and silently turned the whole order into a free one, and
+    NaN/Infinity crashed the server instead of being rejected."""
+
+    @pytest.mark.parametrize(
+        "discount_type, amount",
+        [
+            ("PERCENT", "-20"),  # negative
+            ("PERCENT", "abc"),  # not a number
+            ("PERCENT", None),  # blank
+            ("PERCENT", "150"),  # over 100%
+            ("PERCENT", "100.01"),  # just over 100%
+            ("AMOUNT", "200"),  # more than the P125 order total
+            ("PERCENT", "NaN"),  # crashed with an unhandled error
+            ("PERCENT", "Infinity"),  # crashed with an unhandled error
+        ],
+    )
+    def test_invalid_discount_is_rejected_and_order_unchanged(
+        self, draft, item, discount_type, amount
+    ):
+        accepted = services.apply_transaction_discount(draft, "SD", discount_type, amount)
+        draft.refresh_from_db()
+        assert accepted is False
+        assert draft.grand_total == Decimal("125.00")  # still full price
+
+    @pytest.mark.parametrize(
+        "discount_type, amount, expected_total",
+        [
+            ("PERCENT", "20", "100.00"),  # normal
+            ("PERCENT", "100", "0.00"),  # exactly 100% is allowed (complimentary)
+            ("AMOUNT", "125", "0.00"),  # exactly the order total is allowed
+        ],
+    )
+    def test_valid_boundary_discounts_are_still_accepted(
+        self, draft, item, discount_type, amount, expected_total
+    ):
+        accepted = services.apply_transaction_discount(draft, "SD", discount_type, amount)
+        draft.refresh_from_db()
+        assert accepted is True
+        assert draft.grand_total == Decimal(expected_total)
+
+    def test_over_100_percent_shows_an_error_and_does_not_apply(self, unlocked_client, draft, item):
+        response = unlocked_client.post(
+            reverse("pos:apply_transaction_discount"),
+            {"category": "SD", "discount_type": "PERCENT", "amount": "150"},
+        )
+        follow = unlocked_client.get(response.url)
+        draft.refresh_from_db()
+        assert b"valid discount amount" in follow.content
+        assert draft.grand_total == Decimal("125.00")
 
 
 class TestOrderSummaryDisplaysCorrectly:
