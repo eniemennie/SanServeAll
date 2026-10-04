@@ -74,12 +74,18 @@ Usage in a screen template:
 </header>
 
 <div class="d-flex align-items-stretch">
-  {# Defaults to expanded (labels visible) rather than icon-only, per
-     adviser feedback on navigation usability -- every nav item already
-     has a real text label in the markup below; this just makes that the
-     first thing a viewer sees instead of requiring a click to reveal it.
-     Still collapsible via the hamburger toggle for anyone who prefers
-     the icon-only view. #}
+  {% comment %}
+    Defaults to expanded (labels visible) rather than icon-only, per
+    adviser feedback on navigation usability -- every nav item already
+    has a real text label in the markup below; this just makes that the
+    first thing a viewer sees instead of requiring a click to reveal it.
+    Still collapsible via the hamburger toggle for anyone who prefers
+    the icon-only view.
+
+    NOTE: keep this a block comment. Django's short hash-style comment
+    only works on a single line; a multi-line one renders as visible
+    text on the page.
+  {% endcomment %}
   <nav class="jc-sidebar d-flex flex-column flex-shrink-0" id="jc-sidebar" data-expanded="true">
     <div class="py-2 d-flex" style="padding-left: 12px;">
       <button type="button" class="btn btn-link p-2 text-muted" id="jc-sidebar-toggle" aria-label="Toggle sidebar">

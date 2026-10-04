@@ -101,3 +101,29 @@ class TestAdminShell:
         response = authed_client.get(reverse("accounts:admin_dashboard"))
         content = response.content.decode()
         assert 'data-expanded="true"' in content
+
+
+class TestNoTemplateSyntaxLeaksIntoPages:
+    """Regression: Django's {# ... #} comment only works on a SINGLE line.
+    A multi-line one in admin_base.html was not treated as a comment and
+    rendered as visible text inside the page's flex layout, squeezing the
+    sidebar and content to one side. Every admin screen extends
+    admin_base.html, so checking each one catches it however it recurs."""
+
+    @pytest.mark.parametrize(
+        "url_name",
+        [
+            "accounts:admin_dashboard",
+            "production:batch_management",
+            "forecasting:forecasting_dashboard",
+            "forecasting:resource_management_dashboard",
+            "analytics:reports_hub",
+            "inventory:product_management",
+            "system_config:system_settings",
+        ],
+    )
+    def test_no_unrendered_template_comments_or_tags(self, authed_client, url_name):
+        content = authed_client.get(reverse(url_name)).content.decode()
+        assert "{#" not in content
+        assert "#}" not in content
+        assert "{%" not in content
