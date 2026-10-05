@@ -9,7 +9,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.inventory.models import Inventory, InventoryTransaction, Product
-from apps.pos.models import SalesItem, SalesTransaction
+from apps.pos.models import DiscountType, SalesItem, SalesTransaction
 
 
 def get_or_create_draft_transaction(user, branch):
@@ -247,8 +247,22 @@ def apply_transaction_discount(draft, category, discount_type, amount):
         amount = Decimal(str(amount))
     except (InvalidOperation, TypeError):
         return False
-    if amount < 0:
+    # NaN/Infinity parse as valid Decimals but crash the comparisons and the
+    # database save below -- only a crafted request can send them (a
+    # browser number box can't), but invalid input must be rejected, not
+    # turn into a server error.
+    if not amount.is_finite() or amount < 0:
         return False
+    # Found by negative testing: only "not negative" used to be checked, so
+    # 150% (or one stray extra zero: 200 instead of 20) silently turned the
+    # whole order into a free one. A discount can't exceed what it
+    # discounts. Exactly 100% / exactly the order total is still allowed --
+    # a complimentary order is a business decision, not invalid input.
+    if discount_type == DiscountType.PERCENT and amount > 100:
+        return False
+    if discount_type == DiscountType.AMOUNT and draft.total_amount > 0:
+        if amount > draft.total_amount:
+            return False
 
     draft.transaction_discount_category = category
     draft.transaction_discount_type = discount_type
