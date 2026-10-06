@@ -26,6 +26,7 @@ class Product(models.Model):
         PASTA = "PASTA", "Pasta"
         DESSERTS = "DESSERTS", "Desserts"
         CAKES = "CAKES", "Cakes"
+        BAKERY = "BAKERY", "Bakery & Pasalubong"
 
     name = models.CharField(max_length=150)
     price = models.DecimalField(max_digits=10, decimal_places=2)
