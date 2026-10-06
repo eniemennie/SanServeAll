@@ -26,10 +26,9 @@ accompanying PR description for the full reasoning:
   for Silvanas is skipped, since it duplicates what the Mini cakes
   already price per flavor.
 - Butter Toast and Broas: the source menu image shows one price
-  ("Jar - P140.00") under two product photos. Interpreted as two
-  separate P140 jar products (flagged as an assumption, not a
-  certainty, when this script was delivered) rather than silently
-  guessing a combined price with no basis for it.
+  ("Jar - P140.00") under two product photos. Loaded as two separate
+  P140 jar products -- confirmed with the client/team as genuinely
+  distinct items, not a bundled combo.
 
 Safe to run more than once -- every row uses get_or_create/
 update_or_create, matching seed_demo_data.py's own convention.
