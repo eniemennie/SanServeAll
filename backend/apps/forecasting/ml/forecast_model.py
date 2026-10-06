@@ -1,10 +1,16 @@
 """
 Holt-Winters Exponential Smoothing time-series forecasting (Row 10.2).
-Replaces the earlier ARIMA(1,1,1) model -- see the module docstring below
-for why. Wraps statsmodels so the rest of the app deals with a simple
-"give me N days of predictions" interface, not the fitting/forecasting
-API directly. No new dependency: statsmodels already ships
-ExponentialSmoothing alongside ARIMA.
+Replaces the earlier ARIMA(1,1,1) model -- see below for why.
+
+Uses a hand-written additive Holt-Winters implementation
+(apps.forecasting.ml.holt_winters) rather than
+statsmodels.tsa.holtwinters.ExponentialSmoothing. The algorithm is the
+same; what changed is the dependency footprint. statsmodels pulls in
+scipy purely to run its parameter optimizer, and on PythonAnywhere's free
+tier that's ~168MB of a 512MB total disk quota for one function call --
+see apps/forecasting/ml/holt_winters.py's module docstring for the full
+reasoning and what's different about how the smoothing parameters get
+chosen.
 
 Why Holt-Winters over ARIMA: the cafe's own daily sales genuinely show
 weekly seasonality (weekend spikes -- see the Weekly Demand Pattern
@@ -18,11 +24,9 @@ divides by the seasonal/trend level, which is undefined (or requires
 special-casing) at zero. Additive has no such restriction.
 """
 
-import warnings
-
 import numpy as np
-from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
+from apps.forecasting.ml import holt_winters
 from apps.forecasting.ml.data_prep import has_sufficient_history
 
 # Weekly seasonality (7-day cycle), matching the cafe's own observed
@@ -30,16 +34,14 @@ from apps.forecasting.ml.data_prep import has_sufficient_history
 # general-purpose default for daily retail sales without hand-tuning per
 # product, same spirit as the ARIMA(1,1,1) default it replaces.
 SEASONAL_PERIODS = 7
-TREND = "add"
-SEASONAL = "add"
 
 # Holt-Winters' seasonal component needs at least 2 full seasonal cycles
-# to estimate reliably -- below this, statsmodels either refuses to fit
-# or produces an unreliable seasonal estimate. has_sufficient_history's
-# own 14-day floor already happens to satisfy this (2 x 7), which is
-# convenient but not a coincidence worth relying on if SEASONAL_PERIODS
-# ever changes -- this constant exists so the two stay connected on
-# purpose, not by accident.
+# to estimate reliably -- below this, the fit either isn't meaningful or
+# can't be computed at all (holt_winters.fit needs 2*m points just for
+# its initialization step). has_sufficient_history's own 14-day floor
+# already happens to satisfy this (2 x 7), which is convenient but not a
+# coincidence worth relying on if SEASONAL_PERIODS ever changes -- this
+# constant exists so the two stay connected on purpose, not by accident.
 MINIMUM_SEASONAL_CYCLES = 2
 
 
@@ -58,26 +60,15 @@ def _has_enough_for_seasonal_fit(series):
     """Holt-Winters with a 7-day seasonal period needs at least
     MINIMUM_SEASONAL_CYCLES x SEASONAL_PERIODS real data points to
     estimate the seasonal component at all -- fitting on less either
-    raises inside statsmodels or silently produces a degenerate
-    seasonal estimate. Checked explicitly here rather than letting
-    statsmodels fail unpredictably."""
+    fails outright or silently produces a degenerate seasonal estimate.
+    Checked explicitly here rather than letting the fit fail
+    unpredictably."""
     return len(series) >= MINIMUM_SEASONAL_CYCLES * SEASONAL_PERIODS
 
 
 def _fit_holtwinters(series):
-    with warnings.catch_warnings():
-        # statsmodels emits routine convergence warnings on short or
-        # unusual series that don't indicate a real problem -- silenced
-        # here rather than left to alarm whoever reads the logs.
-        warnings.simplefilter("ignore")
-        model = ExponentialSmoothing(
-            series,
-            trend=TREND,
-            seasonal=SEASONAL,
-            seasonal_periods=SEASONAL_PERIODS,
-            initialization_method="estimated",
-        )
-        return model.fit()
+    values = series.to_numpy(dtype=float)
+    return holt_winters.fit(values, m=SEASONAL_PERIODS)
 
 
 def _compute_holdout_mae(series, holdout_days=7):
@@ -100,9 +91,9 @@ def _compute_holdout_mae(series, holdout_days=7):
         return None
 
     try:
-        fitted = _fit_holtwinters(train)
-        predicted = fitted.forecast(steps=holdout_days)
-        mae = float(np.mean(np.abs(predicted.values - actual_holdout.values)))
+        fit_result = _fit_holtwinters(train)
+        predicted = np.array(holt_winters.forecast(fit_result, holdout_days))
+        mae = float(np.mean(np.abs(predicted - actual_holdout.to_numpy(dtype=float))))
         return round(mae, 2)
     except Exception:
         # A holdout-validation failure shouldn't block the real forecast
@@ -131,9 +122,8 @@ def generate_forecast(series, steps=7):
     mae = _compute_holdout_mae(series)
 
     try:
-        fitted = _fit_holtwinters(series)
-        forecast_result = fitted.forecast(steps=steps)
-        predicted_values = [round(float(v), 2) for v in forecast_result.values]
+        fit_result = _fit_holtwinters(series)
+        predicted_values = [round(float(v), 2) for v in holt_winters.forecast(fit_result, steps)]
         # Holt-Winters can occasionally predict negative demand on a
         # noisy/short series, which is meaningless for physical unit
         # sales -- clamped to zero rather than reported as-is.
