@@ -11,9 +11,27 @@
             stock section further down.
         </p>
     </div>
-    <a href="{% url 'forecasting:decision_support' %}" class="btn btn-sm" style="background: var(--jc-orange); color: #fff;">
-        AI Insights &amp; Decision Support
-    </a>
+    <div class="d-flex gap-2 flex-shrink-0">
+        <a href="{% url 'forecasting:export_resource_report' %}{% if selected_branch %}?branch={{ selected_branch.pk }}{% endif %}"
+           class="btn btn-jc-outline btn-sm d-inline-flex align-items-center gap-1">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M8 1.5v8.5m0 0L5 7m3 3 3-3M2.5 11v2a1.5 1.5 0 0 0 1.5 1.5h8a1.5 1.5 0 0 0 1.5-1.5v-2"
+                      stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Export Report
+        </a>
+        <a href="{% url 'kahero:upload' %}" class="btn btn-jc-teal btn-sm d-inline-flex align-items-center gap-1"
+           title="Import Alangilan branch sales data from a KaHero POS export">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M8 10.5V2m0 0L5 5m3-3 3 3M2.5 11v2a1.5 1.5 0 0 0 1.5 1.5h8a1.5 1.5 0 0 0 1.5-1.5v-2"
+                      stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Import (KaHero)
+        </a>
+        <a href="{% url 'forecasting:decision_support' %}" class="btn btn-sm" style="background: var(--jc-orange); color: #fff;">
+            AI Insights &amp; Decision Support
+        </a>
+    </div>
 </div>
 
 <div class="row g-3 mb-4">

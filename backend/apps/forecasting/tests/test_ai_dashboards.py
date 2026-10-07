@@ -436,6 +436,55 @@ class TestResourceManagementDashboardView:
         assert unscoped_other.context["resource_status"]["critical_count"] == 0
 
 
+class TestExportResourceReportView:
+    """Export Report button (Resource Management topbar): a CSV mirroring
+    exactly what's on screen for the currently selected branch."""
+
+    def test_owner_can_export(self, owner_client):
+        response = owner_client.get(reverse("forecasting:export_resource_report"))
+        assert response.status_code == 200
+        assert response["Content-Type"] == "text/csv"
+        assert "attachment;" in response["Content-Disposition"]
+
+    def test_non_owner_cannot_export(self, client, cashier):
+        client.force_login(cashier)
+        response = client.get(reverse("forecasting:export_resource_report"))
+        assert response.status_code == 403
+
+    def test_material_alert_appears_in_csv(self, owner_client):
+        commissary = Branch.objects.create(
+            name="Commissary", code="COMMISSARY2", is_commissary=True
+        )
+        flour = Product.objects.create(
+            name="Flour (kg)", price="55.00", product_type=Product.ProductType.MATERIAL
+        )
+        InventoryRiskScore.objects.create(
+            branch=commissary,
+            product=flour,
+            risk_level="HIGH",
+            quantity_on_hand=2,
+            avg_daily_demand=5.0,
+            days_of_stock_left=0.4,
+        )
+
+        response = owner_client.get(reverse("forecasting:export_resource_report"))
+        assert b"Flour (kg)" in response.content
+
+    def test_finished_goods_section_reflects_the_selected_branch(self, owner_client, branch):
+        from apps.inventory.models import Inventory, Product as InventoryProduct
+
+        cashew = InventoryProduct.objects.create(
+            name="Cashew Nuts", price="650.00", reorder_threshold=10
+        )
+        Inventory.objects.create(branch=branch, product=cashew, quantity_on_hand=0)
+
+        response = owner_client.get(
+            reverse("forecasting:export_resource_report"), {"branch": branch.pk}
+        )
+        assert branch.name.encode() in response.content
+        assert b"Cashew Nuts" in response.content
+
+
 class TestDecisionSupportShellContext:
     """Batch 2: decision_support now extends admin_base.html too."""
 
