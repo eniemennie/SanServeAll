@@ -1,17 +1,28 @@
 import os
+from pathlib import Path
+
 from .base import *  # noqa
 
 DEBUG = False
 ALLOWED_HOSTS = os.environ.get("STAGING_ALLOWED_HOSTS", "").split(",")
 
+# SQLite, not MySQL -- same deployment-driven reasoning as production.py
+# (see that file's module-level comment for the full explanation). A
+# separate file from production's so staging and production never
+# accidentally share one database file if they're ever run on the same
+# machine.
+_default_sqlite_path = Path.home() / "data" / "sanserveall_staging.sqlite3"
+_sqlite_path = Path(os.environ.get("SQLITE_DB_PATH", str(_default_sqlite_path)))
+_sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.mysql",
-        "NAME": os.environ["DB_NAME"],
-        "USER": os.environ["DB_USER"],
-        "PASSWORD": os.environ["DB_PASSWORD"],
-        "HOST": os.environ.get("DB_HOST", "localhost"),
-        "PORT": os.environ.get("DB_PORT", "3306"),
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": str(_sqlite_path),
+        "OPTIONS": {
+            "init_command": "PRAGMA journal_mode=WAL;",
+            "timeout": 20,
+        },
     }
 }
 
