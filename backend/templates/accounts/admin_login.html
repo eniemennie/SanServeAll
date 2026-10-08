@@ -1,85 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Admin Login - SanServeAll{% endblock %}
-{% block extra_css %}
-<style>
-    .jc-admin-login-bg {
-        min-height: 100vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: var(--jc-cream);
-        position: relative;
-        padding: 1.5rem;
-    }
-    .jc-admin-back-link {
-        position: absolute;
-        top: 1.75rem;
-        left: 1.75rem;
-        color: var(--jc-text);
-        text-decoration: none;
-        font-weight: 500;
-        display: inline-flex;
-        align-items: center;
-        gap: 0.4rem;
-    }
-    .jc-admin-back-link:hover { color: var(--jc-orange-dark); }
-    .jc-admin-login-card {
-        background: var(--jc-white);
-        border-radius: var(--jc-radius);
-        box-shadow: 0 10px 30px rgba(30, 42, 58, 0.08);
-        max-width: 440px;
-        width: 100%;
-        padding: 2.75rem 2.5rem;
-        text-align: center;
-    }
-    .jc-admin-login-card .jc-logo-img { height: 68px; margin-bottom: 0.5rem; }
-    .jc-admin-login-subtitle {
-        color: var(--jc-text-muted);
-        margin-bottom: 1.75rem;
-    }
-    .jc-admin-login-card .form-label {
-        text-align: left;
-        display: block;
-        color: var(--jc-text);
-        font-weight: 500;
-    }
-    .jc-admin-login-card .form-control {
-        border-radius: var(--jc-radius-sm);
-        border-color: var(--jc-tan);
-        padding: 0.65rem 0.9rem;
-    }
-    .jc-admin-login-card .form-control:focus {
-        border-color: var(--jc-orange);
-        box-shadow: 0 0 0 0.2rem rgba(232, 139, 90, 0.2);
-    }
-    .jc-password-wrap { position: relative; }
-    .jc-password-toggle {
-        position: absolute;
-        right: 0.75rem;
-        top: 50%;
-        transform: translateY(-50%);
-        background: none;
-        border: none;
-        padding: 0;
-        color: var(--jc-text-muted);
-        display: flex;
-        cursor: pointer;
-    }
-    .jc-password-toggle:hover { color: var(--jc-text); }
-</style>
-{% endblock %}
 {% block content %}
-<div class="jc-admin-login-bg">
-    <a href="{% url 'core:landing' %}" class="jc-admin-back-link">
+<div class="jc-auth-bg">
+    <a href="{% url 'core:landing' %}" class="jc-auth-back-link">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M10 12.5L5.5 8L10 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         Back to Home
     </a>
 
-    <div class="jc-admin-login-card">
+    <div class="jc-auth-card">
         {% include "partials/logo.html" %}
-        <p class="jc-admin-login-subtitle">Admin Dashboard</p>
+        <p class="jc-auth-subtitle">Admin Dashboard</p>
 
         {% if error %}
             <div class="alert alert-danger py-2 text-start">{{ error }}</div>
