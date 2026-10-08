@@ -28,6 +28,19 @@ DATABASES = {
 
 MIDDLEWARE.insert(1, "whitenoise.middleware.WhiteNoiseMiddleware")  # noqa: F405
 
+# Same HTTPS hardening as production.py (see that file's module-level
+# comment for the full explanation of each). Staging is reached over a
+# real public hostname just like production, so it deserves the same
+# protection -- without this, PythonAnywhere's "Force HTTPS" toggle only
+# redirects at the edge while session/CSRF cookies still travel without
+# the Secure flag, and a proxy-terminated HTTPS request would otherwise
+# loop forever trying to redirect itself.
+SECURE_SSL_REDIRECT = True
+SESSION_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = True
+SECURE_HSTS_SECONDS = 31536000
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
 # Same reasoning as production.py's CSRF_TRUSTED_ORIGINS -- without this,
 # every POST form submission gets a CSRF 403 once DEBUG=False and the
 # site is reached over HTTPS, which it will be on any real host.
