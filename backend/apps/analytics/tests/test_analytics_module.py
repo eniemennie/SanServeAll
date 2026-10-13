@@ -5,6 +5,7 @@ Performance (Row 9.2), Resource Consumption & Operational Performance
 """
 
 from datetime import timedelta
+from decimal import Decimal
 
 import pytest
 from django.urls import reverse
@@ -69,6 +70,41 @@ def _completed_sale(branch, cashier, product, quantity, unit_price, amount_tende
     return transaction
 
 
+def _completed_sale_with_discount(
+    branch,
+    cashier,
+    product,
+    quantity,
+    unit_price,
+    discount_category,
+    discount_type,
+    discount_amount,
+    when=None,
+):
+    """Creates a COMPLETED sale with a whole-order discount applied,
+    amount_tendered set to the actual (post-discount) grand_total --
+    the Activity 2 regression scenario (Oct 2026): a discounted sale
+    whose dashboard revenue should reflect what was actually collected,
+    not the pre-discount subtotal."""
+    transaction = SalesTransaction.objects.create(
+        branch=branch,
+        cashier=cashier,
+        status=SalesTransaction.Status.COMPLETED,
+        payment_method="CASH",
+        transaction_discount_category=discount_category,
+        transaction_discount_type=discount_type,
+        transaction_discount_amount=Decimal(discount_amount),
+        completed_at=when or timezone.now(),
+    )
+    SalesItem.objects.create(
+        transaction=transaction, product=product, unit_price=unit_price, quantity=quantity
+    )
+    transaction.refresh_from_db()
+    transaction.amount_tendered = transaction.grand_total
+    transaction.save()
+    return transaction
+
+
 class TestSalesSummary:
     def test_revenue_uses_sale_total_not_amount_tendered(self, branch, cashier, latte):
         """The critical correctness test: a Php375 sale paid with a
@@ -120,6 +156,35 @@ class TestSalesSummary:
         assert summary["total_units_sold"] == 5
         assert summary["total_transactions"] == 1
 
+    def test_revenue_reflects_transaction_wide_discount(self, branch, cashier, latte):
+        """Activity 2 regression scenario (Oct 2026), now fixed: a
+        Php500 subtotal with a 20% whole-order discount actually
+        collects Php400 -- the dashboard must show Php400, not the
+        pre-discount Php500 it showed before this fix."""
+        _completed_sale_with_discount(
+            branch,
+            cashier,
+            latte,
+            quantity=4,
+            unit_price="125.00",
+            discount_category="SC2",
+            discount_type="PERCENT",
+            discount_amount="20",
+        )
+
+        summary = services.get_sales_summary(branch=branch)
+        assert summary["total_revenue"] == pytest.approx(400.00)
+
+    def test_sale_with_no_discount_still_reports_full_subtotal(self, branch, cashier, latte):
+        """Guards against an over-correction -- a sale with no
+        transaction-wide discount must still report its full subtotal,
+        not accidentally zero it out."""
+        _completed_sale(
+            branch, cashier, latte, quantity=2, unit_price="125.00", amount_tendered="250.00"
+        )
+        summary = services.get_sales_summary(branch=branch)
+        assert summary["total_revenue"] == pytest.approx(250.00)
+
 
 class TestWeeklySalesTrend:
     def test_returns_requested_number_of_weeks(self, branch, cashier, latte):
@@ -132,6 +197,20 @@ class TestWeeklySalesTrend:
         )
         trend = services.get_weekly_sales_trend(branch=branch, weeks=1)
         assert trend[0]["revenue"] == pytest.approx(250.00)
+
+    def test_trend_reflects_transaction_wide_discount(self, branch, cashier, latte):
+        _completed_sale_with_discount(
+            branch,
+            cashier,
+            latte,
+            quantity=4,
+            unit_price="125.00",
+            discount_category="SC2",
+            discount_type="PERCENT",
+            discount_amount="20",
+        )
+        trend = services.get_weekly_sales_trend(branch=branch, weeks=1)
+        assert trend[0]["revenue"] == pytest.approx(400.00)
 
 
 class TestTopProducts:
@@ -314,6 +393,20 @@ class TestBranchPerformance:
         assert rows[0]["units_sold"] == 0
         assert rows[0]["orders"] == 0
 
+    def test_revenue_reflects_transaction_wide_discount(self, branch, cashier, latte):
+        _completed_sale_with_discount(
+            branch,
+            cashier,
+            latte,
+            quantity=4,
+            unit_price="125.00",
+            discount_category="SC2",
+            discount_type="PERCENT",
+            discount_amount="20",
+        )
+        rows = {r["branch"].pk: r for r in services.get_branch_performance()}
+        assert rows[branch.pk]["revenue"] == pytest.approx(400.00)
+
 
 class TestSalesSummaryWithToggles:
     """Dashboard Home batch: the three real Total Revenue toggles."""
@@ -411,6 +504,21 @@ class TestWeeklySalesTrendByBranch:
         assert len(result["week_labels"]) == 8
         for series in result["series"]:
             assert len(series["revenue"]) == 8
+
+    def test_revenue_reflects_transaction_wide_discount(self, branch, cashier, latte):
+        _completed_sale_with_discount(
+            branch,
+            cashier,
+            latte,
+            quantity=4,
+            unit_price="125.00",
+            discount_category="SC2",
+            discount_type="PERCENT",
+            discount_amount="20",
+        )
+        result = services.get_weekly_sales_trend_by_branch(weeks=1)
+        series = next(s for s in result["series"] if s["branch_name"] == branch.name)
+        assert series["revenue"][0] == pytest.approx(400.00)
 
 
 class TestReportsHubView:
