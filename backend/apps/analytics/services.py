@@ -21,10 +21,23 @@ def get_sales_summary(branch=None, days=30):
     3-28): total revenue, transaction count, units sold, average daily
     revenue over the given window.
 
-    Revenue is summed from SalesItem (quantity x unit_price), NOT from
-    SalesTransaction.amount_tendered -- the latter is what the customer
+    Revenue is each transaction's grand_total (SalesTransaction's own
+    property: item subtotals minus that transaction's whole-order
+    discount, if any) -- NOT a raw SUM(quantity * unit_price) over
+    SalesItem, which is mathematically identical to the PRE-discount
+    subtotal and overstates revenue by the full discount amount on any
+    discounted sale (Activity 2 regression testing, Oct 2026: confirmed
+    via a Php500 subtotal / 20% discount / Php400 actually-collected
+    sale showing as Php500 on this dashboard). Also NOT
+    SalesTransaction.amount_tendered -- that's what the customer
     physically handed over (e.g. Php500 tendered for a Php375 sale) and
     would overstate revenue by however much change was given back.
+
+    Iterates transactions in Python (via grand_total/items.all(), both
+    prefetched) rather than a single SQL aggregate, since grand_total's
+    discount math isn't expressible as a plain SUM() -- a percent
+    discount is computed against each transaction's own subtotal, not a
+    column that can be summed first and discounted after.
     """
     since = timezone.now() - timedelta(days=days)
     transactions = SalesTransaction.objects.filter(
@@ -32,13 +45,11 @@ def get_sales_summary(branch=None, days=30):
     )
     if branch is not None:
         transactions = transactions.filter(branch=branch)
+    transactions = list(transactions.prefetch_related("items"))
 
-    items = SalesItem.objects.filter(transaction__in=transactions)
-    total_revenue = items.aggregate(total=Sum(F("quantity") * F("unit_price")))["total"] or Decimal(
-        "0"
-    )
-    total_transactions = transactions.count()
-    total_units_sold = items.aggregate(total=Sum("quantity"))["total"] or 0
+    total_revenue = sum((txn.grand_total for txn in transactions), Decimal("0.00"))
+    total_transactions = len(transactions)
+    total_units_sold = sum((item.quantity for txn in transactions for item in txn.items.all()), 0)
     average_daily_revenue = (total_revenue / days) if days else Decimal("0")
 
     return {
@@ -54,8 +65,9 @@ def get_weekly_sales_trend(branch=None, weeks=8):
     """Revenue per week for the last N weeks -- feeds the Chart.js line
     chart on the Sales Analytics Dashboard (Fig. 3-28). Returned oldest
     week first, so it plots left-to-right chronologically. Same
-    SalesItem-based revenue calculation as get_sales_summary, for the
-    same reason (amount_tendered is not the sale total)."""
+    discount-aware grand_total revenue calculation as get_sales_summary,
+    for the same reason (a raw SalesItem SUM() is the pre-discount
+    subtotal, not what was actually collected)."""
     now = timezone.now()
     trend = []
     for week_offset in range(weeks - 1, -1, -1):
@@ -69,10 +81,9 @@ def get_weekly_sales_trend(branch=None, weeks=8):
         )
         if branch is not None:
             transactions = transactions.filter(branch=branch)
+        transactions = transactions.prefetch_related("items")
 
-        revenue = SalesItem.objects.filter(transaction__in=transactions).aggregate(
-            total=Sum(F("quantity") * F("unit_price"))
-        )["total"] or Decimal("0")
+        revenue = sum((txn.grand_total for txn in transactions), Decimal("0.00"))
         trend.append({"week_label": week_start.strftime("%b %d"), "revenue": float(revenue)})
 
     return trend
@@ -84,7 +95,10 @@ def get_weekly_sales_trend_by_branch(weeks=8):
     which plots Batangas/Lipa/Alangilan as three separate lines rather
     than one aggregate line. Only meaningful for "All Branches"; when a
     specific branch is selected, the Dashboard reuses the single-line
-    get_weekly_sales_trend instead."""
+    get_weekly_sales_trend instead. Same discount-aware grand_total
+    revenue calculation as get_weekly_sales_trend -- see that
+    function's docstring and get_sales_summary's for why a raw
+    SalesItem SUM() is wrong here."""
     from apps.accounts.models import Branch
 
     now = timezone.now()
@@ -98,12 +112,13 @@ def get_weekly_sales_trend_by_branch(weeks=8):
         week_starts.append(week_start.strftime("%b %d"))
 
         for b in branches:
-            revenue = SalesItem.objects.filter(
-                transaction__branch=b,
-                transaction__status=SalesTransaction.Status.COMPLETED,
-                transaction__completed_at__gte=week_start,
-                transaction__completed_at__lt=week_end,
-            ).aggregate(total=Sum(F("quantity") * F("unit_price")))["total"] or Decimal("0")
+            branch_transactions = SalesTransaction.objects.filter(
+                branch=b,
+                status=SalesTransaction.Status.COMPLETED,
+                completed_at__gte=week_start,
+                completed_at__lt=week_end,
+            ).prefetch_related("items")
+            revenue = sum((txn.grand_total for txn in branch_transactions), Decimal("0.00"))
             per_branch_revenue[b.pk].append(float(revenue))
 
     return {
@@ -123,24 +138,29 @@ def get_branch_performance(days=30):
     production batch can't honestly be attributed to one branch). Rather
     than invent a number, Units Sold is used as the real,
     per-branch-derivable substitute for that third figure.
+
+    Revenue uses each transaction's discount-aware grand_total, same as
+    get_sales_summary -- see that function's docstring for why a raw
+    SalesItem SUM() overstates revenue on discounted sales.
     """
     from apps.accounts.models import Branch
 
     since = timezone.now() - timedelta(days=days)
     results = []
     for branch in Branch.objects.filter(is_active=True, is_commissary=False):
-        transactions = SalesTransaction.objects.filter(
-            branch=branch, status=SalesTransaction.Status.COMPLETED, completed_at__gte=since
+        transactions = list(
+            SalesTransaction.objects.filter(
+                branch=branch, status=SalesTransaction.Status.COMPLETED, completed_at__gte=since
+            ).prefetch_related("items")
         )
-        agg = SalesItem.objects.filter(transaction__in=transactions).aggregate(
-            revenue=Sum(F("quantity") * F("unit_price")), units=Sum("quantity")
-        )
+        revenue = sum((txn.grand_total for txn in transactions), Decimal("0.00"))
+        units_sold = sum((item.quantity for txn in transactions for item in txn.items.all()), 0)
         results.append(
             {
                 "branch": branch,
-                "revenue": agg["revenue"] or Decimal("0"),
-                "units_sold": agg["units"] or 0,
-                "orders": transactions.count(),
+                "revenue": revenue,
+                "units_sold": units_sold,
+                "orders": len(transactions),
             }
         )
     return results
@@ -236,7 +256,18 @@ def get_sales_summary_with_toggles(
 
 def get_top_products(branch=None, days=30, limit=5):
     """Best-selling products by units sold over the window -- the "top
-    products" panel on the Analytics Dashboard (Fig. 3-19)."""
+    products" panel on the Analytics Dashboard (Fig. 3-19).
+
+    NOTE (same discount issue tracked on the dashboard's revenue totals,
+    not fixed here): this panel's per-product `revenue` is still a raw
+    quantity x unit_price SUM(), i.e. pre-transaction-discount. Unlike
+    get_sales_summary's single total, a whole-order discount here can't
+    be honestly allocated back down to individual line items (which
+    share of a flat/percent order discount belongs to which product?),
+    so this is left as-is rather than introducing an arbitrary
+    allocation rule. Ranking by units_sold (what this panel is actually
+    for) is unaffected either way; only the displayed revenue figure per
+    product should be read as pre-discount."""
     since = timezone.now() - timedelta(days=days)
     items = SalesItem.objects.filter(
         transaction__status=SalesTransaction.Status.COMPLETED,
