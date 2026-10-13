@@ -11,7 +11,6 @@ urlpatterns = [
     path("cashier-lock/<int:user_id>/", views.CashierLockView.as_view(), name="cashier_lock"),
     path("select-branch/", views.BranchSelectionView.as_view(), name="select_branch"),
     path("pin/", views.CashierPinView.as_view(), name="cashier_pin"),
-    path("dashboard/", views.dashboard_placeholder, name="dashboard"),
     # Admin login + 2FA (Row 16, Row 17)
     path("admin/login/", views.AdminLoginView.as_view(), name="admin_login"),
     path("admin/2fa/setup/", views.TwoFactorSetupView.as_view(), name="admin_2fa_setup"),
