@@ -40,6 +40,57 @@
         line-height: 1.6;
         margin: 1.75rem 0 2.5rem;
     }
+
+    /* Role-selection buttons (Row 19): replaces the old "Start Shift" /
+       "Sign In" pair with one button per role. Scoped to this page only
+       (not static/css/main.css) since this stacked icon-over-label card
+       shape is specific to the landing page's role picker -- the shared
+       .btn-jc-primary/.btn-jc-teal pill classes used elsewhere (POS,
+       Admin Login, etc.) are untouched by this. */
+    .jc-role-grid {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 1rem;
+    }
+    .jc-role-btn {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.6rem;
+        flex: 1 1 160px;
+        max-width: 220px;
+        padding: 1.5rem 1rem;
+        border-radius: var(--jc-radius);
+        text-decoration: none;
+        color: #fff;
+        font-weight: 600;
+        font-size: 1rem;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+        transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+    }
+    .jc-role-btn:hover,
+    .jc-role-btn:focus {
+        color: #fff;
+        transform: translateY(-3px);
+        box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+    }
+    .jc-role-btn-icon {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: rgba(255,255,255,0.28);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .jc-role-btn-orange { background-color: var(--jc-orange); }
+    .jc-role-btn-orange:hover,
+    .jc-role-btn-orange:focus { background-color: var(--jc-orange-dark); }
+    .jc-role-btn-teal { background-color: var(--jc-teal); }
+    .jc-role-btn-teal:hover,
+    .jc-role-btn-teal:focus { background-color: #4A7684; }
 </style>
 {% endblock %}
 {% block content %}
@@ -50,9 +101,25 @@
             Experience the perfect blend of artisanal coffee, fresh pastries, and
             warm hospitality. Your neighborhood cafe where every cup tells a story.
         </p>
-        <div class="d-flex gap-3 justify-content-center flex-wrap">
-            <a href="{% url 'accounts:select_cashier' %}" class="btn btn-jc-primary btn-lg px-4">Start Shift</a>
-            <a href="{% url 'accounts:admin_login' %}" class="btn btn-jc-teal btn-lg px-4">Sign In</a>
+        <div class="jc-role-grid">
+            <a href="{% url 'accounts:select_cashier' %}" class="jc-role-btn jc-role-btn-orange">
+                <span class="jc-role-btn-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"></path><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"></path><line x1="6" y1="1" x2="6" y2="4"></line><line x1="10" y1="1" x2="10" y2="4"></line><line x1="14" y1="1" x2="14" y2="4"></line></svg>
+                </span>
+                Cashier
+            </a>
+            <a href="{% url 'accounts:admin_login' %}" class="jc-role-btn jc-role-btn-teal">
+                <span class="jc-role-btn-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>
+                </span>
+                Admin / Owner
+            </a>
+            <a href="{% url 'accounts:login' %}" class="jc-role-btn jc-role-btn-orange">
+                <span class="jc-role-btn-icon">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                </span>
+                Commissary
+            </a>
         </div>
     </div>
 </div>
