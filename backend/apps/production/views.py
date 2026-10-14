@@ -16,9 +16,46 @@ from django.utils import timezone
 
 from apps.accounts.models import Role
 from apps.accounts.permissions import role_required
+from apps.inventory import services as inventory_services
 from apps.inventory.models import Product
 from apps.production import services
 from apps.production.models import ProductionRecord
+
+
+@role_required(Role.COMMISSARY_STAFF, Role.OWNER_ADMIN)
+def commissary_dashboard(request):
+    """Commissary Staff's landing page after login/branch selection.
+
+    Replaces the old generic `accounts.dashboard_placeholder` -- that view
+    was an explicitly temporary stand-in (per its own docstring) for
+    whichever role had no dedicated dashboard yet. Commissary Staff was
+    the only role still landing there; this gives them a real one built
+    from data this app already has, rather than a static welcome page.
+
+    Deliberately NOT wrapped in admin_base.html's full sidebar -- that
+    shell's nav links (Settings, Reports, Product Availability) are
+    Owner/Admin-only views that would 403 a Commissary Staff user who
+    clicked them (a known, pre-existing gap documented in
+    batch_management's own docstring). Rather than repeat that on a new
+    page, this one uses base.html directly with just the links this role
+    actually has: Record Production and Batch Management.
+    """
+    commissary = services.get_commissary_branch()
+    recent_records = ProductionRecord.objects.select_related("product").order_by("-created_at")[:5]
+    resource_status = (
+        inventory_services.get_resource_status_summary(branch=commissary) if commissary else None
+    )
+
+    return render(
+        request,
+        "production/commissary_dashboard.html",
+        {
+            "total_output_30d": services.get_total_output(days=30),
+            "recent_records": recent_records,
+            "resource_status": resource_status,
+            "commissary": commissary,
+        },
+    )
 
 
 @role_required(Role.COMMISSARY_STAFF, Role.OWNER_ADMIN)

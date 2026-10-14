@@ -103,7 +103,7 @@ class TestBranchSelection:
         client.force_login(commissary_worker)
         response = client.get(reverse("accounts:select_branch"))
         assert response.status_code == 302
-        assert response.url == reverse("accounts:dashboard")
+        assert response.url == reverse("production:dashboard")
 
     def test_owner_admin_sees_all_active_branches_in_picker(self, client, owner, branches):
         client.force_login(owner)

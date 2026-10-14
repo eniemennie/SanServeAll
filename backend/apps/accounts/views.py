@@ -143,7 +143,7 @@ class BranchSelectionView(LoginRequiredMixin, View):
             return redirect("accounts:cashier_pin")
         if request.user.role and request.user.role.name == Role.OWNER_ADMIN:
             return redirect("accounts:admin_dashboard")
-        return redirect("accounts:dashboard")
+        return redirect("production:dashboard")
 
 
 class CashierPinView(LoginRequiredMixin, View):
@@ -172,15 +172,6 @@ class CashierPinView(LoginRequiredMixin, View):
             self.template_name,
             {"error": "Incorrect PIN. Please try again."},
         )
-
-
-@login_required
-def dashboard_placeholder(request):
-    """Temporary landing page post-login/PIN. Real role-specific dashboards
-    (POS ordering, Owner/Admin analytics) land in later weeks -- this exists
-    so the Week 3 flow has somewhere valid to redirect to and be tested
-    end-to-end rather than dead-ending at a 404."""
-    return render(request, "accounts/dashboard_placeholder.html")
 
 
 def _base32_secret(device):
