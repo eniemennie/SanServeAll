@@ -177,4 +177,60 @@ class TestLogout:
 
         client.post(reverse("accounts:logout"))
         assert "pos_unlocked" not in client.session
+
+
+class TestCommissaryLogin:
+    def test_commissary_login_page_loads(self, client):
+        response = client.get(reverse("accounts:commissary_login"))
+        assert response.status_code == 200
+        assert b"Commissary Staff Login" in response.content
+
+    def test_valid_commissary_credentials_log_in_and_reach_dashboard(
+        self, client, commissary_worker
+    ):
+        response = client.post(
+            reverse("accounts:commissary_login"),
+            {"username": "commissary1", "password": "testpass123"},
+        )
+        assert response.status_code == 302
+        assert response.url == reverse("accounts:select_branch")
+        assert response.wsgi_request.user.is_authenticated
+
+        # BranchSelectionView's existing role-based routing (Row 14/15) is
+        # what actually lands a Commissary Staff account on their
+        # dashboard -- following the redirect proves that routing still
+        # applies correctly to a user who came in through this new page.
+        response = client.get(response.url)
+        assert response.status_code == 302
+        assert response.url == reverse("production:dashboard")
+
+    def test_wrong_password_is_rejected(self, client, commissary_worker):
+        response = client.post(
+            reverse("accounts:commissary_login"),
+            {"username": "commissary1", "password": "wrongpassword"},
+        )
+        assert response.status_code == 200
+        assert not response.wsgi_request.user.is_authenticated
+        assert b"Invalid username or password" in response.content
+
+    def test_non_commissary_role_cannot_use_commissary_login_even_with_correct_credentials(
+        self, client, cashier
+    ):
+        """A BRANCH_STAFF account with perfectly valid credentials must
+        still be refused here -- this is a Commissary-Staff-only entry
+        point, mirroring how AdminLoginView guards admin/login/."""
+        response = client.post(
+            reverse("accounts:commissary_login"),
+            {"username": "cashier1", "password": "testpass123"},
+        )
+        assert response.status_code == 200
+        assert not response.wsgi_request.user.is_authenticated
+
+    def test_owner_admin_cannot_use_commissary_login_either(self, client, owner):
+        response = client.post(
+            reverse("accounts:commissary_login"),
+            {"username": "owner1", "password": "testpass123"},
+        )
+        assert response.status_code == 200
+        assert not response.wsgi_request.user.is_authenticated
         assert "selected_branch_id" not in client.session

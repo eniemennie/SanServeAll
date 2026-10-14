@@ -41,14 +41,14 @@ class TestLandingPage:
         response = client.get(reverse("core:landing"))
         assert reverse("accounts:admin_login").encode() in response.content
 
-    def test_commissary_button_links_to_staff_login(self, client):
-        """Commissary Staff has no tap-to-select or email+2FA flow of its
-        own -- it uses the same plain username/password login Branch Staff
-        and Owner/Admin can also reach, and BranchSelectionView's existing
-        role-based routing (not this button) is what sends a Commissary
-        Staff user on to production:dashboard after that."""
+    def test_commissary_button_links_to_commissary_login(self, client):
+        """Commissary Staff gets its own branded login screen (styled like
+        Admin/Owner's but username/password-based) rather than the bare
+        generic accounts:login screen -- BranchSelectionView's existing
+        role-based routing (not this button) is still what sends a
+        Commissary Staff user on to production:dashboard after that."""
         response = client.get(reverse("core:landing"))
-        assert reverse("accounts:login").encode() in response.content
+        assert reverse("accounts:commissary_login").encode() in response.content
 
     def test_shows_all_three_role_labels(self, client):
         response = client.get(reverse("core:landing"))
