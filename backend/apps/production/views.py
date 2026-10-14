@@ -32,13 +32,14 @@ def commissary_dashboard(request):
     the only role still landing there; this gives them a real one built
     from data this app already has, rather than a static welcome page.
 
-    Deliberately NOT wrapped in admin_base.html's full sidebar -- that
-    shell's nav links (Settings, Reports, Product Availability) are
-    Owner/Admin-only views that would 403 a Commissary Staff user who
-    clicked them (a known, pre-existing gap documented in
-    batch_management's own docstring). Rather than repeat that on a new
-    page, this one uses base.html directly with just the links this role
-    actually has: Record Production and Batch Management.
+    Wrapped in the same admin_base.html shell as the Owner/Admin screens
+    for visual consistency -- that shell's sidebar/topbar are role-aware
+    (see admin_base.html's own docstring), so a Commissary Staff user only
+    ever sees the three links this role can actually reach (Dashboard,
+    Record Production, Batch Logs); the Owner-only links (Settings,
+    Reports, Forecasting, Product Availability, Resource Management) are
+    not rendered at all for this role, rather than shown and then 403ing
+    on click.
     """
     commissary = services.get_commissary_branch()
     recent_records = ProductionRecord.objects.select_related("product").order_by("-created_at")[:5]
@@ -50,6 +51,7 @@ def commissary_dashboard(request):
         request,
         "production/commissary_dashboard.html",
         {
+            "active_nav": "dashboard",
             "total_output_30d": services.get_total_output(days=30),
             "recent_records": recent_records,
             "resource_status": resource_status,
@@ -96,7 +98,12 @@ def record_production(request):
     return render(
         request,
         "production/production_entry.html",
-        {"error": error, "materials": materials, "finished_goods": finished_goods},
+        {
+            "active_nav": "record",
+            "error": error,
+            "materials": materials,
+            "finished_goods": finished_goods,
+        },
     )
 
 
@@ -114,11 +121,9 @@ def batch_management(request):
     than filled with a fabricated value.
 
     Wrapped in the same Admin Shell as the Owner/Admin screens (matching
-    the reference design) even though Commissary Staff can also reach
-    this view -- there's no separate commissary-facing shell built yet.
-    A Commissary Staff user will see the full sidebar, including links
-    to Owner-only screens that would 403 if clicked; a known, pre-
-    existing gap this batch surfaces but doesn't solve on its own.
+    the reference design). Commissary Staff can also reach this view --
+    admin_base.html's sidebar is role-aware, so a Commissary Staff user
+    sees only their own three links here, not the Owner-only ones.
     """
     status_filter = request.GET.get("status", "")
     date_filter = request.GET.get("date", "")
@@ -172,4 +177,6 @@ def delete_production_record(request, record_id):
         record.delete()
         return redirect("production:batch_management")
 
-    return render(request, "production/confirm_delete.html", {"record": record})
+    return render(
+        request, "production/confirm_delete.html", {"active_nav": "batch", "record": record}
+    )
