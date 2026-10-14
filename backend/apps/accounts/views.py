@@ -241,6 +241,52 @@ class AdminLoginView(View):
         return redirect("accounts:admin_2fa_setup")
 
 
+class CommissaryLoginView(View):
+    """Commissary Staff Login (landing page role selector, Row 19).
+
+    Visually a sibling of AdminLoginView -- same jc-auth-* shell, card and
+    form styling -- but authenticates by username/password like the plain
+    staff Login/Start Screen, since Commissary Staff accounts have no
+    distinct email-first flow the way Owner/Admin's 2FA path needs. Only
+    succeeds for COMMISSARY_STAFF accounts; a correct password for any
+    other role is treated the same as a wrong one here, mirroring how
+    AdminLoginView guards its own entry point, so this page can't be used
+    as a second way into another role's account.
+
+    On success, hands off to the existing BranchSelectionView rather than
+    redirecting straight to production:dashboard -- that view is already
+    the single place role-based post-login routing happens (Row 14/15),
+    and a Commissary Staff account always resolves there to
+    production:dashboard, so access permissions and the redirect target
+    both stay governed by that one existing code path instead of being
+    duplicated here.
+    """
+
+    template_name = "accounts/commissary_login.html"
+
+    def get(self, request):
+        return render(request, self.template_name)
+
+    def post(self, request):
+        username = request.POST.get("username", "").strip()
+        password = request.POST.get("password", "")
+
+        authed = authenticate(request, username=username, password=password)
+        user = None
+        if authed is not None and authed.role and authed.role.name == Role.COMMISSARY_STAFF:
+            user = authed
+
+        if user is None:
+            return render(
+                request,
+                self.template_name,
+                {"error": "Invalid username or password."},
+            )
+
+        auth_login(request, user)
+        return redirect("accounts:select_branch")
+
+
 class TwoFactorSetupView(LoginRequiredMixin, View):
     """2FA enrollment (Row 17, finalized Row 12.4). Shown the first time
     an Owner/Admin logs in with no confirmed authenticator device yet.
