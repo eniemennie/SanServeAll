@@ -178,6 +178,33 @@ class TestLogout:
         client.post(reverse("accounts:logout"))
         assert "pos_unlocked" not in client.session
 
+    @pytest.mark.parametrize("user_fixture", ["cashier", "owner", "commissary_worker"])
+    def test_logout_redirects_to_the_landing_page_for_every_role(
+        self, client, user_fixture, request
+    ):
+        """Row 20: logging out always lands on the same public landing
+        page/role picker, whichever of the three login flows the user
+        came in through -- not a role-specific login screen."""
+        user = request.getfixturevalue(user_fixture)
+        client.force_login(user)
+        response = client.post(reverse("accounts:logout"))
+        assert response.status_code == 302
+        assert response.url == reverse("core:landing")
+
+    @pytest.mark.parametrize("user_fixture", ["cashier", "owner", "commissary_worker"])
+    def test_logout_actually_ends_the_session_for_every_role(self, client, user_fixture, request):
+        """Confirms the session is genuinely cleared, not just redirected
+        -- a protected dashboard must bounce back to login afterward."""
+        user = request.getfixturevalue(user_fixture)
+        client.force_login(user)
+
+        client.post(reverse("accounts:logout"))
+        assert not client.session.get("_auth_user_id")
+
+        response = client.get(reverse("accounts:select_branch"))
+        assert response.status_code == 302
+        assert "/accounts/login/" in response.url
+
 
 class TestCommissaryLogin:
     def test_commissary_login_page_loads(self, client):

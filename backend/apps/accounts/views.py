@@ -57,8 +57,22 @@ class SanServeAllLoginView(auth_views.LoginView):
 
 
 class SanServeAllLogoutView(auth_views.LogoutView):
-    """Also clears the PIN-unlock flag, so a new login always starts from
-    a locked POS state rather than inheriting a stale unlock."""
+    """Shared by all three roles -- Owner/Admin and Commissary Staff reach
+    it from admin_base.html's topbar, Cashier from the POS screen's own
+    logout button (Row 20) -- since Django's auth_logout() (called by the
+    parent class before this redirect) already flushes the session and
+    clears the authenticated user regardless of which role it was, with
+    no role-specific logic needed here.
+
+    Sends everyone back to the public landing page/role picker rather
+    than straight to any one login screen, so logging out always lands
+    on the same neutral starting point a first-time visitor sees, no
+    matter which of the three login flows they came in through. Also
+    clears the PIN-unlock flag, so a new login always starts from a
+    locked POS state rather than inheriting a stale unlock.
+    """
+
+    next_page = "core:landing"
 
     def dispatch(self, request, *args, **kwargs):
         request.session.pop("pos_unlocked", None)
