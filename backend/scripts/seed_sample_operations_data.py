@@ -76,13 +76,27 @@ Or:
 Run `scripts/seed_demo_data.py` FIRST if this is a brand new database --
 this script assumes the branches/roles/product catalog already exist
 and will raise a clear error if they don't.
+
+Removable: run() ends by writing scripts/sample_data_manifest.json, a
+record of exactly what this run changed or created -- the pre-seed
+value of every reorder_threshold and every Inventory.quantity_on_hand
+it touched, plus the primary-key "floor" below which no row it created
+(SalesTransaction, ProductionRecord, InventoryTransaction, Forecast,
+InventoryRiskScore, AIInsight) could exist. `remove_sample_operations_data.py`
+reads that file to undo precisely this run -- not a guess at which rows
+"look like" sample data, which risks sweeping up real client data once
+that starts coexisting in the same tables. See that script's own
+docstring for the one assumption this depends on (run it before real
+operational data starts flowing into the same tables).
 """
 
+import json
 import os
 import random
 import sys
 from datetime import timedelta
 from decimal import Decimal
+from pathlib import Path
 
 import django
 
@@ -91,15 +105,19 @@ if not django.apps.apps.ready:
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.development")
     django.setup()
 
+from django.db.models import Max  # noqa: E402
 from django.utils import timezone  # noqa: E402
 
 from apps.accounts.models import Branch, CashierPIN, Role, User  # noqa: E402
+from apps.forecasting.models import AIInsight, Forecast, InventoryRiskScore  # noqa: E402
 from apps.inventory import services as inventory_services  # noqa: E402
 from apps.inventory.models import Inventory, InventoryTransaction, Product  # noqa: E402
 from apps.pos import services as pos_services  # noqa: E402
 from apps.pos.models import SalesItem, SalesTransaction  # noqa: E402
 from apps.production import services as production_services  # noqa: E402
 from apps.production.models import ProductionRecord  # noqa: E402
+
+MANIFEST_PATH = Path(__file__).resolve().parent / "sample_data_manifest.json"
 
 # Fixed seed -- the generated history is reproducible run to run (useful
 # when comparing "before/after" screenshots for the manuscript), not a
@@ -500,6 +518,46 @@ def generate_forecasts_and_insights():
         print(f"  AI insight generation skipped ({exc.__class__.__name__}: {exc}).")
 
 
+def _max_pk(model):
+    return model.objects.aggregate(m=Max("pk"))["m"] or 0
+
+
+def _write_removal_manifest(reorder_snapshot, inventory_snapshot, pk_floor):
+    """Records exactly what this run is ABOUT to change or create, so
+    `remove_sample_operations_data.py` can undo precisely this run later
+    -- see that script's docstring and this module's docstring
+    ("Removable") for why a recorded manifest is used instead of a
+    guess at which rows "look like" sample data.
+
+    If a manifest from an earlier run already exists, its snapshot/floor
+    is kept instead of being overwritten -- it reflects the state before
+    ANY sample seeding happened, which is what removal should restore
+    to. Re-running this script (e.g. because the idempotency guard
+    mostly no-op'd) must never raise that floor, or the first run's
+    rows would end up below it and never get cleaned up."""
+    demo_usernames = [f"cashier_{b.code.lower()}" for b in _native_branches()] + [
+        "commissary_staff"
+    ]
+    if MANIFEST_PATH.exists():
+        existing = json.loads(MANIFEST_PATH.read_text())
+        reorder_snapshot = {int(k): v for k, v in existing["reorder_threshold_snapshot"].items()}
+        inventory_snapshot = {int(k): v for k, v in existing["inventory_snapshot"].items()}
+        pk_floor = existing["pk_floor"]
+        print(f"\n(A removal manifest already exists at {MANIFEST_PATH} -- keeping its original")
+        print(" pre-seed snapshot/floor rather than overwriting it with this run's.)")
+    manifest = {
+        "seeded_at": timezone.now().isoformat(),
+        "demo_usernames": demo_usernames,
+        "reorder_threshold_snapshot": {str(k): v for k, v in reorder_snapshot.items()},
+        "inventory_snapshot": {str(k): v for k, v in inventory_snapshot.items()},
+        "pk_floor": pk_floor,
+    }
+    MANIFEST_PATH.write_text(json.dumps(manifest, indent=2))
+    print(f"\nWrote removal manifest to {MANIFEST_PATH}.")
+    print("Run scripts/remove_sample_operations_data.py to undo this later, e.g. once")
+    print("the client's real data is ready to take its place.")
+
+
 def run():
     print("=" * 70)
     print("Seeding sample operational data for evaluation")
@@ -511,12 +569,26 @@ def run():
             "create branches, roles, and the product catalog."
         )
 
+    # Snapshot BEFORE anything below mutates these -- this is what makes
+    # a later, precise removal possible (see _write_removal_manifest).
+    reorder_snapshot = dict(Product.objects.values_list("id", "reorder_threshold"))
+    inventory_snapshot = dict(Inventory.objects.values_list("id", "quantity_on_hand"))
+    pk_floor = {
+        "sales_transaction": _max_pk(SalesTransaction),
+        "production_record": _max_pk(ProductionRecord),
+        "inventory_transaction": _max_pk(InventoryTransaction),
+        "forecast": _max_pk(Forecast),
+        "inventory_risk_score": _max_pk(InventoryRiskScore),
+        "ai_insight": _max_pk(AIInsight),
+    }
+
     cashiers, commissary_user, commissary_branch = ensure_demo_users()
     ensure_reorder_thresholds()
     ensure_starting_inventory(cashiers, commissary_branch)
     seed_operational_history(cashiers, commissary_user, commissary_branch)
     apply_demo_stock_snapshot(commissary_branch)
     generate_forecasts_and_insights()
+    _write_removal_manifest(reorder_snapshot, inventory_snapshot, pk_floor)
 
     print("\n" + "=" * 70)
     print("Done. Demo accounts (unchanged if they already existed):")
