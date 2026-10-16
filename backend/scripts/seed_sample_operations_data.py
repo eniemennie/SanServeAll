@@ -21,10 +21,16 @@ queryset `.update()` (which bypasses `auto_now_add`/`auto_now`, unlike
 run would produce and the data this script produces are structurally
 identical -- only the dates differ.
 
-Deliberately scoped to the two native-POS branches (Batangas City,
+Deliberately scoped to the real native-POS branches (Batangas City,
 Lipa City) for sales history -- Alangilan is modeled as KaHero-
 batch-import (Phase 2 decision), so simulating live POS sales there
-would misrepresent how that branch actually operates.
+would misrepresent how that branch actually operates. Any branch
+whose code is in EXCLUDED_BRANCH_CODES is also skipped -- a plain
+is_kahero_branch=False/is_commissary=False filter alone would treat
+ANY other branch row as a real location worth a full fake trading
+history, which is wrong for a leftover/placeholder branch (e.g. a
+"Test Branch" row some environments have sitting around from earlier
+manual testing) that was never a real operating location.
 
 Production and sales are simulated in ONE combined day-by-day loop
 (`seed_operational_history`), not two independent passes, because
@@ -127,6 +133,13 @@ random.seed(20261015)
 DAYS_OF_HISTORY = 90
 SKIP_THRESHOLD = 200  # see idempotency note above
 
+# Branch codes to never treat as a real operating location, however
+# they're flagged otherwise -- see the module docstring's "Deliberately
+# scoped" paragraph. A branch row left over from manual testing (code
+# "TEST") is the known case; add others here if a similar placeholder
+# branch ever turns up in a database this script runs against.
+EXCLUDED_BRANCH_CODES = {"TEST"}
+
 # Demo credentials -- printed at the end, not hidden. Change/rotate
 # these before a real public demo if that ever matters; for an
 # adviser evaluation they just need to be known and consistent.
@@ -152,7 +165,11 @@ REPLENISH_WEEKDAY = 0  # Monday
 
 
 def _native_branches():
-    return list(Branch.objects.filter(is_kahero_branch=False, is_commissary=False))
+    return list(
+        Branch.objects.filter(is_kahero_branch=False, is_commissary=False).exclude(
+            code__in=EXCLUDED_BRANCH_CODES
+        )
+    )
 
 
 def _days_ago(days):
