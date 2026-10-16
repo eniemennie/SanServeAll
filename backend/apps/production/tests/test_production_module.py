@@ -248,3 +248,185 @@ class TestBatchManagementView:
 
         flour_inventory = Inventory.objects.get(branch=commissary, product=flour)
         assert flour_inventory.quantity_on_hand == 45  # still deducted, not restored
+
+
+class TestGetTotalOutput:
+    """Dashboard Home batch: the Production Output KPI card (Fig. 3-19).
+    Deliberately system-wide -- see the service function's own docstring
+    for why a per-branch figure isn't honestly derivable."""
+
+    def test_sums_completed_runs_in_the_window(
+        self, commissary, commissary_staff, cake, flour, sugar
+    ):
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=20,
+            ingredient_rows=[
+                {"material_id": flour.pk, "quantity_used": 5},
+                {"material_id": sugar.pk, "quantity_used": 5},
+            ],
+        )
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=15,
+            ingredient_rows=[
+                {"material_id": flour.pk, "quantity_used": 3},
+                {"material_id": sugar.pk, "quantity_used": 3},
+            ],
+        )
+
+        assert services.get_total_output() == 35
+
+    def test_excludes_non_completed_runs(self, commissary, commissary_staff, cake, flour, sugar):
+        record = services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 2}],
+            status=ProductionRecord.Status.PENDING,
+        )
+        assert record.status == ProductionRecord.Status.PENDING
+        assert services.get_total_output() == 0
+
+    def test_no_production_yet_returns_zero_not_none(self):
+        assert services.get_total_output() == 0
+
+    def test_shell_context_present(self, commissary_client):
+        response = commissary_client.get(reverse("production:batch_management"))
+        assert response.context["active_nav"] == "batch"
+
+    def test_status_filter_narrows_the_queryset(
+        self, commissary_client, commissary_staff, cake, flour
+    ):
+        pending = services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=5,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 2}],
+            status=ProductionRecord.Status.PENDING,
+        )
+        completed = services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 4}],
+            status=ProductionRecord.Status.COMPLETED,
+        )
+
+        response = commissary_client.get(
+            reverse("production:batch_management"), {"status": "COMPLETED"}
+        )
+        record_ids = {r.pk for r in response.context["records"]}
+        assert record_ids == {completed.pk}
+        assert pending.pk not in record_ids
+
+    def test_stats_reflect_the_real_records(self, commissary_client, commissary_staff, cake, flour):
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=5,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 2}],
+            status=ProductionRecord.Status.COMPLETED,
+            quality=ProductionRecord.Quality.PASS,
+        )
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=3,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 1}],
+            status=ProductionRecord.Status.COMPLETED,
+            quality=ProductionRecord.Quality.FAIL,
+        )
+
+        response = commissary_client.get(reverse("production:batch_management"))
+        stats = response.context["stats"]
+        assert stats["total"] == 2
+        assert stats["completed"] == 2
+        assert stats["total_quantity"] == 8
+        assert stats["quality_rate"] == 50
+
+    def test_no_fabricated_branch_column_in_the_table(self, commissary_client):
+        """Regression guard: ProductionRecord has no branch field (see
+        the view's own docstring for why). The template must not render
+        a per-row branch tag that doesn't correspond to real data."""
+        response = commissary_client.get(reverse("production:batch_management"))
+        assert b"<th>Branch</th>" not in response.content
+
+
+class TestCommissaryDashboardView:
+    """Commissary Staff's real landing page (replaces the old
+    accounts.dashboard_placeholder -- see apps/accounts/views.py)."""
+
+    def test_commissary_staff_can_view_it(self, commissary_client):
+        response = commissary_client.get(reverse("production:dashboard"))
+        assert response.status_code == 200
+
+    def test_owner_can_also_view_it(self, client):
+        role = Role.objects.create(name=Role.OWNER_ADMIN)
+        owner = User.objects.create_user(username="owner1", password="testpass123", role=role)
+        client.force_login(owner)
+        verify_otp_for_client(client, owner)
+        response = client.get(reverse("production:dashboard"))
+        assert response.status_code == 200
+
+    def test_branch_staff_cannot_view_it(self, client):
+        role = Role.objects.create(name=Role.BRANCH_STAFF)
+        staff = User.objects.create_user(username="cashier1", password="testpass123", role=role)
+        client.force_login(staff)
+        response = client.get(reverse("production:dashboard"))
+        assert response.status_code == 403
+
+    def test_shows_total_output_and_recent_runs(
+        self, commissary_client, commissary, commissary_staff, cake, flour
+    ):
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 5}],
+        )
+        response = commissary_client.get(reverse("production:dashboard"))
+        assert response.context["total_output_30d"] == 10
+        assert len(response.context["recent_records"]) == 1
+
+
+class TestRoleAwareAdminShell:
+    """admin_base.html's sidebar/topbar is role-aware (Row 18 follow-up):
+    one shared shell, scoped per-role, rather than a duplicate template.
+    These tests guard both directions -- Commissary Staff must not see
+    Owner-only links (they'd 403 anyway, but shouldn't be advertised), and
+    Owner/Admin's own sidebar must stay exactly as it was."""
+
+    def test_commissary_staff_sidebar_hides_owner_only_links(self, commissary_client):
+        response = commissary_client.get(reverse("production:dashboard"))
+        assert b"Record Production" in response.content
+        assert b"Batch Logs" in response.content
+        assert b"Settings" not in response.content
+        assert b"Reports" not in response.content
+        assert b"Demand Forecasting" not in response.content
+        assert b"Resource Management" not in response.content
+        assert b"Product Availability" not in response.content
+
+    def test_commissary_staff_does_not_see_the_nonfunctional_branch_filter(self, commissary_client):
+        """The ?branch= dropdown filters Owner/Admin dashboards; no view
+        in apps/production reads it, so showing it to Commissary Staff
+        would look like a working control that silently does nothing."""
+        response = commissary_client.get(reverse("production:dashboard"))
+        assert b'id="jc-branch-form"' not in response.content
+
+    def test_owner_sidebar_on_shared_batch_page_is_unchanged(self, client):
+        """Batch Management is reachable by both roles -- confirms the
+        same template still gives Owner/Admin their full, original
+        sidebar rather than the trimmed Commissary one."""
+        role = Role.objects.create(name=Role.OWNER_ADMIN)
+        owner = User.objects.create_user(username="owner1", password="testpass123", role=role)
+        client.force_login(owner)
+        verify_otp_for_client(client, owner)
+        response = client.get(reverse("production:batch_management"))
+        assert b"Settings" in response.content
+        assert b"Reports" in response.content
+        assert b"Demand Forecasting" in response.content
+        assert b"Resource Management" in response.content
+        assert b"Product Availability" in response.content

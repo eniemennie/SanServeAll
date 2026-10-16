@@ -29,15 +29,32 @@ class TestLandingPage:
         assert b"images/logo.png" in response.content
         assert b'alt="Jorge' in response.content
 
-    def test_start_shift_links_to_cashier_selection(self, client):
-        """Start Shift now leads to the tap-to-select cashier flow
-        (Row 3 redesign), not the old username/password login."""
+    def test_cashier_button_links_to_cashier_selection(self, client):
+        """The Cashier role button leads to the tap-to-select cashier flow
+        (Row 3 redesign), not the plain username/password login -- this
+        button replaced the old "Start Shift" label (Row 19), same target."""
         response = client.get(reverse("core:landing"))
         assert reverse("accounts:select_cashier").encode() in response.content
 
-    def test_sign_in_links_to_admin_login(self, client):
+    def test_admin_owner_button_links_to_admin_login(self, client):
+        """Replaced the old "Sign In" label (Row 19), same target."""
         response = client.get(reverse("core:landing"))
         assert reverse("accounts:admin_login").encode() in response.content
+
+    def test_commissary_button_links_to_commissary_login(self, client):
+        """Commissary Staff gets its own branded login screen (styled like
+        Admin/Owner's but username/password-based) rather than the bare
+        generic accounts:login screen -- BranchSelectionView's existing
+        role-based routing (not this button) is still what sends a
+        Commissary Staff user on to production:dashboard after that."""
+        response = client.get(reverse("core:landing"))
+        assert reverse("accounts:commissary_login").encode() in response.content
+
+    def test_shows_all_three_role_labels(self, client):
+        response = client.get(reverse("core:landing"))
+        assert b"Cashier" in response.content
+        assert b"Admin" in response.content
+        assert b"Commissary" in response.content
 
     def test_does_not_require_authentication(self, client):
         """The landing page is the public entry point -- it must be

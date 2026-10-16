@@ -1,0 +1,222 @@
+{% extends "admin_base.html" %}
+{% block admin_title %}Dashboard{% endblock %}
+{% block admin_content %}
+
+<h1 class="h5 mb-3" style="color: var(--jc-text);">Branch Performance Overview</h1>
+<div class="row g-3 mb-4">
+    {% for row in branch_performance %}
+    <div class="col-md-4">
+        <div class="jc-card jc-card-accent{% if forloop.counter == 2 %}-sage{% elif forloop.counter == 3 %}-teal{% endif %} p-3">
+            <div class="fw-semibold mb-2">{{ row.branch.name }}</div>
+            <div class="d-flex justify-content-between text-muted small">
+                <span>Revenue</span><span class="text-dark fw-semibold">&#8369;{{ row.revenue|floatformat:0 }}</span>
+            </div>
+            <div class="d-flex justify-content-between text-muted small">
+                <span>Units Sold</span><span class="text-dark fw-semibold">{{ row.units_sold }} units</span>
+            </div>
+            <div class="d-flex justify-content-between text-muted small">
+                <span>Orders</span><span class="text-dark fw-semibold">{{ row.orders }}</span>
+            </div>
+        </div>
+    </div>
+    {% empty %}
+    <div class="col-12 text-muted">No active branches configured.</div>
+    {% endfor %}
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="jc-card p-3 h-100">
+            <div class="text-muted small mb-1">Total Revenue</div>
+            <div class="fs-4 fw-bold">&#8369;{{ summary.total_revenue|floatformat:2 }}</div>
+            <div class="text-muted small mb-2">This month</div>
+            <form method="get" class="small">
+                <input type="hidden" name="branch" value="{{ selected_branch.pk|default:'' }}">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" name="additional" value="1" id="incAdd"
+                           {% if include_additional_sales %}checked{% endif %} onchange="this.form.submit()">
+                    <label class="form-check-label" for="incAdd">Include Additional Sales</label>
+                </div>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" name="exclude_discounts" value="1" id="exDisc"
+                           {% if exclude_discounts %}checked{% endif %} onchange="this.form.submit()">
+                    <label class="form-check-label" for="exDisc">Exclude Discounts</label>
+                </div>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" name="exclude_vat" value="1" id="exVat"
+                           {% if exclude_vat %}checked{% endif %} onchange="this.form.submit()">
+                    <label class="form-check-label" for="exVat">Exclude VAT</label>
+                </div>
+            </form>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="jc-card p-3 h-100">
+            <div class="text-muted small mb-1">Production Output</div>
+            <div class="fs-4 fw-bold">{{ production_output }}</div>
+            <div class="text-muted small">Units this month &middot; all branches (commissary-wide)</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="jc-card p-3 h-100">
+            <div class="text-muted small mb-1">Demand Forecast</div>
+            <div class="fs-4 fw-bold">{{ forecast_label.label }}</div>
+            <div class="text-muted small">Next {{ forecast_label.window_days }} days</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="jc-card p-3 h-100">
+            <div class="text-muted small mb-1">Resource Status</div>
+            <div class="fs-4 fw-bold">{{ resource_status.sufficiency_pct }}%</div>
+            <div class="text-muted small">
+                Overall sufficiency
+                {% if resource_status.critical_count %}
+                &middot; <span style="color: var(--jc-critical);">{{ resource_status.critical_count }} Critical</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-lg-8">
+        <div class="jc-card p-3 h-100">
+            <div class="fw-semibold mb-2">Sales Analytics</div>
+            <canvas id="salesTrendChart" height="90"></canvas>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="jc-card p-3 h-100">
+            <div class="fw-semibold mb-2">Top Products</div>
+            <canvas id="topProductsChart" height="90"></canvas>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-lg-6">
+        <div class="jc-card p-3 h-100">
+            <div class="fw-semibold mb-3">Resource Monitoring</div>
+            {% for item in resource_status.items %}
+            <div class="d-flex justify-content-between align-items-center py-2 {% if not forloop.last %}border-bottom{% endif %}">
+                <div>
+                    <div class="fw-semibold">{{ item.product.name }}</div>
+                    <div class="text-muted small">{{ item.quantity_on_hand }} on hand &middot; {{ item.branch.name }}</div>
+                </div>
+                {% if item.is_out_of_stock %}
+                <span class="jc-badge jc-badge-critical">Critical</span>
+                {% elif item.is_low_stock %}
+                <span class="jc-badge jc-badge-low">Low</span>
+                {% else %}
+                <span class="jc-badge jc-badge-adequate">Adequate</span>
+                {% endif %}
+            </div>
+            {% empty %}
+            <p class="text-muted small mb-0">No inventory tracked for this selection yet.</p>
+            {% endfor %}
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="jc-card p-3 h-100">
+            <div class="fw-semibold mb-3">AI-Powered Insights &amp; Recommendations</div>
+
+            {% if critical_alerts %}
+            <div class="jc-card jc-card-accent p-3 mb-2">
+                <div class="fw-semibold" style="color: var(--jc-critical);">Critical: Restock Needed</div>
+                {% for alert in critical_alerts|slice:":3" %}
+                <div class="small mt-1">
+                    {{ alert.score.product.name }} at {{ alert.score.branch.name }} &mdash;
+                    {{ alert.score.days_of_stock_left|floatformat:1 }} day(s) of stock left.
+                    <span class="fw-semibold">Order +{{ alert.recommended_reorder_quantity }}.</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if slow_moving %}
+            <div class="jc-card jc-card-accent-sage p-3 mb-2">
+                <div class="fw-semibold">Slow-Moving Product{{ slow_moving|length|pluralize }} Detected</div>
+                {% for score in slow_moving|slice:":2" %}
+                <div class="small mt-1">{{ score.product.name }} at {{ score.branch.name }} &mdash; {{ score.avg_daily_demand|floatformat:1 }} units/day avg.</div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if peak_hour %}
+            <div class="jc-card jc-card-accent-teal p-3 mb-2">
+                <div class="fw-semibold">Peak Hour Pattern</div>
+                <div class="small mt-1">{{ peak_hour.hour }}:00 sees the most transactions ({{ peak_hour.transaction_count }} in the last 30 days) &mdash; consider staffing/promotions around this window.</div>
+            </div>
+            {% endif %}
+
+            {% if anomalies %}
+            <div class="jc-card p-3 mb-2" style="border-left: 4px solid #8B6BB0;">
+                <div class="fw-semibold">Unusual Pattern Detected</div>
+                {% for a in anomalies|slice:":2" %}
+                <div class="small mt-1">
+                    {{ a.product.name }}: {{ a.yesterday_units }} sold yesterday vs. {{ a.baseline_average }} average
+                    ({{ a.deviation_pct }}% deviation).
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if insights %}
+            <div class="jc-card p-3" style="border-left: 4px solid var(--jc-teal);">
+                <div class="fw-semibold mb-1">Automated Restocking Recommendation{{ insights|length|pluralize }}</div>
+                {% for insight in insights|slice:":3" %}
+                <div class="small mt-1">
+                    {{ insight.message }}
+                    {% if not insight.generated_by_ai %}<span class="text-muted">(template-generated)</span>{% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            {% if not critical_alerts and not slow_moving and not peak_hour and not anomalies and not insights %}
+            <p class="text-muted small mb-0">No insights generated yet for this selection.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+    var trendData = {{ trend_chart_json|safe }};
+    var palette = ["#D2703F", "#8FA894", "#5C8A99", "#E8B54D", "#8B6BB0"];
+    new Chart(document.getElementById("salesTrendChart"), {
+        type: "line",
+        data: {
+            labels: trendData.week_labels,
+            datasets: trendData.series.map(function (s, i) {
+                return {
+                    label: s.branch_name + " Sales (\u20b1)",
+                    data: s.revenue,
+                    borderColor: palette[i % palette.length],
+                    backgroundColor: "transparent",
+                    tension: 0.3,
+                };
+            })
+        },
+        options: { responsive: true, scales: { y: { beginAtZero: true } } }
+    });
+
+    var topProducts = {{ top_products_json|safe }};
+    new Chart(document.getElementById("topProductsChart"), {
+        type: "pie",
+        data: {
+            labels: topProducts.map(function (p) { return p.name; }),
+            datasets: [{
+                data: topProducts.map(function (p) { return p.units; }),
+                backgroundColor: palette,
+            }]
+        },
+        options: { responsive: true }
+    });
+})();
+</script>
+{% endblock %}

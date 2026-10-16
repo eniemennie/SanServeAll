@@ -6,6 +6,53 @@ low-stock detection, and manual stock adjustment.
 from apps.inventory.models import Inventory, InventoryTransaction, Product
 
 
+def get_product_availability(branch=None, product_type=None, search=""):
+    """Product Availability screen (Fig. 3-34), enhanced beyond the bare
+    catalog list product_management previously showed: real per-branch
+    stock across all branches (or one, via the shared shell's branch
+    dropdown), plus the stat summary the reference design shows (Total
+    Products/Available/Low Stock/Out of Stock/Total Stock/Stock Value).
+
+    Deliberately reuses Inventory (not just Product) so stock numbers
+    are real, not fabricated -- a Product with no Inventory row anywhere
+    genuinely has no stock to report, and isn't included here.
+    """
+    from apps.accounts.models import Branch
+
+    queryset = Inventory.objects.select_related("product", "branch")
+    if branch is not None:
+        queryset = queryset.filter(branch=branch)
+    else:
+        queryset = queryset.filter(
+            branch__in=Branch.objects.filter(is_active=True, is_commissary=False)
+        )
+    if product_type:
+        queryset = queryset.filter(product__product_type=product_type)
+    if search:
+        queryset = queryset.filter(product__name__icontains=search)
+
+    items = list(queryset.order_by("product__name"))
+
+    total_products = len({i.product_id for i in items})
+    critical_items = [i for i in items if i.is_out_of_stock]
+    low_items = [i for i in items if not i.is_out_of_stock and i.is_low_stock]
+    available_items = [i for i in items if not i.is_out_of_stock and not i.is_low_stock]
+    total_stock = sum(i.quantity_on_hand for i in items)
+    stock_value = sum(i.quantity_on_hand * i.product.price for i in items)
+
+    return {
+        "items": items,
+        "stats": {
+            "total_products": total_products,
+            "available_count": len(available_items),
+            "low_count": len(low_items),
+            "critical_count": len(critical_items),
+            "total_stock": total_stock,
+            "stock_value": stock_value,
+        },
+    }
+
+
 def get_branch_inventory(branch, product_type=None, low_stock_only=False):
     """Returns Inventory rows for a branch, optionally filtered by product
     type (Fig. 3-32 Finished Goods vs. Fig. 3-33 Materials share one
@@ -24,6 +71,55 @@ def get_branch_inventory(branch, product_type=None, low_stock_only=False):
         queryset = [item for item in queryset if item.is_low_stock or item.is_out_of_stock]
 
     return queryset
+
+
+def get_resource_status_summary(branch=None):
+    """Stock-health snapshot for the Dashboard Home Resource Status KPI
+    card (Fig. 3-19) and the Resource Monitoring list underneath it.
+
+    NOTE: the reference design shows four tiers (Critical/Low/Medium/
+    Adequate). Inventory only models three real states (is_out_of_stock,
+    is_low_stock, and Available -- see Inventory.status_label, Fig.
+    3-20/3-32's own three-state badge). Collapsed honestly here rather
+    than inventing an unbacked "Medium" cutoff with no threshold behind
+    it: Critical == is_out_of_stock, Low == is_low_stock, Adequate ==
+    everything else.
+
+    branch=None aggregates across every active, non-commissary branch
+    (the Dashboard's "All Branches" state); a specific branch filters to
+    just that one.
+    """
+    from apps.accounts.models import Branch
+
+    queryset = Inventory.objects.select_related("product", "branch")
+    if branch is not None:
+        queryset = queryset.filter(branch=branch)
+    else:
+        queryset = queryset.filter(
+            branch__in=Branch.objects.filter(is_active=True, is_commissary=False)
+        )
+
+    items = list(queryset)
+    critical_items = [i for i in items if i.is_out_of_stock]
+    low_items = [i for i in items if not i.is_out_of_stock and i.is_low_stock]
+    adequate_items = [i for i in items if not i.is_out_of_stock and not i.is_low_stock]
+    total = len(items)
+    sufficiency_pct = round((len(adequate_items) / total) * 100) if total else 100
+
+    # Critical first, then Low, then Adequate -- matches the reference
+    # design's own ordering for the Resource Monitoring list (Fig. 3-19).
+    ordered_items = critical_items + low_items + adequate_items
+
+    return {
+        "total_items": total,
+        "critical_count": len(critical_items),
+        "critical_items": critical_items,
+        "low_count": len(low_items),
+        "low_items": low_items,
+        "adequate_count": len(adequate_items),
+        "items": ordered_items,
+        "sufficiency_pct": sufficiency_pct,
+    }
 
 
 def get_or_create_inventory_row(branch, product):

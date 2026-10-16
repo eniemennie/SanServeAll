@@ -833,6 +833,22 @@
     bindSetting("setting-print-receipt", "printReceipt", true);
 })();
 
+(function () {
+    // Category tab clicks are plain links (?category=...), so selecting
+    // one triggers a full server-side page reload rather than a
+    // client-side filter -- and a freshly loaded page always resets a
+    // scrollable element back to its start. That meant clicking a
+    // category further right than the visible strip (e.g. "Bakery and
+    // Pasalubong") always snapped the bar back to showing "All" again,
+    // hiding the tab the cashier just selected. Scrolling the active
+    // tab into view once the page loads keeps the strip positioned
+    // where the selection actually is, instead of always resetting left.
+    var activeTab = document.querySelector("#category-tabs .jc-category-tab.active");
+    if (activeTab) {
+        activeTab.scrollIntoView({ inline: "center", block: "nearest" });
+    }
+})();
+
 {% if completed_transaction %}
 (function () {
     // Row 3 redesign: shown exactly once, right after a successful

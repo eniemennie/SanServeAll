@@ -103,7 +103,7 @@ class TestBranchSelection:
         client.force_login(commissary_worker)
         response = client.get(reverse("accounts:select_branch"))
         assert response.status_code == 302
-        assert response.url == reverse("accounts:dashboard")
+        assert response.url == reverse("production:dashboard")
 
     def test_owner_admin_sees_all_active_branches_in_picker(self, client, owner, branches):
         client.force_login(owner)
@@ -177,4 +177,87 @@ class TestLogout:
 
         client.post(reverse("accounts:logout"))
         assert "pos_unlocked" not in client.session
+
+    @pytest.mark.parametrize("user_fixture", ["cashier", "owner", "commissary_worker"])
+    def test_logout_redirects_to_the_landing_page_for_every_role(
+        self, client, user_fixture, request
+    ):
+        """Row 20: logging out always lands on the same public landing
+        page/role picker, whichever of the three login flows the user
+        came in through -- not a role-specific login screen."""
+        user = request.getfixturevalue(user_fixture)
+        client.force_login(user)
+        response = client.post(reverse("accounts:logout"))
+        assert response.status_code == 302
+        assert response.url == reverse("core:landing")
+
+    @pytest.mark.parametrize("user_fixture", ["cashier", "owner", "commissary_worker"])
+    def test_logout_actually_ends_the_session_for_every_role(self, client, user_fixture, request):
+        """Confirms the session is genuinely cleared, not just redirected
+        -- a protected dashboard must bounce back to login afterward."""
+        user = request.getfixturevalue(user_fixture)
+        client.force_login(user)
+
+        client.post(reverse("accounts:logout"))
+        assert not client.session.get("_auth_user_id")
+
+        response = client.get(reverse("accounts:select_branch"))
+        assert response.status_code == 302
+        assert "/accounts/login/" in response.url
+
+
+class TestCommissaryLogin:
+    def test_commissary_login_page_loads(self, client):
+        response = client.get(reverse("accounts:commissary_login"))
+        assert response.status_code == 200
+        assert b"Commissary Staff Login" in response.content
+
+    def test_valid_commissary_credentials_log_in_and_reach_dashboard(
+        self, client, commissary_worker
+    ):
+        response = client.post(
+            reverse("accounts:commissary_login"),
+            {"username": "commissary1", "password": "testpass123"},
+        )
+        assert response.status_code == 302
+        assert response.url == reverse("accounts:select_branch")
+        assert response.wsgi_request.user.is_authenticated
+
+        # BranchSelectionView's existing role-based routing (Row 14/15) is
+        # what actually lands a Commissary Staff account on their
+        # dashboard -- following the redirect proves that routing still
+        # applies correctly to a user who came in through this new page.
+        response = client.get(response.url)
+        assert response.status_code == 302
+        assert response.url == reverse("production:dashboard")
+
+    def test_wrong_password_is_rejected(self, client, commissary_worker):
+        response = client.post(
+            reverse("accounts:commissary_login"),
+            {"username": "commissary1", "password": "wrongpassword"},
+        )
+        assert response.status_code == 200
+        assert not response.wsgi_request.user.is_authenticated
+        assert b"Invalid username or password" in response.content
+
+    def test_non_commissary_role_cannot_use_commissary_login_even_with_correct_credentials(
+        self, client, cashier
+    ):
+        """A BRANCH_STAFF account with perfectly valid credentials must
+        still be refused here -- this is a Commissary-Staff-only entry
+        point, mirroring how AdminLoginView guards admin/login/."""
+        response = client.post(
+            reverse("accounts:commissary_login"),
+            {"username": "cashier1", "password": "testpass123"},
+        )
+        assert response.status_code == 200
+        assert not response.wsgi_request.user.is_authenticated
+
+    def test_owner_admin_cannot_use_commissary_login_either(self, client, owner):
+        response = client.post(
+            reverse("accounts:commissary_login"),
+            {"username": "owner1", "password": "testpass123"},
+        )
+        assert response.status_code == 200
+        assert not response.wsgi_request.user.is_authenticated
         assert "selected_branch_id" not in client.session

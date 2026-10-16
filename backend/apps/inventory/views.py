@@ -13,7 +13,7 @@ of FR-02 (Multi-Branch Inventory Synchronization).
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import get_object_or_404, redirect, render
 
-from apps.accounts.models import Role
+from apps.accounts.models import Branch, Role
 from apps.accounts.permissions import role_required
 from apps.inventory import services
 from apps.inventory.models import Inventory, Product
@@ -56,8 +56,14 @@ def inventory_monitoring(request):
 
 @role_required(Role.OWNER_ADMIN)
 def product_management(request):
-    """Product Inventory Management Interface (Fig. 3-34): catalog list
-    plus the add-product form."""
+    """Product Inventory Management Interface (Fig. 3-34): real
+    per-branch stock (via get_product_availability), Finished
+    Products/Raw Materials toggle, search, stat cards, and the
+    catalog-add form. Enhanced from a bare Product-only list (no stock
+    numbers, no branch concept at all) to match the reference design's
+    actual content, which shows real Inventory rows, not just catalog
+    entries.
+    """
     error = None
     if request.method == "POST":
         try:
@@ -71,12 +77,56 @@ def product_management(request):
         except (services.InventoryServiceError, ValueError, TypeError) as exc:
             error = str(exc) or "Please check the values entered."
 
-    products = Product.objects.all()
+    branch_id = request.GET.get("branch")
+    selected_branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
+    product_type = request.GET.get("type", "")
+    search = request.GET.get("search", "")
+
+    availability = services.get_product_availability(
+        branch=selected_branch, product_type=product_type or None, search=search
+    )
+
     return render(
         request,
         "inventory/product_management.html",
-        {"products": products, "error": error, "product_types": Product.ProductType.choices},
+        {
+            "active_nav": "availability",
+            "branches": Branch.objects.filter(is_active=True, is_commissary=False),
+            "selected_branch": selected_branch,
+            "selected_type": product_type,
+            "search": search,
+            "items": availability["items"],
+            "stats": availability["stats"],
+            "quick_sale_amounts": [1, 2, 5],
+            "error": error,
+            "product_types": Product.ProductType.choices,
+        },
     )
+
+
+@role_required(Role.OWNER_ADMIN)
+def quick_sale(request, inventory_id):
+    """Quick Sale (Fig. 3-34's -1/-2/-5 buttons): a thin wrapper over the
+    same real adjust_stock service the Manual Adjustment page uses, just
+    invoked inline with a preset negative delta instead of a separate
+    confirmation form. Still produces a real, auditable
+    InventoryTransaction -- not a display-only decrement.
+    """
+    inventory = get_object_or_404(Inventory, pk=inventory_id)
+    if request.method == "POST":
+        try:
+            delta = -abs(int(request.POST.get("amount", 1)))
+            services.adjust_stock(inventory, delta, reason="Quick Sale")
+        except (services.InventoryServiceError, ValueError, TypeError):
+            pass  # Same behavior as running out mid-quick-sale: no-op, stay on the page.
+
+    next_url = request.POST.get("next") or request.META.get("HTTP_REFERER", "")
+    if not next_url.startswith("/"):
+        # Empty, missing, or (defensively) an external URL in a spoofed
+        # Referer header -- fall back to a known-safe internal page
+        # rather than trusting it, since HTTP_REFERER is caller-supplied.
+        return redirect("inventory:product_management")
+    return redirect(next_url)
 
 
 @role_required(Role.OWNER_ADMIN)

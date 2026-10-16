@@ -324,3 +324,93 @@ body.jc-dark .btn-close {
   order: 1;
 }
 
+/* --- Auth Pages (Admin Login, 2FA Verify, ...) ---
+   Shared across every standalone login/verification screen so they stay
+   visually locked together -- edit here, not per-template, or the
+   screens will silently drift apart from each other again. */
+.jc-auth-bg {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--jc-cream);
+  position: relative;
+  padding: 1.5rem;
+}
+.jc-auth-back-link {
+  position: absolute;
+  top: 1.75rem;
+  left: 1.75rem;
+  color: var(--jc-text);
+  text-decoration: none;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.jc-auth-back-link:hover {
+  color: var(--jc-orange-dark);
+}
+.jc-auth-card {
+  background: var(--jc-white);
+  border-radius: var(--jc-radius);
+  box-shadow: 0 10px 30px rgba(30, 42, 58, 0.08);
+  max-width: 440px;
+  width: 100%;
+  padding: 2.75rem 2.5rem;
+  text-align: center;
+}
+.jc-auth-card .jc-logo-img {
+  height: 68px;
+  margin-bottom: 0.5rem;
+}
+.jc-auth-subtitle {
+  color: var(--jc-text-muted);
+  margin-bottom: 1.75rem;
+}
+.jc-auth-card .form-label {
+  text-align: left;
+  display: block;
+  color: var(--jc-text);
+  font-weight: 500;
+}
+.jc-auth-card .form-control {
+  border-radius: var(--jc-radius-sm);
+  border-color: var(--jc-tan);
+  padding: 0.65rem 0.9rem;
+}
+.jc-auth-card .form-control:focus {
+  border-color: var(--jc-orange);
+  box-shadow: 0 0 0 0.2rem rgba(232, 139, 90, 0.2);
+}
+.jc-auth-otp-input {
+  text-align: center;
+  font-size: 1.5rem;
+  letter-spacing: 0.5rem;
+  font-weight: 600;
+}
+.jc-auth-footnote {
+  color: var(--jc-text-muted);
+  font-size: 0.875rem;
+  margin-top: 1.25rem;
+  margin-bottom: 0;
+}
+.jc-password-wrap {
+  position: relative;
+}
+.jc-password-toggle {
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--jc-text-muted);
+  display: flex;
+  cursor: pointer;
+}
+.jc-password-toggle:hover {
+  color: var(--jc-text);
+}
+
