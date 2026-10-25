@@ -68,11 +68,11 @@ Usage in a screen template:
     would look like a working filter and do nothing. This shows their
     one actual branch (always the commissary) as plain text instead.
   {% endcomment %}
-  <div class="mx-auto text-center" style="min-width: 260px; max-width: 340px; width: 100%;">
+  <div class="mx-auto text-center jc-branch-filter">
     <span class="jc-badge jc-badge-info">{{ user.branch.name|default:"Commissary" }}</span>
   </div>
   {% else %}
-  <form method="get" class="mx-auto" style="min-width: 260px; max-width: 340px; width: 100%;" id="jc-branch-form">
+  <form method="get" class="mx-auto jc-branch-filter" id="jc-branch-form">
     <select name="branch" class="form-select form-select-sm" onchange="this.form.submit()" aria-label="Select branch">
       <option value=""{% if not selected_branch %} selected{% endif %}>All Branches</option>
       {% for b in branches %}
@@ -113,6 +113,15 @@ Usage in a screen template:
     only works on a single line; a multi-line one renders as visible
     text on the page.
   {% endcomment %}
+  {% comment %}
+    Mobile/tablet only (<768px, see main.css): a tap-to-close backdrop
+    behind the drawer. Hidden entirely at desktop widths via CSS, and
+    hidden by default here (jc-sidebar-backdrop-visible added/removed by
+    the same toggle script below) so it never intercepts clicks when the
+    drawer is closed.
+  {% endcomment %}
+  <div class="jc-sidebar-backdrop" id="jc-sidebar-backdrop"></div>
+
   <nav class="jc-sidebar d-flex flex-column flex-shrink-0" id="jc-sidebar" data-expanded="true">
     <div class="py-2 d-flex" style="padding-left: 12px;">
       <button type="button" class="btn btn-link p-2 text-muted" id="jc-sidebar-toggle" aria-label="Toggle sidebar">
@@ -186,11 +195,37 @@ Usage in a screen template:
   (function () {
     var sidebar = document.getElementById('jc-sidebar');
     var toggle = document.getElementById('jc-sidebar-toggle');
+    var backdrop = document.getElementById('jc-sidebar-backdrop');
     if (!sidebar || !toggle) return;
+
+    // Below 768px the sidebar becomes an off-canvas drawer (see
+    // main.css) instead of the desktop width-collapse behavior, so it
+    // must start CLOSED there -- the server always renders
+    // data-expanded="true" (the desktop default), which would otherwise
+    // cover the whole screen with the drawer on first load on a phone.
+    // Only runs once, on load, so a person's own toggle click afterward
+    // (in either mode) is never overridden.
+    var MOBILE_BREAKPOINT = 768;
+    function setExpanded(expanded) {
+      sidebar.setAttribute('data-expanded', String(expanded));
+      if (backdrop) {
+        backdrop.classList.toggle('jc-sidebar-backdrop-visible', expanded && window.innerWidth < MOBILE_BREAKPOINT);
+      }
+    }
+    if (window.innerWidth < MOBILE_BREAKPOINT) {
+      setExpanded(false);
+    }
+
     toggle.addEventListener('click', function () {
       var expanded = sidebar.getAttribute('data-expanded') === 'true';
-      sidebar.setAttribute('data-expanded', String(!expanded));
+      setExpanded(!expanded);
     });
+
+    if (backdrop) {
+      backdrop.addEventListener('click', function () {
+        setExpanded(false);
+      });
+    }
   })();
 </script>
 {% endblock %}
