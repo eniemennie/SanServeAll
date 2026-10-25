@@ -101,7 +101,7 @@
             <div class="d-flex justify-content-between align-items-center py-2 {% if not forloop.last %}border-bottom{% endif %}">
                 <div>
                     <div class="fw-semibold">{{ item.product.name }}</div>
-                    <div class="text-muted small">{{ item.quantity_on_hand }} on hand &middot; {{ item.branch.name }}</div>
+                    <div class="text-muted small">{{ item.display_quantity }} on hand &middot; {{ item.branch.name }}</div>
                 </div>
                 {% if item.is_out_of_stock %}
                 <span class="jc-badge jc-badge-critical">Critical</span>

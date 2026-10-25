@@ -44,7 +44,7 @@
             <tr>
                 <td>{{ alert.score.product.name }}</td>
                 <td>{{ alert.score.branch.name }}</td>
-                <td>{{ alert.score.quantity_on_hand }}</td>
+                <td>{{ alert.score.display_quantity }}</td>
                 <td>{% if alert.score.days_of_stock_left %}{{ alert.score.days_of_stock_left|floatformat:1 }}{% else %}&mdash;{% endif %}</td>
                 <td><span class="jc-badge jc-badge-critical">+{{ alert.recommended_reorder_quantity }} units</span></td>
             </tr>

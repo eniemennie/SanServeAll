@@ -69,6 +69,17 @@ class InventoryRiskScore(models.Model):
     class Meta:
         ordering = ["-computed_at"]
 
+    @property
+    def display_quantity(self):
+        """QA fix, same reasoning as Inventory.display_quantity: this
+        snapshot can be genuinely negative (oversold stock is exactly
+        what HIGH risk is meant to flag), which is real signal for the
+        classifier -- but a raw negative number reads as a glitch to a
+        person looking at the Decision Support / Resource Management
+        dashboards. Display-only; risk_level and days_of_stock_left were
+        already computed from the real (possibly negative) value."""
+        return max(self.quantity_on_hand, 0)
+
     def __str__(self):
         return f"{self.product.name} @ {self.branch.name}: {self.risk_level}"
 

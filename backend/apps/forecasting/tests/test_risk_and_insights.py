@@ -59,6 +59,37 @@ def _completed_sale(branch, cashier, product, quantity, days_ago):
     return transaction
 
 
+class TestInventoryRiskScoreDisplayQuantity:
+    """QA fix: a negative quantity_on_hand snapshot (oversold stock --
+    exactly the HIGH-risk case this model exists to flag) must not be
+    shown to a person as a raw negative number on the Decision Support /
+    Resource Management dashboards, while the real value -- already used
+    to compute risk_level and days_of_stock_left -- stays untouched."""
+
+    def test_negative_snapshot_displays_as_zero(self, branch, latte):
+        score = InventoryRiskScore.objects.create(
+            branch=branch,
+            product=latte,
+            risk_level="HIGH",
+            quantity_on_hand=-4,
+            avg_daily_demand=5.0,
+            days_of_stock_left=0.0,
+        )
+        assert score.quantity_on_hand == -4
+        assert score.display_quantity == 0
+
+    def test_positive_snapshot_display_matches_real_value(self, branch, latte):
+        score = InventoryRiskScore.objects.create(
+            branch=branch,
+            product=latte,
+            risk_level="LOW",
+            quantity_on_hand=50,
+            avg_daily_demand=5.0,
+            days_of_stock_left=10.0,
+        )
+        assert score.display_quantity == 50
+
+
 class TestRuleBasedLabel:
     def test_zero_stock_is_always_high_risk(self):
         assert rule_based_label(0, 5.0, 0.0) == "HIGH"
