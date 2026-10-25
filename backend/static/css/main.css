@@ -448,6 +448,15 @@ body.jc-dark .btn-close {
   padding: 2.75rem 2.5rem;
   text-align: center;
 }
+@media (max-width: 400px) {
+  /* .jc-auth-bg already adds 1.5rem of its own padding around this
+     card, so on the narrowest phones (375px) the combined padding left
+     very little room for the form itself; this only trims the card's
+     own padding, not the card's max-width or the page layout. */
+  .jc-auth-card {
+    padding: 1.75rem 1.25rem;
+  }
+}
 .jc-auth-card .jc-logo-img {
   height: 68px;
   margin-bottom: 0.5rem;
