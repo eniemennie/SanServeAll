@@ -511,3 +511,22 @@ body.jc-dark .btn-close {
   color: var(--jc-text);
 }
 
+/* Responsive: Phase 5 spot-check. A page-header row (title + a single
+   action button, both vertically centered) is reused across most
+   Admin/Commissary screens -- on a phone-width screen, a longer title
+   plus a button like "View Batch Dashboard" don't both fit on one
+   line, and neither child shrinks on its own (buttons don't wrap their
+   label, headings don't yield space to a sibling). Letting this exact,
+   specific combination wrap is a no-op wherever it already fits (flex-
+   wrap only activates once content overflows), so this is safe to
+   apply once here rather than duplicating a fix across every template
+   that uses it. Headers that already handle this themselves (a
+   wrapping description beside a button, via align-items-start instead
+   of -center) are a different class combination and unaffected. */
+@media (max-width: 575.98px) {
+  .d-flex.justify-content-between.align-items-center {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+}
+
