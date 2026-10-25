@@ -37,8 +37,14 @@ def get_product_availability(branch=None, product_type=None, search=""):
     critical_items = [i for i in items if i.is_out_of_stock]
     low_items = [i for i in items if not i.is_out_of_stock and i.is_low_stock]
     available_items = [i for i in items if not i.is_out_of_stock and not i.is_low_stock]
-    total_stock = sum(i.quantity_on_hand for i in items)
-    stock_value = sum(i.quantity_on_hand * i.product.price for i in items)
+    # display_quantity, not the raw field -- these feed the stat cards a
+    # person reads (Total Stock / Stock Value), same QA-fix reasoning as
+    # Inventory.display_quantity: a negative quantity_on_hand is a real,
+    # useful internal signal (oversold stock), but summing the raw value
+    # here would make the displayed total drift below what the
+    # individually-displayed (already-clamped) item rows add up to.
+    total_stock = sum(i.display_quantity for i in items)
+    stock_value = sum(i.display_quantity * i.product.price for i in items)
 
     return {
         "items": items,

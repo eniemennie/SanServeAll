@@ -87,7 +87,7 @@
         <li>{{ item.product.name }} -- out of stock</li>
         {% endfor %}
         {% for item in resource_status.low_items %}
-        <li>{{ item.product.name }} -- low stock ({{ item.quantity_on_hand }} on hand)</li>
+        <li>{{ item.product.name }} -- low stock ({{ item.display_quantity }} on hand)</li>
         {% endfor %}
     </ul>
 </div>

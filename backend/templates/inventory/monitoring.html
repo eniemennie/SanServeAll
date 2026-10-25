@@ -42,7 +42,7 @@
                 <td>{{ item.product.name }}</td>
                 <td><span class="badge bg-secondary">{{ item.product.get_product_type_display }}</span></td>
                 <td>&#8369;{{ item.product.price }}</td>
-                <td>{{ item.quantity_on_hand }}</td>
+                <td>{{ item.display_quantity }}</td>
                 <td>{{ item.status_label }}</td>
                 <td>
                     <a href="{% url 'inventory:adjust_stock' item.pk %}" class="btn btn-outline-secondary btn-sm">Adjust</a>

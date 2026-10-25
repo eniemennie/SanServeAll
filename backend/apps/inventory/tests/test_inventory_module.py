@@ -82,6 +82,23 @@ class TestInventoryModelStatus:
         inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=20)
         assert inv.status_label == "Available"
 
+    def test_negative_quantity_displays_as_zero(self, branch):
+        """QA fix: a negative quantity_on_hand (the sale-deduction hook
+        deliberately allows overselling to drive it below zero, as a
+        signal for the AI risk module) must not be shown to a person as
+        a raw negative number -- display_quantity clamps it to 0 while
+        the real field stays negative for internal logic."""
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=-3)
+        assert inv.quantity_on_hand == -3  # real value preserved
+        assert inv.display_quantity == 0  # display clamps
+        assert inv.is_out_of_stock is True  # status logic still uses the real value
+
+    def test_positive_quantity_display_matches_real_value(self, branch):
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=7)
+        assert inv.display_quantity == 7
+
 
 class TestGetBranchInventory:
     def test_only_returns_items_for_the_given_branch(self, branch, other_branch):
@@ -226,6 +243,21 @@ class TestInventoryMonitoringView:
         response = client.get(reverse("inventory:monitoring"))
         assert response.status_code == 302
         assert response.url == reverse("accounts:select_branch")
+
+    def test_negative_stock_displays_as_zero_not_a_raw_negative(self, staff_client, branch):
+        """QA fix (SYSTEM_DOCUMENTATION: 'the system displays -1 instead
+        of 0'): the Monitoring page must never render a raw negative
+        quantity. Asserted against the rendered table cell specifically
+        (">-1<") rather than scanning the whole page for "-1", since
+        that substring can appear incidentally elsewhere (CSS, asset
+        URLs) with no relation to inventory data."""
+        product = Product.objects.create(name="Oversold Item", price="10.00")
+        Inventory.objects.create(branch=branch, product=product, quantity_on_hand=-1)
+
+        response = staff_client.get(reverse("inventory:monitoring"))
+        assert b"Oversold Item" in response.content
+        assert b">-1<" not in response.content
+        assert response.context["items"][0].display_quantity == 0
 
     def test_low_stock_toggle_filters_results(self, staff_client, branch):
         low = Product.objects.create(name="Low Item", price="10.00", reorder_threshold=5)
@@ -397,6 +429,22 @@ class TestProductAvailabilityEnhancements:
         assert stats["critical_count"] == 1
         assert stats["available_count"] == 1
         assert stats["total_stock"] == 50
+
+    def test_total_stock_stat_does_not_go_negative_from_an_oversold_item(
+        self, owner_client, branch, other_branch
+    ):
+        """QA fix: the Total Stock stat card sums display_quantity, not
+        the raw field -- an oversold item (negative quantity_on_hand)
+        must not drag the displayed total below what the individually-
+        displayed (already-clamped) rows add up to."""
+        oversold = Product.objects.create(name="Oversold Item", price="10.00")
+        healthy = Product.objects.create(name="Healthy Item", price="10.00")
+        Inventory.objects.create(branch=branch, product=oversold, quantity_on_hand=-2)
+        Inventory.objects.create(branch=other_branch, product=healthy, quantity_on_hand=5)
+
+        response = owner_client.get(reverse("inventory:product_management"))
+        stats = response.context["stats"]
+        assert stats["total_stock"] == 5  # 0 (clamped) + 5, not -2 + 5
 
     def test_type_filter_narrows_to_materials_only(self, owner_client, branch):
         cake = Product.objects.create(
