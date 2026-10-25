@@ -29,8 +29,15 @@ def pos_ordering(request):
     query = request.GET.get("q", "").strip()
     category = request.GET.get("category", "").strip()
 
+    # Branch-scoped: a product only shows up in a branch's POS catalog
+    # once it has a real Inventory row there (see
+    # inventory.services.create_product's branch_ids provisioning) --
+    # fixes the QA-reported bug where a new product became orderable at
+    # every branch regardless of which one it was meant for.
     products = Product.objects.filter(
-        is_active=True, product_type=Product.ProductType.FINISHED_GOOD
+        is_active=True,
+        product_type=Product.ProductType.FINISHED_GOOD,
+        inventory__branch=request.selected_branch,
     )
     if query:
         products = products.filter(name__icontains=query)

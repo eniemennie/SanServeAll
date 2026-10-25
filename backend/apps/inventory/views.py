@@ -67,11 +67,17 @@ def product_management(request):
     error = None
     if request.method == "POST":
         try:
+            branch_ids = request.POST.getlist("branches")
+            if not branch_ids:
+                raise services.InventoryServiceError(
+                    "Select at least one branch to add this product to."
+                )
             services.create_product(
                 name=request.POST.get("name"),
                 price=request.POST.get("price") or 0,
                 product_type=request.POST.get("product_type", Product.ProductType.FINISHED_GOOD),
                 reorder_threshold=request.POST.get("reorder_threshold") or 0,
+                branch_ids=branch_ids,
             )
             return redirect("inventory:product_management")
         except (services.InventoryServiceError, ValueError, TypeError) as exc:

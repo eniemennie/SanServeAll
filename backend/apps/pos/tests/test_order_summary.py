@@ -9,7 +9,7 @@ import pytest
 from django.urls import reverse
 
 from apps.accounts.models import Branch, CashierPIN, Role, User
-from apps.inventory.models import Product
+from apps.inventory.models import Inventory, Product
 from apps.pos import services
 from apps.pos.models import SalesTransaction
 
@@ -51,8 +51,9 @@ def draft(cashier, branch):
 
 
 @pytest.fixture
-def item(draft):
+def item(draft, branch):
     product = Product.objects.create(name="Spanish Latte", price=Decimal("125.00"))
+    Inventory.objects.create(branch=branch, product=product)
     return services.add_catalog_item(draft, product.pk, quantity=1)
 
 
@@ -62,17 +63,23 @@ class TestGrandTotalAndDiscountMath:
     def test_grand_total_equals_subtotal_with_no_transaction_discount(self, draft, item):
         assert draft.grand_total == draft.total_amount
 
-    def test_reference_example_spanish_latte_and_lasagna_no_transaction_discount(self, draft):
+    def test_reference_example_spanish_latte_and_lasagna_no_transaction_discount(
+        self, draft, branch
+    ):
         latte = Product.objects.create(name="Spanish Latte", price=Decimal("80.00"))
         lasagna = Product.objects.create(name="Lasagna", price=Decimal("145.00"))
+        Inventory.objects.create(branch=branch, product=latte)
+        Inventory.objects.create(branch=branch, product=lasagna)
         services.add_catalog_item(draft, latte.pk, quantity=1)
         services.add_catalog_item(draft, lasagna.pk, quantity=1)
         assert draft.total_amount == Decimal("225.00")
         assert draft.grand_total == Decimal("225.00")
 
-    def test_vat_breakdown_matches_the_reference_exactly(self, draft):
+    def test_vat_breakdown_matches_the_reference_exactly(self, draft, branch):
         latte = Product.objects.create(name="Spanish Latte", price=Decimal("80.00"))
         lasagna = Product.objects.create(name="Lasagna", price=Decimal("145.00"))
+        Inventory.objects.create(branch=branch, product=latte)
+        Inventory.objects.create(branch=branch, product=lasagna)
         services.add_catalog_item(draft, latte.pk, quantity=1)
         services.add_catalog_item(draft, lasagna.pk, quantity=1)
 
@@ -103,10 +110,11 @@ class TestGrandTotalAndDiscountMath:
         services.apply_transaction_discount(draft, "NO_DISCOUNT", "", None)
         assert draft.grand_total == draft.total_amount
 
-    def test_item_discounts_total_sums_across_items(self, draft):
+    def test_item_discounts_total_sums_across_items(self, draft, branch):
         product = Product.objects.create(
             name="Spanish Latte", price=Decimal("125.00"), category=Product.Category.COFFEE
         )
+        Inventory.objects.create(branch=branch, product=product)
         services.add_customized_item(
             draft, product.pk, discount_category="SD", discount_type="AMOUNT", discount_amount="45"
         )

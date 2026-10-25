@@ -166,17 +166,36 @@ def adjust_stock(inventory, delta, reason=""):
     return inventory
 
 
-def create_product(name, price, product_type, reorder_threshold=0):
+def create_product(name, price, product_type, reorder_threshold=0, branch_ids=None):
     """Product Inventory Management (Row 6.2): adds a new item to the
     catalog. Kept separate from POS's own catalog-reading logic -- this is
-    the write side, restricted to Owner/Admin at the view layer."""
+    the write side, restricted to Owner/Admin at the view layer.
+
+    `branch_ids`, if given, provisions an Inventory row (at 0 on hand) for
+    exactly those branches -- the product only becomes visible on
+    Monitoring and orderable in POS at a branch once it has a real
+    Inventory row there (see apps/pos catalog queries). Left as an
+    optional, defaulted parameter so existing callers (and the product's
+    own creation) are unaffected if no branch is specified -- matches the
+    pre-fix behavior of not auto-provisioning anywhere (QA-reported bug:
+    a new product silently became orderable at every branch with no
+    branch selection at all; this makes that selection explicit instead
+    of removing it)."""
+    from apps.accounts.models import Branch
+
     name = (name or "").strip()
     if not name:
         raise InventoryServiceError("Product name is required.")
 
-    return Product.objects.create(
+    product = Product.objects.create(
         name=name,
         price=price,
         product_type=product_type,
         reorder_threshold=reorder_threshold or 0,
     )
+
+    if branch_ids:
+        for branch in Branch.objects.filter(pk__in=branch_ids):
+            get_or_create_inventory_row(branch, product)
+
+    return product

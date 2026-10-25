@@ -10,7 +10,7 @@ import pytest
 from django.urls import reverse
 
 from apps.accounts.models import Branch, CashierPIN, Role, User
-from apps.inventory.models import Product
+from apps.inventory.models import Inventory, Product
 from apps.pos import services
 from apps.pos.models import AddOn, SalesTransaction
 
@@ -49,22 +49,30 @@ def unlocked_client(client, cashier, branch):
 @pytest.fixture
 def beverage(branch):
     """A product with size options and beverage category, matching the
-    reference's Spanish Latte example."""
-    return Product.objects.create(
+    reference's Spanish Latte example. Provisioned (an Inventory row) at
+    `branch` -- POS now only allows adding a product that's actually
+    stocked at the cashier's branch (QA fix: branch-specific product
+    availability)."""
+    product = Product.objects.create(
         name="Spanish Latte",
         price=Decimal("95.00"),
         large_price=Decimal("105.00"),
         category=Product.Category.COFFEE,
     )
+    Inventory.objects.create(branch=branch, product=product)
+    return product
 
 
 @pytest.fixture
 def simple_product(branch):
     """A non-beverage product with no size options, matching the
-    reference's "Lasagna" example (no size/sugar/add-ons shown)."""
-    return Product.objects.create(
+    reference's "Lasagna" example (no size/sugar/add-ons shown).
+    Provisioned at `branch`, same reasoning as `beverage` above."""
+    product = Product.objects.create(
         name="Lasagna", price=Decimal("145.00"), category=Product.Category.PASTA
     )
+    Inventory.objects.create(branch=branch, product=product)
+    return product
 
 
 @pytest.fixture

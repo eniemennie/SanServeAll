@@ -27,9 +27,14 @@ def get_or_create_draft_transaction(user, branch):
 def add_catalog_item(draft, product_id, quantity=1):
     """Adds a product from the standard catalog to the draft order
     (Fig. 3-12). Returns None on an invalid/inactive product rather than
-    raising, so the view can show a friendly error instead of a 500."""
+    raising, so the view can show a friendly error instead of a 500.
+
+    Scoped to products actually provisioned (an Inventory row exists) at
+    the draft's own branch -- mirrors the pos_ordering catalog filter, so
+    a cashier can't add an item via a crafted request that the branch's
+    own catalog screen would never have shown them."""
     try:
-        product = Product.objects.get(pk=product_id, is_active=True)
+        product = Product.objects.get(pk=product_id, is_active=True, inventory__branch=draft.branch)
     except (Product.DoesNotExist, ValueError, TypeError):
         return None
 
@@ -127,7 +132,7 @@ def add_customized_item(
     from apps.pos.models import AddOn
 
     try:
-        product = Product.objects.get(pk=product_id, is_active=True)
+        product = Product.objects.get(pk=product_id, is_active=True, inventory__branch=draft.branch)
     except (Product.DoesNotExist, ValueError, TypeError):
         return None
 
