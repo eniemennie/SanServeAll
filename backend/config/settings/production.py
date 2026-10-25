@@ -1,7 +1,21 @@
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 from .base import *  # noqa
+
+# base.py falls back to a hardcoded placeholder SECRET_KEY when the env
+# var is unset -- harmless for local dev, but a real security hole if it
+# ever happened here (anyone reading this repo knows that exact value,
+# which signs session cookies, password-reset tokens, and CSRF tokens).
+# Fail loudly at startup instead of silently serving real traffic with a
+# known-insecure key.
+if SECRET_KEY == "dev-insecure-placeholder-key":  # noqa: F405
+    raise ImproperlyConfigured(
+        "SECRET_KEY environment variable is not set. Refusing to start "
+        "production with the insecure development placeholder key."
+    )
 
 DEBUG = False
 ALLOWED_HOSTS = os.environ.get("PRODUCTION_ALLOWED_HOSTS", "").split(",")
