@@ -37,6 +37,7 @@
 
 <div class="jc-card p-3 mb-4">
     <div class="fw-semibold mb-2">Critical Alerts &amp; Restocking Recommendations</div>
+    <div class="table-responsive">
     <table class="table table-sm mb-0">
         <thead><tr><th>Product</th><th>Branch</th><th>Stock</th><th>Days Left</th><th>Recommended Reorder</th></tr></thead>
         <tbody>
@@ -53,12 +54,14 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
 </div>
 
 <div class="row g-3">
     <div class="col-md-6">
         <div class="jc-card p-3 h-100">
             <div class="fw-semibold mb-2">Slow-Moving Products</div>
+            <div class="table-responsive">
             <table class="table table-sm mb-0">
                 <thead><tr><th>Product</th><th>Branch</th><th>Avg Daily Demand</th></tr></thead>
                 <tbody>
@@ -73,6 +76,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
         </div>
     </div>
     <div class="col-md-6">

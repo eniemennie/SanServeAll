@@ -63,6 +63,7 @@
         <span class="text-muted small align-self-center ms-auto">Showing {{ stats.total }} batch log{{ stats.total|pluralize }}</span>
     </form>
 
+    <div class="table-responsive">
     <table class="table table-sm mb-0">
         <thead>
             <tr>
@@ -107,6 +108,7 @@
             {% endfor %}
         </tbody>
     </table>
+    </div>
 </div>
 
 {% endblock %}
