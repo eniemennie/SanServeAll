@@ -180,13 +180,32 @@ def add_customized_item(
 def update_item_customization(item, quantity=None, customizations=None):
     """Applies Order Customization changes (Fig. 3-14) to an existing line
     item -- size, sugar level, add-ons, quantity, etc. `customizations` is
-    stored as-is (a plain dict) since its shape varies per product."""
+    stored as-is (a plain dict) since its shape varies per product.
+
+    A quantity of zero or negative removes the line item entirely (QA
+    fix: this used to be silently ignored, leaving the item in the cart
+    unchanged no matter what was typed). The HTML field has a client-side
+    `min="1"`, but that's not something the server can rely on -- a
+    request can always arrive with a smaller or negative value regardless
+    of what the browser's own input widget allowed. A blank/non-numeric
+    quantity is left as a no-op on quantity (same as before) since that's
+    a different, not-reported concern from an explicit negative/zero
+    value.
+
+    Returns the item, or None if this call deleted it -- callers that
+    need the item afterward should check for that.
+    """
     if quantity is not None:
         try:
             quantity = int(quantity)
         except (TypeError, ValueError):
             quantity = None
-        if quantity is not None and quantity > 0:
+
+        if quantity is not None and quantity <= 0:
+            item.delete()
+            return None
+
+        if quantity is not None:
             item.quantity = quantity
 
     if customizations is not None:

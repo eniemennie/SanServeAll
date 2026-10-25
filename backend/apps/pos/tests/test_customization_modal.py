@@ -203,6 +203,43 @@ class TestAddCustomizedItemService:
         assert item.customizations["discount_category"] == ""
 
 
+class TestUpdateItemCustomizationQuantity:
+    """QA fix: a negative or zero quantity in Order Customization must
+    remove the line item, not silently leave it unchanged."""
+
+    def test_negative_quantity_removes_the_item(self, draft, beverage):
+        from apps.pos.models import SalesItem
+
+        item = services.add_customized_item(draft, beverage.pk, quantity=1)
+        result = services.update_item_customization(item, quantity=-3)
+        assert result is None
+        assert not SalesItem.objects.filter(pk=item.pk).exists()
+
+    def test_zero_quantity_removes_the_item(self, draft, beverage):
+        from apps.pos.models import SalesItem
+
+        item = services.add_customized_item(draft, beverage.pk, quantity=1)
+        services.update_item_customization(item, quantity=0)
+        assert not SalesItem.objects.filter(pk=item.pk).exists()
+
+    def test_positive_quantity_still_updates_normally(self, draft, beverage):
+        item = services.add_customized_item(draft, beverage.pk, quantity=1)
+        result = services.update_item_customization(item, quantity=5)
+        assert result is not None
+        item.refresh_from_db()
+        assert item.quantity == 5
+
+    def test_blank_quantity_leaves_item_untouched(self, draft, beverage):
+        """Not the QA-reported case -- a blank/non-numeric quantity
+        should still be a no-op on quantity, same as before this fix,
+        not treated as 'remove'."""
+        item = services.add_customized_item(draft, beverage.pk, quantity=1)
+        result = services.update_item_customization(item, quantity="")
+        assert result is not None
+        item.refresh_from_db()
+        assert item.quantity == 1
+
+
 class TestAddCustomizedItemView:
     def test_adds_item_and_redirects_to_ordering(self, unlocked_client, beverage):
         response = unlocked_client.post(
