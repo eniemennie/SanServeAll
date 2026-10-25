@@ -9,7 +9,7 @@ import pytest
 from django.urls import reverse
 
 from apps.accounts.models import Branch, CashierPIN, Role, User
-from apps.inventory.models import Product
+from apps.inventory.models import Inventory, Product
 from apps.pos.models import SalesItem, SalesTransaction
 
 pytestmark = pytest.mark.django_db
@@ -50,7 +50,12 @@ def unlocked_client(client, cashier, branch):
 
 @pytest.fixture
 def product(branch):
-    return Product.objects.create(name="Spanish Latte", price=Decimal("120.00"))
+    """Provisioned at `branch` (an Inventory row) -- POS now only shows/
+    allows a product that's actually stocked at the cashier's branch
+    (QA fix: branch-specific product availability)."""
+    product = Product.objects.create(name="Spanish Latte", price=Decimal("120.00"))
+    Inventory.objects.create(branch=branch, product=product)
+    return product
 
 
 class TestPosUnlockRequired:
@@ -90,29 +95,43 @@ class TestPosOrdering:
         response = unlocked_client.get(reverse("pos:ordering"))
         assert b"Spanish Latte" not in response.content
 
-    def test_search_filters_products(self, unlocked_client, product):
-        Product.objects.create(name="Iced Tea", price=Decimal("50.00"))
+    def test_search_filters_products(self, unlocked_client, product, branch):
+        iced_tea = Product.objects.create(name="Iced Tea", price=Decimal("50.00"))
+        Inventory.objects.create(branch=branch, product=iced_tea)
         response = unlocked_client.get(reverse("pos:ordering"), {"q": "Latte"})
         assert b"Spanish Latte" in response.content
         assert b"Iced Tea" not in response.content
 
-    def test_category_filters_products(self, unlocked_client, product):
+    def test_category_filters_products(self, unlocked_client, product, branch):
         """product fixture has no category set (blank) -- confirms
         filtering by PASTA correctly excludes it."""
-        Product.objects.create(
+        lasagna = Product.objects.create(
             name="Lasagna", price=Decimal("145.00"), category=Product.Category.PASTA
         )
+        Inventory.objects.create(branch=branch, product=lasagna)
         response = unlocked_client.get(reverse("pos:ordering"), {"category": "PASTA"})
         assert b"Lasagna" in response.content
         assert b"Spanish Latte" not in response.content
 
-    def test_all_products_shown_when_no_category_selected(self, unlocked_client, product):
-        Product.objects.create(
+    def test_all_products_shown_when_no_category_selected(self, unlocked_client, product, branch):
+        lasagna = Product.objects.create(
             name="Lasagna", price=Decimal("145.00"), category=Product.Category.PASTA
         )
+        Inventory.objects.create(branch=branch, product=lasagna)
         response = unlocked_client.get(reverse("pos:ordering"))
         assert b"Spanish Latte" in response.content
         assert b"Lasagna" in response.content
+
+    def test_product_not_provisioned_at_this_branch_is_not_listed(self, unlocked_client):
+        """QA fix (branch-specific product availability): a product
+        stocked only at a different branch must not appear in this
+        branch's POS catalog, even though it's a shared, active
+        catalog entry."""
+        other_branch = Branch.objects.create(name="Batangas City", code="BATANGAS")
+        other_only = Product.objects.create(name="Batangas Exclusive", price=Decimal("75.00"))
+        Inventory.objects.create(branch=other_branch, product=other_only)
+        response = unlocked_client.get(reverse("pos:ordering"))
+        assert b"Batangas Exclusive" not in response.content
 
     def test_material_products_never_appear_in_the_pos_catalog(self, unlocked_client):
         Product.objects.create(

@@ -186,6 +186,27 @@ class TestCreateProduct:
         with pytest.raises(services.InventoryServiceError, match="name is required"):
             services.create_product("   ", "10.00", Product.ProductType.FINISHED_GOOD)
 
+    def test_no_branch_ids_provisions_nowhere(self):
+        """Backward-compatible default: a product created without
+        branch_ids gets no Inventory row anywhere, same as before the
+        QA fix -- existing callers that don't pass it keep working."""
+        product = services.create_product(
+            "Unprovisioned", "10.00", Product.ProductType.FINISHED_GOOD
+        )
+        assert not Inventory.objects.filter(product=product).exists()
+
+    def test_branch_ids_provisions_only_those_branches(self, branch, other_branch):
+        product = services.create_product(
+            "Branch Scoped Item",
+            "10.00",
+            Product.ProductType.FINISHED_GOOD,
+            branch_ids=[branch.pk],
+        )
+        assert Inventory.objects.filter(branch=branch, product=product).exists()
+        assert not Inventory.objects.filter(branch=other_branch, product=product).exists()
+        inv = Inventory.objects.get(branch=branch, product=product)
+        assert inv.quantity_on_hand == 0
+
 
 class TestInventoryMonitoringView:
     def test_branch_staff_can_view_monitoring_for_their_own_branch(self, staff_client, branch):
@@ -226,7 +247,7 @@ class TestProductManagementView:
         response = owner_client.get(reverse("inventory:product_management"))
         assert response.status_code == 200
 
-    def test_owner_can_add_a_product(self, owner_client):
+    def test_owner_can_add_a_product(self, owner_client, branch):
         response = owner_client.post(
             reverse("inventory:product_management"),
             {
@@ -234,10 +255,42 @@ class TestProductManagementView:
                 "price": "130.00",
                 "product_type": Product.ProductType.FINISHED_GOOD,
                 "reorder_threshold": "10",
+                "branches": [branch.pk],
             },
         )
         assert response.status_code == 302
         assert Product.objects.filter(name="New Latte").exists()
+
+    def test_adding_a_product_provisions_it_only_at_the_selected_branch(
+        self, owner_client, branch, other_branch
+    ):
+        """QA fix: a product must be provisioned only where explicitly
+        selected, not silently become available at every branch."""
+        owner_client.post(
+            reverse("inventory:product_management"),
+            {
+                "name": "Branch Exclusive Item",
+                "price": "99.00",
+                "product_type": Product.ProductType.FINISHED_GOOD,
+                "branches": [branch.pk],
+            },
+        )
+        product = Product.objects.get(name="Branch Exclusive Item")
+        assert Inventory.objects.filter(branch=branch, product=product).exists()
+        assert not Inventory.objects.filter(branch=other_branch, product=product).exists()
+
+    def test_no_branch_selected_shows_error_and_does_not_create(self, owner_client):
+        response = owner_client.post(
+            reverse("inventory:product_management"),
+            {
+                "name": "No Branch Item",
+                "price": "50.00",
+                "product_type": Product.ProductType.FINISHED_GOOD,
+            },
+        )
+        assert response.status_code == 200
+        assert b"Select at least one branch" in response.content
+        assert not Product.objects.filter(name="No Branch Item").exists()
 
     def test_blank_name_shows_error_and_does_not_create(self, owner_client):
         response = owner_client.post(
