@@ -7,3 +7,9 @@
 5. `pip install -r backend/requirements/staging.txt`
 6. `python manage.py migrate --settings=config.settings.staging`
 7. Reload the web app.
+8. Same nightly-jobs reliability setup as production (see
+   `deployment/production/notes.md` steps 7-8) -- three PythonAnywhere
+   Scheduled Tasks calling `run_nightly_forecast`,
+   `run_nightly_risk_classification`, and `run_nightly_insight_generation`
+   with `--settings=config.settings.staging`, then
+   `APSCHEDULER_AUTOSTART=false` once those are confirmed running.

@@ -97,3 +97,14 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 # about. Built from the same ALLOWED_HOSTS env var above rather than a
 # second variable to keep in sync.
 CSRF_TRUSTED_ORIGINS = [f"https://{host}" for host in ALLOWED_HOSTS if host]
+
+# base.py defaults this True (the in-process APScheduler in
+# config/scheduler.py, tied to the web worker's own uptime). Once the
+# nightly jobs are scheduled independently via `manage.py
+# run_nightly_forecast` / `run_nightly_risk_classification` /
+# `run_nightly_insight_generation` on PythonAnywhere's own Scheduled
+# Tasks (see deployment/production/notes.md), set
+# APSCHEDULER_AUTOSTART=false in the environment so the two paths don't
+# both fire the same job. Left True by default so existing behavior is
+# unchanged until that's deliberately turned off.
+APSCHEDULER_AUTOSTART = os.environ.get("APSCHEDULER_AUTOSTART", "true").lower() == "true"
