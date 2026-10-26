@@ -59,6 +59,37 @@ def _completed_sale(branch, cashier, product, quantity, days_ago):
     return transaction
 
 
+class TestInventoryRiskScoreDisplayQuantity:
+    """QA fix: a negative quantity_on_hand snapshot (oversold stock --
+    exactly the HIGH-risk case this model exists to flag) must not be
+    shown to a person as a raw negative number on the Decision Support /
+    Resource Management dashboards, while the real value -- already used
+    to compute risk_level and days_of_stock_left -- stays untouched."""
+
+    def test_negative_snapshot_displays_as_zero(self, branch, latte):
+        score = InventoryRiskScore.objects.create(
+            branch=branch,
+            product=latte,
+            risk_level="HIGH",
+            quantity_on_hand=-4,
+            avg_daily_demand=5.0,
+            days_of_stock_left=0.0,
+        )
+        assert score.quantity_on_hand == -4
+        assert score.display_quantity == 0
+
+    def test_positive_snapshot_display_matches_real_value(self, branch, latte):
+        score = InventoryRiskScore.objects.create(
+            branch=branch,
+            product=latte,
+            risk_level="LOW",
+            quantity_on_hand=50,
+            avg_daily_demand=5.0,
+            days_of_stock_left=10.0,
+        )
+        assert score.display_quantity == 50
+
+
 class TestRuleBasedLabel:
     def test_zero_stock_is_always_high_risk(self):
         assert rule_based_label(0, 5.0, 0.0) == "HIGH"
@@ -163,7 +194,7 @@ class TestRunRiskClassificationForAllInventory:
 
 class TestInsightGenerator:
     def test_no_api_key_falls_back_to_template(self, settings):
-        settings.CLAUDE_API_KEY = ""
+        settings.GEMINI_API_KEY = ""
         message, generated_by_ai = generate_insight(
             "STOCKOUT_WARNING",
             {"branch_name": "Lipa City", "at_risk_items": "Spanish Latte (HIGH)"},
@@ -173,10 +204,16 @@ class TestInsightGenerator:
         assert "Spanish Latte" in message
 
     def test_successful_api_call_returns_ai_generated_true(self, settings):
-        settings.CLAUDE_API_KEY = "fake-test-key"
+        settings.GEMINI_API_KEY = "fake-test-key"
         mock_response = MagicMock()
         mock_response.json.return_value = {
-            "content": [{"text": "Lipa City is low on Spanish Latte -- restock soon."}]
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [{"text": "Lipa City is low on Spanish Latte -- restock soon."}]
+                    }
+                }
+            ]
         }
         mock_response.raise_for_status.return_value = None
 
@@ -192,7 +229,7 @@ class TestInsightGenerator:
         assert message == "Lipa City is low on Spanish Latte -- restock soon."
 
     def test_api_failure_falls_back_to_template_not_an_exception(self, settings):
-        settings.CLAUDE_API_KEY = "fake-test-key"
+        settings.GEMINI_API_KEY = "fake-test-key"
         with patch(
             "apps.forecasting.ml.insight_generator.requests.post",
             side_effect=ConnectionError("network unreachable"),
@@ -212,7 +249,7 @@ class TestInsightGenerator:
 
 class TestGenerateInsightsForAllBranches:
     def test_only_generates_for_branches_with_at_risk_items(self, branch, latte, settings):
-        settings.CLAUDE_API_KEY = ""
+        settings.GEMINI_API_KEY = ""
         healthy_branch = Branch.objects.create(name="Batangas City", code="BATANGAS")
 
         InventoryRiskScore.objects.create(
@@ -238,7 +275,7 @@ class TestGenerateInsightsForAllBranches:
         assert healthy_branch.pk not in branch_ids
 
     def test_creates_a_stockout_warning_insight(self, branch, latte, settings):
-        settings.CLAUDE_API_KEY = ""
+        settings.GEMINI_API_KEY = ""
         InventoryRiskScore.objects.create(
             branch=branch,
             product=latte,
@@ -251,3 +288,69 @@ class TestGenerateInsightsForAllBranches:
         insight = AIInsight.objects.get(branch=branch)
         assert insight.insight_type == AIInsight.InsightType.STOCKOUT_WARNING
         assert insight.generated_by_ai is False
+
+
+class TestDemandForecastLabel:
+    """Dashboard Home batch: the High/Medium/Low KPI card label (Fig.
+    3-19). Documented as a heuristic in the service's own docstring --
+    these tests pin down exactly what that heuristic does."""
+
+    def test_no_forecast_data_returns_insufficient_data(self, branch):
+        result = services.get_demand_forecast_label(branch=branch)
+        assert result["label"] == "Insufficient Data"
+
+    def test_predicted_well_above_trailing_average_is_high(self, branch, cashier, latte):
+        from datetime import date, timedelta as td
+
+        from apps.forecasting.models import Forecast
+
+        # Trailing 30-day actual: 1 unit/day average.
+        _sale(branch, cashier, latte, quantity=1, when=timezone.now())
+
+        # Forecast predicts ~2 units/day for the next 7 days -- well
+        # above the +15% "High" threshold.
+        for i in range(7):
+            Forecast.objects.create(
+                branch=branch,
+                product=latte,
+                forecast_date=date.today() + td(days=i + 1),
+                predicted_quantity=2.0,
+                model_used="HoltWinters(seasonal=7)",
+            )
+
+        result = services.get_demand_forecast_label(branch=branch)
+        assert result["label"] == "High"
+        assert result["window_days"] == 7
+
+    def test_predicted_close_to_trailing_average_is_medium(self, branch, cashier, latte):
+        from datetime import date, timedelta as td
+
+        from apps.forecasting.models import Forecast
+
+        # 30 sales of 1 unit each over the trailing 30-day window ->
+        # avg_actual_daily = 30 units / 30 days = 1.0/day.
+        for _ in range(30):
+            _sale(branch, cashier, latte, quantity=1, when=timezone.now())
+
+        # Predicting ~1.0/day for the next day is within the +/-15%
+        # "Medium" band around that same 1.0/day trailing average.
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=date.today() + td(days=1),
+            predicted_quantity=1.0,
+            model_used="HoltWinters(seasonal=7)",
+        )
+
+        result = services.get_demand_forecast_label(branch=branch)
+        assert result["label"] == "Medium"
+
+
+def _sale(branch, cashier, product, quantity, when):
+    txn = SalesTransaction.objects.create(
+        branch=branch, cashier=cashier, status=SalesTransaction.Status.COMPLETED, completed_at=when
+    )
+    SalesItem.objects.create(
+        transaction=txn, product=product, unit_price="10.00", quantity=quantity
+    )
+    return txn

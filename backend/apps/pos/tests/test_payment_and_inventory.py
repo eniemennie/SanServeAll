@@ -25,8 +25,15 @@ def kahero_branch():
 
 
 @pytest.fixture
-def product():
-    return Product.objects.create(name="Spanish Latte", price="125.00")
+def product(branch):
+    """Provisioned at `branch` (an Inventory row, quantity 0) -- POS now
+    only allows adding a product that's actually stocked at the
+    cashier's branch (QA fix: branch-specific product availability).
+    Tests that need a specific starting quantity update this row rather
+    than creating a second one (branch+product is unique)."""
+    product = Product.objects.create(name="Spanish Latte", price="125.00")
+    Inventory.objects.create(branch=branch, product=product, quantity_on_hand=0)
+    return product
 
 
 @pytest.fixture
@@ -86,7 +93,10 @@ class TestCompleteSalePayment:
         assert result.completed_at is not None
 
     def test_native_branch_sale_deducts_inventory(self, cashier, branch, product):
-        Inventory.objects.create(branch=branch, product=product, quantity_on_hand=10)
+        # `product` fixture already provisioned an Inventory row at
+        # `branch` (quantity 0) -- set the real starting quantity on it
+        # rather than creating a second row (branch+product is unique).
+        Inventory.objects.filter(branch=branch, product=product).update(quantity_on_hand=10)
         draft = services.get_or_create_draft_transaction(cashier, branch)
         services.add_catalog_item(draft, product.pk, 3)
 

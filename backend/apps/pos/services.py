@@ -9,7 +9,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.inventory.models import Inventory, InventoryTransaction, Product
-from apps.pos.models import SalesItem, SalesTransaction
+from apps.pos.models import DiscountType, SalesItem, SalesTransaction
 
 
 def get_or_create_draft_transaction(user, branch):
@@ -27,9 +27,14 @@ def get_or_create_draft_transaction(user, branch):
 def add_catalog_item(draft, product_id, quantity=1):
     """Adds a product from the standard catalog to the draft order
     (Fig. 3-12). Returns None on an invalid/inactive product rather than
-    raising, so the view can show a friendly error instead of a 500."""
+    raising, so the view can show a friendly error instead of a 500.
+
+    Scoped to products actually provisioned (an Inventory row exists) at
+    the draft's own branch -- mirrors the pos_ordering catalog filter, so
+    a cashier can't add an item via a crafted request that the branch's
+    own catalog screen would never have shown them."""
     try:
-        product = Product.objects.get(pk=product_id, is_active=True)
+        product = Product.objects.get(pk=product_id, is_active=True, inventory__branch=draft.branch)
     except (Product.DoesNotExist, ValueError, TypeError):
         return None
 
@@ -127,7 +132,7 @@ def add_customized_item(
     from apps.pos.models import AddOn
 
     try:
-        product = Product.objects.get(pk=product_id, is_active=True)
+        product = Product.objects.get(pk=product_id, is_active=True, inventory__branch=draft.branch)
     except (Product.DoesNotExist, ValueError, TypeError):
         return None
 
@@ -175,13 +180,32 @@ def add_customized_item(
 def update_item_customization(item, quantity=None, customizations=None):
     """Applies Order Customization changes (Fig. 3-14) to an existing line
     item -- size, sugar level, add-ons, quantity, etc. `customizations` is
-    stored as-is (a plain dict) since its shape varies per product."""
+    stored as-is (a plain dict) since its shape varies per product.
+
+    A quantity of zero or negative removes the line item entirely (QA
+    fix: this used to be silently ignored, leaving the item in the cart
+    unchanged no matter what was typed). The HTML field has a client-side
+    `min="1"`, but that's not something the server can rely on -- a
+    request can always arrive with a smaller or negative value regardless
+    of what the browser's own input widget allowed. A blank/non-numeric
+    quantity is left as a no-op on quantity (same as before) since that's
+    a different, not-reported concern from an explicit negative/zero
+    value.
+
+    Returns the item, or None if this call deleted it -- callers that
+    need the item afterward should check for that.
+    """
     if quantity is not None:
         try:
             quantity = int(quantity)
         except (TypeError, ValueError):
             quantity = None
-        if quantity is not None and quantity > 0:
+
+        if quantity is not None and quantity <= 0:
+            item.delete()
+            return None
+
+        if quantity is not None:
             item.quantity = quantity
 
     if customizations is not None:
@@ -247,8 +271,22 @@ def apply_transaction_discount(draft, category, discount_type, amount):
         amount = Decimal(str(amount))
     except (InvalidOperation, TypeError):
         return False
-    if amount < 0:
+    # NaN/Infinity parse as valid Decimals but crash the comparisons and the
+    # database save below -- only a crafted request can send them (a
+    # browser number box can't), but invalid input must be rejected, not
+    # turn into a server error.
+    if not amount.is_finite() or amount < 0:
         return False
+    # Found by negative testing: only "not negative" used to be checked, so
+    # 150% (or one stray extra zero: 200 instead of 20) silently turned the
+    # whole order into a free one. A discount can't exceed what it
+    # discounts. Exactly 100% / exactly the order total is still allowed --
+    # a complimentary order is a business decision, not invalid input.
+    if discount_type == DiscountType.PERCENT and amount > 100:
+        return False
+    if discount_type == DiscountType.AMOUNT and draft.total_amount > 0:
+        if amount > draft.total_amount:
+            return False
 
     draft.transaction_discount_category = category
     draft.transaction_discount_type = discount_type

@@ -1,6 +1,7 @@
 """
-AI/DSS module: ARIMA forecasting (Row 10), inventory risk classification
-and natural-language insights (Row 11).
+AI/DSS module: Holt-Winters forecasting (Row 10, originally ARIMA --
+see apps.forecasting.ml.forecast_model's module docstring for why),
+inventory risk classification and natural-language insights (Row 11).
 """
 
 from django.db import models
@@ -16,10 +17,10 @@ class Forecast(models.Model):
     product = models.ForeignKey("inventory.Product", on_delete=models.CASCADE)
     forecast_date = models.DateField(help_text="The future date this prediction is for.")
     predicted_quantity = models.FloatField()
-    # Records which method actually produced this number -- ARIMA needs a
-    # reasonable amount of history to fit meaningfully; a new product/
-    # branch pair with too little sales history falls back to a naive
-    # average instead of forcing ARIMA on data it can't model well.
+    # Records which method actually produced this number -- Holt-Winters
+    # needs a reasonable amount of history to fit meaningfully; a new
+    # product/branch pair with too little sales history falls back to a
+    # naive average instead of forcing it on data it can't model well.
     model_used = models.CharField(max_length=50)
     # Mean Absolute Error against a held-out slice of real historical
     # data, computed at the time this forecast was generated -- null
@@ -67,6 +68,17 @@ class InventoryRiskScore(models.Model):
 
     class Meta:
         ordering = ["-computed_at"]
+
+    @property
+    def display_quantity(self):
+        """QA fix, same reasoning as Inventory.display_quantity: this
+        snapshot can be genuinely negative (oversold stock is exactly
+        what HIGH risk is meant to flag), which is real signal for the
+        classifier -- but a raw negative number reads as a glitch to a
+        person looking at the Decision Support / Resource Management
+        dashboards. Display-only; risk_level and days_of_stock_left were
+        already computed from the real (possibly negative) value."""
+        return max(self.quantity_on_hand, 0)
 
     def __str__(self):
         return f"{self.product.name} @ {self.branch.name}: {self.risk_level}"

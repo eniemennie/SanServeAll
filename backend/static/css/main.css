@@ -211,6 +211,94 @@ body {
   padding: 0.75rem 1.5rem;
 }
 
+/* Branch filter dropdown / commissary badge in the topbar -- pulled out
+   of inline styles (admin_base.html) into a reusable class so it can be
+   relaxed responsively here in one place instead of duplicated per
+   usage. */
+.jc-branch-filter {
+  min-width: 260px;
+  max-width: 340px;
+  width: 100%;
+}
+
+/* --- Responsive: shared Admin/Commissary shell ---
+   Mobile-first overrides for the topbar and sidebar. Desktop (>=768px)
+   behavior above this block is completely unchanged. */
+@media (max-width: 767.98px) {
+  /* Topbar: allow wrapping instead of forcing every child to fit one
+     row (the fixed-width branch filter was the main horizontal-scroll
+     culprit on a phone-width screen). */
+  .jc-topbar {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
+  .jc-topbar .jc-branch-filter {
+    min-width: 0;
+    max-width: none;
+    order: 3;
+    flex-basis: 100%;
+  }
+
+  /* Sidebar becomes an off-canvas drawer: fixed over the content instead
+     of pushing it, toggled by the existing hamburger button (JS below
+     just flips data-expanded the same way it always did -- only the
+     meaning of that attribute changes at this breakpoint, via these
+     rules). Starts closed on load (see admin_base.html's extra_js). */
+  .jc-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 240px;
+    height: 100vh;
+    min-height: 100vh;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    z-index: 1045;
+  }
+  .jc-sidebar[data-expanded="true"] {
+    width: 240px;
+    transform: translateX(0);
+    box-shadow: 0 0 32px rgba(30, 42, 58, 0.25);
+  }
+  .jc-sidebar[data-expanded="true"] .jc-nav-label {
+    opacity: 1;
+    max-width: 180px;
+  }
+  .jc-sidebar:not([data-expanded="true"]) .jc-nav-item {
+    /* Irrelevant while off-canvas, but keeps icon alignment correct for
+       the instant before the slide-out transition finishes. */
+    justify-content: flex-start;
+    width: auto;
+    margin: 0;
+  }
+
+  .jc-sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 22, 32, 0.4);
+    z-index: 1044;
+  }
+  .jc-sidebar-backdrop-visible {
+    display: block;
+  }
+
+  /* Main content takes the full width since the drawer is now
+     position: fixed (out of normal flow) instead of a flex sibling. */
+  .jc-topbar + div > main {
+    width: 100%;
+  }
+}
+
+@media (min-width: 768px) {
+  /* The backdrop only ever applies to the mobile drawer; make sure it
+     can never block clicks at desktop widths even if JS left the
+     visible class on from a resize. */
+  .jc-sidebar-backdrop {
+    display: none !important;
+  }
+}
+
 body.jc-dark .jc-sidebar {
   background-color: var(--jc-white);
   border-right-color: #2C3847;
@@ -322,5 +410,123 @@ body.jc-dark .btn-close {
 }
 .jc-left-handed .jc-summary-col {
   order: 1;
+}
+
+/* --- Auth Pages (Admin Login, 2FA Verify, ...) ---
+   Shared across every standalone login/verification screen so they stay
+   visually locked together -- edit here, not per-template, or the
+   screens will silently drift apart from each other again. */
+.jc-auth-bg {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--jc-cream);
+  position: relative;
+  padding: 1.5rem;
+}
+.jc-auth-back-link {
+  position: absolute;
+  top: 1.75rem;
+  left: 1.75rem;
+  color: var(--jc-text);
+  text-decoration: none;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.jc-auth-back-link:hover {
+  color: var(--jc-orange-dark);
+}
+.jc-auth-card {
+  background: var(--jc-white);
+  border-radius: var(--jc-radius);
+  box-shadow: 0 10px 30px rgba(30, 42, 58, 0.08);
+  max-width: 440px;
+  width: 100%;
+  padding: 2.75rem 2.5rem;
+  text-align: center;
+}
+@media (max-width: 400px) {
+  /* .jc-auth-bg already adds 1.5rem of its own padding around this
+     card, so on the narrowest phones (375px) the combined padding left
+     very little room for the form itself; this only trims the card's
+     own padding, not the card's max-width or the page layout. */
+  .jc-auth-card {
+    padding: 1.75rem 1.25rem;
+  }
+}
+.jc-auth-card .jc-logo-img {
+  height: 68px;
+  margin-bottom: 0.5rem;
+}
+.jc-auth-subtitle {
+  color: var(--jc-text-muted);
+  margin-bottom: 1.75rem;
+}
+.jc-auth-card .form-label {
+  text-align: left;
+  display: block;
+  color: var(--jc-text);
+  font-weight: 500;
+}
+.jc-auth-card .form-control {
+  border-radius: var(--jc-radius-sm);
+  border-color: var(--jc-tan);
+  padding: 0.65rem 0.9rem;
+}
+.jc-auth-card .form-control:focus {
+  border-color: var(--jc-orange);
+  box-shadow: 0 0 0 0.2rem rgba(232, 139, 90, 0.2);
+}
+.jc-auth-otp-input {
+  text-align: center;
+  font-size: 1.5rem;
+  letter-spacing: 0.5rem;
+  font-weight: 600;
+}
+.jc-auth-footnote {
+  color: var(--jc-text-muted);
+  font-size: 0.875rem;
+  margin-top: 1.25rem;
+  margin-bottom: 0;
+}
+.jc-password-wrap {
+  position: relative;
+}
+.jc-password-toggle {
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--jc-text-muted);
+  display: flex;
+  cursor: pointer;
+}
+.jc-password-toggle:hover {
+  color: var(--jc-text);
+}
+
+/* Responsive: Phase 5 spot-check. A page-header row (title + a single
+   action button, both vertically centered) is reused across most
+   Admin/Commissary screens -- on a phone-width screen, a longer title
+   plus a button like "View Batch Dashboard" don't both fit on one
+   line, and neither child shrinks on its own (buttons don't wrap their
+   label, headings don't yield space to a sibling). Letting this exact,
+   specific combination wrap is a no-op wherever it already fits (flex-
+   wrap only activates once content overflows), so this is safe to
+   apply once here rather than duplicating a fix across every template
+   that uses it. Headers that already handle this themselves (a
+   wrapping description beside a button, via align-items-start instead
+   of -center) are a different class combination and unaffected. */
+@media (max-width: 575.98px) {
+  .d-flex.justify-content-between.align-items-center {
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+  }
 }
 

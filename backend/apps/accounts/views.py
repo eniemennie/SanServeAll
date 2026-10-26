@@ -11,6 +11,7 @@ cashier-PIN, and 2FA flow on top of an already-authenticated session.
 
 import base64
 import io
+import json
 
 import qrcode
 from django.contrib.auth import authenticate
@@ -37,6 +38,11 @@ from apps.accounts.services import (
     verify_cashier_pin,
     verify_cashier_pin_with_lockout,
 )
+from apps.analytics import services as analytics_services
+from apps.forecasting import services as forecasting_services
+from apps.forecasting.models import AIInsight
+from apps.inventory import services as inventory_services
+from apps.production import services as production_services
 
 
 class SanServeAllLoginView(auth_views.LoginView):
@@ -51,8 +57,22 @@ class SanServeAllLoginView(auth_views.LoginView):
 
 
 class SanServeAllLogoutView(auth_views.LogoutView):
-    """Also clears the PIN-unlock flag, so a new login always starts from
-    a locked POS state rather than inheriting a stale unlock."""
+    """Shared by all three roles -- Owner/Admin and Commissary Staff reach
+    it from admin_base.html's topbar, Cashier from the POS screen's own
+    logout button (Row 20) -- since Django's auth_logout() (called by the
+    parent class before this redirect) already flushes the session and
+    clears the authenticated user regardless of which role it was, with
+    no role-specific logic needed here.
+
+    Sends everyone back to the public landing page/role picker rather
+    than straight to any one login screen, so logging out always lands
+    on the same neutral starting point a first-time visitor sees, no
+    matter which of the three login flows they came in through. Also
+    clears the PIN-unlock flag, so a new login always starts from a
+    locked POS state rather than inheriting a stale unlock.
+    """
+
+    next_page = "core:landing"
 
     def dispatch(self, request, *args, **kwargs):
         request.session.pop("pos_unlocked", None)
@@ -137,7 +157,7 @@ class BranchSelectionView(LoginRequiredMixin, View):
             return redirect("accounts:cashier_pin")
         if request.user.role and request.user.role.name == Role.OWNER_ADMIN:
             return redirect("accounts:admin_dashboard")
-        return redirect("accounts:dashboard")
+        return redirect("production:dashboard")
 
 
 class CashierPinView(LoginRequiredMixin, View):
@@ -166,15 +186,6 @@ class CashierPinView(LoginRequiredMixin, View):
             self.template_name,
             {"error": "Incorrect PIN. Please try again."},
         )
-
-
-@login_required
-def dashboard_placeholder(request):
-    """Temporary landing page post-login/PIN. Real role-specific dashboards
-    (POS ordering, Owner/Admin analytics) land in later weeks -- this exists
-    so the Week 3 flow has somewhere valid to redirect to and be tested
-    end-to-end rather than dead-ending at a 404."""
-    return render(request, "accounts/dashboard_placeholder.html")
 
 
 def _base32_secret(device):
@@ -242,6 +253,52 @@ class AdminLoginView(View):
         if TOTPDevice.objects.filter(user=user, confirmed=True).exists():
             return redirect("accounts:admin_2fa_verify")
         return redirect("accounts:admin_2fa_setup")
+
+
+class CommissaryLoginView(View):
+    """Commissary Staff Login (landing page role selector, Row 19).
+
+    Visually a sibling of AdminLoginView -- same jc-auth-* shell, card and
+    form styling -- but authenticates by username/password like the plain
+    staff Login/Start Screen, since Commissary Staff accounts have no
+    distinct email-first flow the way Owner/Admin's 2FA path needs. Only
+    succeeds for COMMISSARY_STAFF accounts; a correct password for any
+    other role is treated the same as a wrong one here, mirroring how
+    AdminLoginView guards its own entry point, so this page can't be used
+    as a second way into another role's account.
+
+    On success, hands off to the existing BranchSelectionView rather than
+    redirecting straight to production:dashboard -- that view is already
+    the single place role-based post-login routing happens (Row 14/15),
+    and a Commissary Staff account always resolves there to
+    production:dashboard, so access permissions and the redirect target
+    both stay governed by that one existing code path instead of being
+    duplicated here.
+    """
+
+    template_name = "accounts/commissary_login.html"
+
+    def get(self, request):
+        return render(request, self.template_name)
+
+    def post(self, request):
+        username = request.POST.get("username", "").strip()
+        password = request.POST.get("password", "")
+
+        authed = authenticate(request, username=username, password=password)
+        user = None
+        if authed is not None and authed.role and authed.role.name == Role.COMMISSARY_STAFF:
+            user = authed
+
+        if user is None:
+            return render(
+                request,
+                self.template_name,
+                {"error": "Invalid username or password."},
+            )
+
+        auth_login(request, user)
+        return redirect("accounts:select_branch")
 
 
 class TwoFactorSetupView(LoginRequiredMixin, View):
@@ -336,27 +393,90 @@ def regenerate_backup_codes(request):
 
 @role_required(Role.OWNER_ADMIN)
 @otp_required(login_url="accounts:admin_login")
-def admin_dashboard_placeholder(request):
-    """Temporary Owner/Admin landing page. Protected by BOTH role (only
-    OWNER_ADMIN) and OTP verification (must have completed 2FA this
-    session) -- demonstrates the full enforcement chain this batch builds:
-    Admin Login -> 2FA -> Branch Selection -> here.
+def admin_dashboard(request):
+    """Dashboard Home (Fig. 3-19/3-28): Branch Performance, KPI cards,
+    Sales Analytics + Top Products, Resource Monitoring, and the
+    AI-Powered Insights feed. Protected by BOTH role (only OWNER_ADMIN)
+    and OTP verification (must have completed 2FA this session) --
+    demonstrates the full enforcement chain built in the Admin Shell
+    batch: Admin Login -> 2FA -> Branch Selection -> here.
 
-    Now rendered inside admin_base.html (the shared Admin Shell), so it
-    also carries the branch dropdown context every shell-wrapped screen
-    needs. Real dashboard content (Branch Performance, Sales Analytics,
-    etc.) replaces this placeholder body in the next batch -- the shell
-    itself is what this batch delivers.
+    Renamed from admin_dashboard_placeholder now that it renders real
+    content rather than a placeholder; the URL name (accounts:admin_
+    dashboard) is unchanged, so nothing else needed updating for the
+    rename beyond urls.py's own view reference.
+
+    KPI revenue toggles (?additional=/?exclude_discounts=/?exclude_vat=)
+    default to matching the reference screenshot's own default toggle
+    states: Include Additional Sales ON, Exclude Discounts OFF, Exclude
+    VAT OFF.
     """
     branch_id = request.GET.get("branch")
     selected_branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
 
+    include_additional_sales = request.GET.get("additional", "1") == "1"
+    exclude_discounts = request.GET.get("exclude_discounts") == "1"
+    exclude_vat = request.GET.get("exclude_vat") == "1"
+
+    summary = analytics_services.get_sales_summary_with_toggles(
+        branch=selected_branch,
+        include_additional_sales=include_additional_sales,
+        exclude_discounts=exclude_discounts,
+        exclude_vat=exclude_vat,
+    )
+    branch_performance = analytics_services.get_branch_performance()
+    top_products = analytics_services.get_top_products(branch=selected_branch)
+    forecast_label = forecasting_services.get_demand_forecast_label(branch=selected_branch)
+    resource_status = inventory_services.get_resource_status_summary(branch=selected_branch)
+    production_output = production_services.get_total_output()
+    insights = (
+        AIInsight.objects.filter(branch=selected_branch)
+        if selected_branch
+        else AIInsight.objects.all()[:5]
+    )
+    critical_alerts = forecasting_services.get_critical_alerts(selected_branch)
+    slow_moving = forecasting_services.get_slow_moving_products(selected_branch)
+    peak_hour = forecasting_services.get_peak_hour(selected_branch)
+    anomalies = forecasting_services.detect_unusual_patterns(selected_branch)
+
+    if selected_branch:
+        trend = analytics_services.get_weekly_sales_trend(branch=selected_branch)
+        trend_chart = {
+            "week_labels": [t["week_label"] for t in trend],
+            "series": [
+                {
+                    "branch_name": selected_branch.name,
+                    "revenue": [t["revenue"] for t in trend],
+                }
+            ],
+        }
+    else:
+        trend_chart = analytics_services.get_weekly_sales_trend_by_branch()
+
     return render(
         request,
-        "accounts/admin_dashboard_placeholder.html",
+        "accounts/admin_dashboard.html",
         {
             "active_nav": "dashboard",
             "branches": Branch.objects.filter(is_active=True, is_commissary=False),
             "selected_branch": selected_branch,
+            "summary": summary,
+            "branch_performance": branch_performance,
+            "top_products": top_products,
+            "forecast_label": forecast_label,
+            "resource_status": resource_status,
+            "production_output": production_output,
+            "insights": insights,
+            "critical_alerts": critical_alerts,
+            "slow_moving": slow_moving,
+            "peak_hour": peak_hour,
+            "anomalies": anomalies,
+            "trend_chart_json": json.dumps(trend_chart),
+            "top_products_json": json.dumps(
+                [{"name": p["product__name"], "units": p["units_sold"]} for p in top_products]
+            ),
+            "include_additional_sales": include_additional_sales,
+            "exclude_discounts": exclude_discounts,
+            "exclude_vat": exclude_vat,
         },
     )

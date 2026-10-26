@@ -1,8 +1,8 @@
 """
 Tests for the Admin Shell (shared topbar + sidebar template every
 Owner/Admin screen extends). Verifies the shell itself renders correctly
-around the existing admin_dashboard_placeholder view -- the placeholder's
-own access-control behavior (role + 2FA gating) is already covered by
+around the real admin_dashboard view (Dashboard Home) -- its own
+access-control behavior (role + 2FA gating) is already covered by
 test_rbac_and_2fa.py and isn't re-tested here.
 """
 
@@ -59,7 +59,11 @@ class TestAdminShell:
         assert reverse("production:batch_management") in content
         assert reverse("forecasting:forecasting_dashboard") in content
         assert reverse("forecasting:resource_management_dashboard") in content
-        assert reverse("analytics:sales_dashboard") in content
+        # Was analytics:sales_dashboard -- the Reports & Export sidebar
+        # item now points at the dedicated Reports hub instead (Reports
+        # & Export batch), which itself links onward to sales_dashboard/
+        # product_performance/resource_consumption as report tabs.
+        assert reverse("analytics:reports_hub") in content
         assert reverse("inventory:product_management") in content
         assert reverse("system_config:system_settings") in content
 
@@ -86,3 +90,40 @@ class TestAdminShell:
         response = authed_client.get(reverse("accounts:admin_dashboard"))
         content = response.content.decode()
         assert reverse("accounts:logout") in content
+
+    def test_sidebar_defaults_to_expanded_with_labels_visible(self, authed_client):
+        """Adviser feedback (compliance check item 21): icon-only
+        navigation needs labels. Every nav item already carries a real
+        text label in the markup; this confirms the sidebar now defaults
+        to the expanded state so that label is visible without
+        requiring a click, rather than just existing in markup a
+        collapsed sidebar hides by default."""
+        response = authed_client.get(reverse("accounts:admin_dashboard"))
+        content = response.content.decode()
+        assert 'data-expanded="true"' in content
+
+
+class TestNoTemplateSyntaxLeaksIntoPages:
+    """Regression: Django's {# ... #} comment only works on a SINGLE line.
+    A multi-line one in admin_base.html was not treated as a comment and
+    rendered as visible text inside the page's flex layout, squeezing the
+    sidebar and content to one side. Every admin screen extends
+    admin_base.html, so checking each one catches it however it recurs."""
+
+    @pytest.mark.parametrize(
+        "url_name",
+        [
+            "accounts:admin_dashboard",
+            "production:batch_management",
+            "forecasting:forecasting_dashboard",
+            "forecasting:resource_management_dashboard",
+            "analytics:reports_hub",
+            "inventory:product_management",
+            "system_config:system_settings",
+        ],
+    )
+    def test_no_unrendered_template_comments_or_tags(self, authed_client, url_name):
+        content = authed_client.get(reverse(url_name)).content.decode()
+        assert "{#" not in content
+        assert "#}" not in content
+        assert "{%" not in content

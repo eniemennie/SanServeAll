@@ -8,7 +8,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.shortcuts import redirect, render
 
-from apps.accounts.models import Role
+from apps.accounts.models import Branch, Role
 from apps.accounts.permissions import role_required
 from apps.system_config.models import BusinessSettings, SystemConfiguration
 
@@ -38,7 +38,14 @@ def system_settings(request):
             error = "Tax rate must be a valid number."
 
     return render(
-        request, "system_config/system_settings.html", {"settings": settings_obj, "error": error}
+        request,
+        "system_config/system_settings.html",
+        {
+            "active_nav": "settings",
+            "branches": Branch.objects.filter(is_active=True, is_commissary=False),
+            "settings": settings_obj,
+            "error": error,
+        },
     )
 
 
@@ -76,5 +83,12 @@ def system_configuration(request):
             error = "Please enter valid whole numbers for the threshold fields."
 
     return render(
-        request, "system_config/system_configuration.html", {"config": config, "error": error}
+        request,
+        "system_config/system_configuration.html",
+        {
+            "active_nav": "settings",
+            "branches": Branch.objects.filter(is_active=True, is_commissary=False),
+            "config": config,
+            "error": error,
+        },
     )

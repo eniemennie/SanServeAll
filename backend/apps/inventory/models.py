@@ -26,6 +26,7 @@ class Product(models.Model):
         PASTA = "PASTA", "Pasta"
         DESSERTS = "DESSERTS", "Desserts"
         CAKES = "CAKES", "Cakes"
+        BAKERY = "BAKERY", "Bakery & Pasalubong"
 
     name = models.CharField(max_length=150)
     price = models.DecimalField(max_digits=10, decimal_places=2)
@@ -103,6 +104,20 @@ class Inventory(models.Model):
     @property
     def is_out_of_stock(self):
         return self.quantity_on_hand <= 0
+
+    @property
+    def display_quantity(self):
+        """QA fix: `quantity_on_hand` can genuinely go negative (the
+        real-time sale-deduction hook deliberately allows overselling to
+        drive it below zero -- see pos.services._deduct_inventory_for_sale
+        -- so the AI risk-classification module has a real signal for
+        "urgently oversold", not just "empty"). That's useful data, not a
+        bug, but showing a raw "-1" to a cashier or owner reads as a
+        glitch rather than a meaningful status. Every UI that shows this
+        number to a person uses this instead of the raw field; anything
+        computing real stock health, deductions, or feeding the AI
+        model keeps using quantity_on_hand directly, unchanged."""
+        return max(self.quantity_on_hand, 0)
 
     @property
     def is_low_stock(self):

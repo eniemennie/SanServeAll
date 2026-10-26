@@ -1,0 +1,96 @@
+{% extends "admin_base.html" %}
+{% block admin_title %}Dashboard{% endblock %}
+{% block admin_content %}
+
+<div class="mb-4">
+    <h1 class="h5 mb-0">Welcome, {{ user.get_full_name|default:user.get_username }}</h1>
+    <div class="text-muted small">
+        {% if commissary %}{{ commissary.name }} Commissary{% else %}Commissary{% endif %}
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-sm-6 col-lg-3">
+        <div class="jc-card p-3 text-center">
+            <div class="text-muted small">Produced (30 days)</div>
+            <div class="fs-4 fw-bold">{{ total_output_30d }}</div>
+        </div>
+    </div>
+    {% if resource_status %}
+    <div class="col-sm-6 col-lg-3">
+        <div class="jc-card p-3 text-center">
+            <div class="text-muted small">Critical Materials</div>
+            <div class="fs-4 fw-bold" style="color: var(--jc-critical);">{{ resource_status.critical_count }}</div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="jc-card p-3 text-center">
+            <div class="text-muted small">Low Stock</div>
+            <div class="fs-4 fw-bold">{{ resource_status.low_count }}</div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="jc-card p-3 text-center">
+            <div class="text-muted small">Stock Sufficiency</div>
+            <div class="fs-4 fw-bold" style="color: var(--jc-adequate);">{{ resource_status.sufficiency_pct }}%</div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+<div class="d-flex gap-2 mb-4">
+    <a href="{% url 'production:record' %}" class="btn btn-sm" style="background: var(--jc-orange); color: #fff;">
+        Record New Production
+    </a>
+    <a href="{% url 'production:batch_management' %}" class="btn btn-outline-secondary btn-sm">
+        View Batch Logs
+    </a>
+</div>
+
+<div class="jc-card p-3">
+    <h2 class="h6 mb-3">Recent Production Runs</h2>
+    {% if recent_records %}
+    <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+            <thead>
+                <tr>
+                    <th>Product</th>
+                    <th>Qty</th>
+                    <th>Quality</th>
+                    <th>Status</th>
+                    <th>Recorded</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for record in recent_records %}
+                <tr>
+                    <td>{{ record.product.name }}</td>
+                    <td>{{ record.quantity_produced }}</td>
+                    <td>{{ record.get_quality_display }}</td>
+                    <td>{{ record.get_status_display }}</td>
+                    <td>{{ record.created_at|date:"M j, Y H:i" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-muted mb-0">No production runs recorded yet.</p>
+    {% endif %}
+</div>
+
+{% if resource_status and resource_status.critical_items %}
+<div class="jc-card p-3 mt-4">
+    <h2 class="h6 mb-3" style="color: var(--jc-critical);">Materials Needing Attention</h2>
+    <ul class="mb-0">
+        {% for item in resource_status.critical_items %}
+        <li>{{ item.product.name }} -- out of stock</li>
+        {% endfor %}
+        {% for item in resource_status.low_items %}
+        <li>{{ item.product.name }} -- low stock ({{ item.display_quantity }} on hand)</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
+
+{% endblock %}

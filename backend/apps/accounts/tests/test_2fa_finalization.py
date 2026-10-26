@@ -213,9 +213,11 @@ class TestInsightGeneratorStillWorksWithMockedAPI:
     def test_mocked_api_path_still_reachable(self, settings):
         from apps.forecasting.ml.insight_generator import generate_insight
 
-        settings.CLAUDE_API_KEY = "fake-key"
+        settings.GEMINI_API_KEY = "fake-key"
         with patch("apps.forecasting.ml.insight_generator.requests.post") as mock_post:
-            mock_post.return_value.json.return_value = {"content": [{"text": "ok"}]}
+            mock_post.return_value.json.return_value = {
+                "candidates": [{"content": {"parts": [{"text": "ok"}]}}]
+            }
             mock_post.return_value.raise_for_status.return_value = None
             message, generated_by_ai = generate_insight(
                 "DEMAND_SUMMARY", {"branch_name": "Lipa City", "forecast_summary": "steady"}
