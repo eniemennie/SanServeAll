@@ -1,7 +1,18 @@
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 from .base import *  # noqa
+
+# Same reasoning as production.py's SECRET_KEY check: fail loudly at
+# startup rather than silently serving real traffic with the known
+# placeholder key from base.py.
+if SECRET_KEY == "dev-insecure-placeholder-key":  # noqa: F405
+    raise ImproperlyConfigured(
+        "SECRET_KEY environment variable is not set. Refusing to start "
+        "staging with the insecure development placeholder key."
+    )
 
 DEBUG = False
 ALLOWED_HOSTS = os.environ.get("STAGING_ALLOWED_HOSTS", "").split(",")
