@@ -196,6 +196,56 @@ class TestIngestion:
         )
         batch = services.process_kahero_upload(kahero_branch, owner, _make_csv(csv_text))
         assert batch.quality_rate == 50.0
+        # The batch is still COMPLETED (at least one row ingested), but
+        # has_warnings must flag that it wasn't a clean import.
+        assert batch.status == KaheroImportBatch.Status.COMPLETED
+        assert batch.has_warnings is True
+
+
+class TestSilentSkipWarningUI:
+    """A batch that's COMPLETED but skipped rows must not look identical
+    to a fully clean batch in either the dashboard list or the batch
+    detail page (Development Status Assessment, KaHero item)."""
+
+    def _partial_csv(self):
+        return (
+            "transaction_date,product_name,quantity,unit_price\n"
+            "2026-08-01,Spanish Latte,2,125.00\n"
+            "2026-08-01,Nonexistent,1,50.00\n"
+        )
+
+    def test_dashboard_shows_warning_badge_for_partial_batch(
+        self, owner_client, kahero_branch, owner, product
+    ):
+        services.process_kahero_upload(kahero_branch, owner, _make_csv(self._partial_csv()))
+        response = owner_client.get(reverse("kahero:dashboard"))
+        assert response.status_code == 200
+        assert b"Completed (warnings)" in response.content
+
+    def test_dashboard_shows_plain_completed_badge_for_clean_batch(
+        self, owner_client, kahero_branch, owner, product
+    ):
+        services.process_kahero_upload(kahero_branch, owner, _make_csv(VALID_CSV))
+        response = owner_client.get(reverse("kahero:dashboard"))
+        assert response.status_code == 200
+        assert b"Completed (warnings)" not in response.content
+
+    def test_batch_detail_shows_warning_banner_for_partial_batch(
+        self, owner_client, kahero_branch, owner, product
+    ):
+        batch = services.process_kahero_upload(kahero_branch, owner, _make_csv(self._partial_csv()))
+        response = owner_client.get(reverse("kahero:batch_detail", args=[batch.pk]))
+        assert response.status_code == 200
+        assert b"row(s) were" in response.content
+        assert b"skipped" in response.content
+
+    def test_batch_detail_has_no_warning_banner_for_clean_batch(
+        self, owner_client, kahero_branch, owner, product
+    ):
+        batch = services.process_kahero_upload(kahero_branch, owner, _make_csv(VALID_CSV))
+        response = owner_client.get(reverse("kahero:batch_detail", args=[batch.pk]))
+        assert response.status_code == 200
+        assert b"were skipped and were not imported" not in response.content
 
 
 class TestUploadView:
