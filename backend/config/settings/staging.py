@@ -56,3 +56,7 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 # every POST form submission gets a CSRF 403 once DEBUG=False and the
 # site is reached over HTTPS, which it will be on any real host.
 CSRF_TRUSTED_ORIGINS = [f"https://{host}" for host in ALLOWED_HOSTS if host]
+
+# Same reasoning as production.py's APSCHEDULER_AUTOSTART override --
+# see that file's comment for the full explanation.
+APSCHEDULER_AUTOSTART = os.environ.get("APSCHEDULER_AUTOSTART", "true").lower() == "true"
