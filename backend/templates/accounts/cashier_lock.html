@@ -49,6 +49,20 @@
     }
     .jc-key:hover { background-color: var(--jc-canvas); }
     .jc-key.jc-key-active { border-color: var(--jc-orange); }
+
+    /* 3rem of card padding plus the .container's own gutter left very
+       little width for the avatar/keypad columns on a phone screen;
+       this only trims the card's padding and avatar size, not the
+       card's own max-width or the keypad's column layout. */
+    @media (max-width: 575.98px) {
+        .jc-lock-card {
+            padding: 1.5rem;
+        }
+        .jc-avatar-lg {
+            width: 96px;
+            height: 96px;
+        }
+    }
 </style>
 {% endblock %}
 {% block content %}

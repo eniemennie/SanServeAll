@@ -10,7 +10,7 @@ import pytest
 from django.urls import reverse
 
 from apps.accounts.models import Branch, CashierPIN, Role, User
-from apps.inventory.models import Product
+from apps.inventory.models import Inventory, Product
 from apps.pos import services
 from apps.pos.models import AddOn, SalesTransaction
 
@@ -49,22 +49,30 @@ def unlocked_client(client, cashier, branch):
 @pytest.fixture
 def beverage(branch):
     """A product with size options and beverage category, matching the
-    reference's Spanish Latte example."""
-    return Product.objects.create(
+    reference's Spanish Latte example. Provisioned (an Inventory row) at
+    `branch` -- POS now only allows adding a product that's actually
+    stocked at the cashier's branch (QA fix: branch-specific product
+    availability)."""
+    product = Product.objects.create(
         name="Spanish Latte",
         price=Decimal("95.00"),
         large_price=Decimal("105.00"),
         category=Product.Category.COFFEE,
     )
+    Inventory.objects.create(branch=branch, product=product)
+    return product
 
 
 @pytest.fixture
 def simple_product(branch):
     """A non-beverage product with no size options, matching the
-    reference's "Lasagna" example (no size/sugar/add-ons shown)."""
-    return Product.objects.create(
+    reference's "Lasagna" example (no size/sugar/add-ons shown).
+    Provisioned at `branch`, same reasoning as `beverage` above."""
+    product = Product.objects.create(
         name="Lasagna", price=Decimal("145.00"), category=Product.Category.PASTA
     )
+    Inventory.objects.create(branch=branch, product=product)
+    return product
 
 
 @pytest.fixture
@@ -193,6 +201,43 @@ class TestAddCustomizedItemService:
     def test_no_discount_category_is_not_stored(self, draft, beverage):
         item = services.add_customized_item(draft, beverage.pk, discount_category="NO_DISCOUNT")
         assert item.customizations["discount_category"] == ""
+
+
+class TestUpdateItemCustomizationQuantity:
+    """QA fix: a negative or zero quantity in Order Customization must
+    remove the line item, not silently leave it unchanged."""
+
+    def test_negative_quantity_removes_the_item(self, draft, beverage):
+        from apps.pos.models import SalesItem
+
+        item = services.add_customized_item(draft, beverage.pk, quantity=1)
+        result = services.update_item_customization(item, quantity=-3)
+        assert result is None
+        assert not SalesItem.objects.filter(pk=item.pk).exists()
+
+    def test_zero_quantity_removes_the_item(self, draft, beverage):
+        from apps.pos.models import SalesItem
+
+        item = services.add_customized_item(draft, beverage.pk, quantity=1)
+        services.update_item_customization(item, quantity=0)
+        assert not SalesItem.objects.filter(pk=item.pk).exists()
+
+    def test_positive_quantity_still_updates_normally(self, draft, beverage):
+        item = services.add_customized_item(draft, beverage.pk, quantity=1)
+        result = services.update_item_customization(item, quantity=5)
+        assert result is not None
+        item.refresh_from_db()
+        assert item.quantity == 5
+
+    def test_blank_quantity_leaves_item_untouched(self, draft, beverage):
+        """Not the QA-reported case -- a blank/non-numeric quantity
+        should still be a no-op on quantity, same as before this fix,
+        not treated as 'remove'."""
+        item = services.add_customized_item(draft, beverage.pk, quantity=1)
+        result = services.update_item_customization(item, quantity="")
+        assert result is not None
+        item.refresh_from_db()
+        assert item.quantity == 1
 
 
 class TestAddCustomizedItemView:

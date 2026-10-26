@@ -1,8 +1,8 @@
 """
-Data preparation for ARIMA forecasting (Row 10.1). Pure pandas/numpy work
-here -- no Django ORM writes, no model-fitting -- this module's only job
-is turning raw sales rows into a clean, regularly-spaced time series that
-statsmodels can actually work with.
+Data preparation for Holt-Winters forecasting (Row 10.1). Pure
+pandas/numpy work here -- no Django ORM writes, no model-fitting --
+this module's only job is turning raw sales rows into a clean,
+regularly-spaced time series that statsmodels can actually work with.
 """
 
 import pandas as pd
@@ -22,7 +22,7 @@ def build_daily_sales_series(branch, product, days_history=90):
     DB filter and the reindex target line up exactly -- a mismatch here
     would silently zero out every real data point on reindex.
 
-    Days with ZERO sales are filled in explicitly -- ARIMA needs a
+    Days with ZERO sales are filled in explicitly -- Holt-Winters needs a
     regular, gap-free time index. A day with no sales is a real data
     point (demand was zero that day), not a missing one.
     """
@@ -51,9 +51,11 @@ def build_daily_sales_series(branch, product, days_history=90):
 
 
 def has_sufficient_history(series, minimum_days=14):
-    """ARIMA can technically run on very short series, but the result is
-    not meaningful -- this is the single place that decision is made, so
-    arima_model.py doesn't need its own opinion about what "enough data"
-    means."""
+    """Holt-Winters can technically run on very short series, but the
+    result is not meaningful -- this is the single place that general
+    decision is made, so forecast_model.py doesn't need its own opinion
+    about what "enough data" means. (Holt-Winters' seasonal component has
+    its own, stricter requirement on top of this -- see
+    forecast_model.MINIMUM_SEASONAL_CYCLES.)"""
     non_zero_days = int((series != 0).sum())
     return len(series) >= minimum_days and non_zero_days >= 3

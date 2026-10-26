@@ -1,7 +1,14 @@
+"""
+Shared Django settings for SanServeAll.
+Environment-specific settings (development/staging/production) import
+from this file and override only what differs.
+"""
+
 import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-insecure-placeholder-key")
 
 INSTALLED_APPS = [
@@ -38,6 +45,7 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = "config.urls"
+
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
@@ -49,10 +57,11 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
-            ]
+            ],
         },
-    }
+    },
 ]
+
 WSGI_APPLICATION = "config.wsgi.application"
 
 AUTH_USER_MODEL = "accounts.User"
@@ -68,7 +77,14 @@ LANGUAGE_CODE = "en-us"
 TIME_ZONE = "Asia/Manila"
 USE_I18N = True
 USE_TZ = True
+
 STATIC_URL = "static/"
+STATICFILES_DIRS = [BASE_DIR / "static"]
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+MEDIA_URL = "media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
@@ -89,10 +105,12 @@ KAHERO_BRANCH = os.environ.get("KAHERO_BRANCH", "Alangilan")
 # so the test suite never accidentally fires real scheduled jobs.
 APSCHEDULER_AUTOSTART = True
 
-# Natural-language insight generation (Row 11.2). Absent/empty in local
-# dev by default -- insight_generator.py falls back to a plain template
-# message rather than failing when this isn't configured.
-CLAUDE_API_KEY = os.environ.get("CLAUDE_API_KEY", "")
+# Natural-language insight generation (Row 11.2), via the Gemini API's
+# free tier (see insight_generator.py's module docstring for why Gemini,
+# not a paid provider). Absent/empty in local dev by default --
+# insight_generator.py falls back to a plain template message rather
+# than failing when this isn't configured.
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 # Auth flow (Week 3): unauthenticated requests to a login-required view
 # land on the Login/Start Screen; a successful login's default next-step

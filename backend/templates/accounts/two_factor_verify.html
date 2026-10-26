@@ -1,26 +1,36 @@
 {% extends "base.html" %}
 {% block title %}Verify - SanServeAll{% endblock %}
 {% block content %}
-<div class="container d-flex align-items-center justify-content-center" style="min-height: 100vh;">
-    <div class="card shadow-sm" style="max-width: 340px; width: 100%;">
-        <div class="card-body p-4 text-center">
-            <h1 class="h4 mb-3">Enter Authenticator Code</h1>
+<div class="jc-auth-bg">
+    <a href="{% url 'core:landing' %}" class="jc-auth-back-link">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M10 12.5L5.5 8L10 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Back to Home
+    </a>
 
-            {% if error %}
-                <div class="alert alert-danger py-2">{{ error }}</div>
-            {% endif %}
+    <div class="jc-auth-card">
+        {% include "partials/logo.html" %}
+        <p class="jc-auth-subtitle">Enter Authenticator Code</p>
 
-            <form method="post">
-                {% csrf_token %}
-                <input type="text" name="token" inputmode="text"
-                       maxlength="8" class="form-control form-control-lg text-center mb-3"
-                       placeholder="000000" required autofocus>
-                <button type="submit" class="btn btn-dark w-100">Verify</button>
-            </form>
-            <p class="text-muted small mt-3 mb-0">
-                Lost your device? Enter one of your saved backup codes instead.
-            </p>
-        </div>
+        {% if error %}
+            <div class="alert alert-danger py-2 text-start">{{ error }}</div>
+        {% endif %}
+
+        <form method="post" class="text-start">
+            {% csrf_token %}
+            <input type="text" name="token" inputmode="text" maxlength="8"
+                   class="form-control jc-auth-otp-input mb-3" placeholder="000000" required autofocus>
+            <button type="submit" class="btn btn-jc-primary w-100 py-2">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-1">
+                    <path d="M6 2L11 8L6 14M11 8H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                Verify
+            </button>
+        </form>
+        <p class="jc-auth-footnote">
+            Lost your device? Enter one of your saved backup codes instead.
+        </p>
     </div>
 </div>
 {% endblock %}

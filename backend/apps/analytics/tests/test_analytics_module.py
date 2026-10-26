@@ -5,6 +5,7 @@ Performance (Row 9.2), Resource Consumption & Operational Performance
 """
 
 from datetime import timedelta
+from decimal import Decimal
 
 import pytest
 from django.urls import reverse
@@ -69,6 +70,41 @@ def _completed_sale(branch, cashier, product, quantity, unit_price, amount_tende
     return transaction
 
 
+def _completed_sale_with_discount(
+    branch,
+    cashier,
+    product,
+    quantity,
+    unit_price,
+    discount_category,
+    discount_type,
+    discount_amount,
+    when=None,
+):
+    """Creates a COMPLETED sale with a whole-order discount applied,
+    amount_tendered set to the actual (post-discount) grand_total --
+    the Activity 2 regression scenario (Oct 2026): a discounted sale
+    whose dashboard revenue should reflect what was actually collected,
+    not the pre-discount subtotal."""
+    transaction = SalesTransaction.objects.create(
+        branch=branch,
+        cashier=cashier,
+        status=SalesTransaction.Status.COMPLETED,
+        payment_method="CASH",
+        transaction_discount_category=discount_category,
+        transaction_discount_type=discount_type,
+        transaction_discount_amount=Decimal(discount_amount),
+        completed_at=when or timezone.now(),
+    )
+    SalesItem.objects.create(
+        transaction=transaction, product=product, unit_price=unit_price, quantity=quantity
+    )
+    transaction.refresh_from_db()
+    transaction.amount_tendered = transaction.grand_total
+    transaction.save()
+    return transaction
+
+
 class TestSalesSummary:
     def test_revenue_uses_sale_total_not_amount_tendered(self, branch, cashier, latte):
         """The critical correctness test: a Php375 sale paid with a
@@ -120,6 +156,35 @@ class TestSalesSummary:
         assert summary["total_units_sold"] == 5
         assert summary["total_transactions"] == 1
 
+    def test_revenue_reflects_transaction_wide_discount(self, branch, cashier, latte):
+        """Activity 2 regression scenario (Oct 2026), now fixed: a
+        Php500 subtotal with a 20% whole-order discount actually
+        collects Php400 -- the dashboard must show Php400, not the
+        pre-discount Php500 it showed before this fix."""
+        _completed_sale_with_discount(
+            branch,
+            cashier,
+            latte,
+            quantity=4,
+            unit_price="125.00",
+            discount_category="SC2",
+            discount_type="PERCENT",
+            discount_amount="20",
+        )
+
+        summary = services.get_sales_summary(branch=branch)
+        assert summary["total_revenue"] == pytest.approx(400.00)
+
+    def test_sale_with_no_discount_still_reports_full_subtotal(self, branch, cashier, latte):
+        """Guards against an over-correction -- a sale with no
+        transaction-wide discount must still report its full subtotal,
+        not accidentally zero it out."""
+        _completed_sale(
+            branch, cashier, latte, quantity=2, unit_price="125.00", amount_tendered="250.00"
+        )
+        summary = services.get_sales_summary(branch=branch)
+        assert summary["total_revenue"] == pytest.approx(250.00)
+
 
 class TestWeeklySalesTrend:
     def test_returns_requested_number_of_weeks(self, branch, cashier, latte):
@@ -132,6 +197,20 @@ class TestWeeklySalesTrend:
         )
         trend = services.get_weekly_sales_trend(branch=branch, weeks=1)
         assert trend[0]["revenue"] == pytest.approx(250.00)
+
+    def test_trend_reflects_transaction_wide_discount(self, branch, cashier, latte):
+        _completed_sale_with_discount(
+            branch,
+            cashier,
+            latte,
+            quantity=4,
+            unit_price="125.00",
+            discount_category="SC2",
+            discount_type="PERCENT",
+            discount_amount="20",
+        )
+        trend = services.get_weekly_sales_trend(branch=branch, weeks=1)
+        assert trend[0]["revenue"] == pytest.approx(400.00)
 
 
 class TestTopProducts:
@@ -272,3 +351,219 @@ class TestResourceConsumptionView:
         client.force_login(cashier)
         response = client.get(reverse("analytics:resource_consumption"))
         assert response.status_code == 403
+
+
+class TestBranchPerformance:
+    """Dashboard Home batch: Branch Performance cards (Fig. 3-19)."""
+
+    def test_revenue_and_units_are_per_branch_not_global(self, branch, cashier, latte):
+        other_branch = Branch.objects.create(name="Batangas City", code="BATANGAS")
+        other_cashier = User.objects.create_user(
+            username="cashier2",
+            password="testpass123",
+            role=cashier.role,
+            branch=other_branch,
+        )
+
+        _completed_sale(
+            branch, cashier, latte, quantity=2, unit_price="125.00", amount_tendered="300.00"
+        )
+        _completed_sale(
+            other_branch,
+            other_cashier,
+            latte,
+            quantity=5,
+            unit_price="125.00",
+            amount_tendered="700.00",
+        )
+
+        rows = {r["branch"].pk: r for r in services.get_branch_performance()}
+
+        assert rows[branch.pk]["revenue"] == pytest.approx(250.00)
+        assert rows[branch.pk]["units_sold"] == 2
+        assert rows[branch.pk]["orders"] == 1
+
+        assert rows[other_branch.pk]["revenue"] == pytest.approx(625.00)
+        assert rows[other_branch.pk]["units_sold"] == 5
+
+    def test_branch_with_no_sales_still_appears_with_zeros(self, branch):
+        rows = services.get_branch_performance()
+        assert len(rows) == 1
+        assert rows[0]["revenue"] == 0
+        assert rows[0]["units_sold"] == 0
+        assert rows[0]["orders"] == 0
+
+    def test_revenue_reflects_transaction_wide_discount(self, branch, cashier, latte):
+        _completed_sale_with_discount(
+            branch,
+            cashier,
+            latte,
+            quantity=4,
+            unit_price="125.00",
+            discount_category="SC2",
+            discount_type="PERCENT",
+            discount_amount="20",
+        )
+        rows = {r["branch"].pk: r for r in services.get_branch_performance()}
+        assert rows[branch.pk]["revenue"] == pytest.approx(400.00)
+
+
+class TestSalesSummaryWithToggles:
+    """Dashboard Home batch: the three real Total Revenue toggles."""
+
+    def test_default_toggles_match_get_sales_summary_reference_shape(self, branch, cashier, latte):
+        _completed_sale(
+            branch, cashier, latte, quantity=2, unit_price="125.00", amount_tendered="300.00"
+        )
+        result = services.get_sales_summary_with_toggles(branch=branch)
+        assert set(result.keys()) == {
+            "total_revenue",
+            "total_transactions",
+            "total_units_sold",
+            "average_daily_revenue",
+            "days",
+        }
+        assert result["total_revenue"] == pytest.approx(250.00)
+
+    def test_include_additional_sales_off_excludes_custom_items(self, branch, cashier, latte):
+        txn = SalesTransaction.objects.create(
+            branch=branch,
+            cashier=cashier,
+            status=SalesTransaction.Status.COMPLETED,
+            completed_at=timezone.now(),
+        )
+        SalesItem.objects.create(transaction=txn, product=latte, unit_price="125.00", quantity=1)
+        SalesItem.objects.create(
+            transaction=txn, custom_name="Off-menu special", unit_price="500.00", quantity=1
+        )
+
+        with_additional = services.get_sales_summary_with_toggles(
+            branch=branch, include_additional_sales=True
+        )
+        without_additional = services.get_sales_summary_with_toggles(
+            branch=branch, include_additional_sales=False
+        )
+
+        assert with_additional["total_revenue"] == pytest.approx(625.00)
+        assert without_additional["total_revenue"] == pytest.approx(125.00)
+
+    def test_exclude_discounts_reverses_transaction_wide_discount_only(
+        self, branch, cashier, latte
+    ):
+        txn = SalesTransaction.objects.create(
+            branch=branch,
+            cashier=cashier,
+            status=SalesTransaction.Status.COMPLETED,
+            completed_at=timezone.now(),
+            transaction_discount_category="SENIOR",
+            transaction_discount_type="PERCENT",
+            transaction_discount_amount="20.00",
+        )
+        SalesItem.objects.create(transaction=txn, product=latte, unit_price="100.00", quantity=1)
+
+        discounted = services.get_sales_summary_with_toggles(branch=branch, exclude_discounts=False)
+        undiscounted = services.get_sales_summary_with_toggles(
+            branch=branch, exclude_discounts=True
+        )
+
+        assert discounted["total_revenue"] == pytest.approx(80.00)
+        assert undiscounted["total_revenue"] == pytest.approx(100.00)
+
+    def test_exclude_vat_strips_the_configured_tax_rate(self, branch, cashier, latte):
+        from apps.system_config.models import BusinessSettings
+
+        settings_obj = BusinessSettings.load()
+        settings_obj.tax_rate_percent = "12.00"
+        settings_obj.save()
+
+        SalesTransaction.objects.create(
+            branch=branch,
+            cashier=cashier,
+            status=SalesTransaction.Status.COMPLETED,
+            completed_at=timezone.now(),
+        ).items.create(product=latte, unit_price="112.00", quantity=1)
+
+        inclusive = services.get_sales_summary_with_toggles(branch=branch, exclude_vat=False)
+        exclusive = services.get_sales_summary_with_toggles(branch=branch, exclude_vat=True)
+
+        assert inclusive["total_revenue"] == pytest.approx(112.00)
+        assert exclusive["total_revenue"] == pytest.approx(100.00, abs=0.01)
+
+
+class TestWeeklySalesTrendByBranch:
+    def test_returns_one_series_per_active_branch(self, branch, cashier, latte):
+        other_branch = Branch.objects.create(name="Batangas City", code="BATANGAS")
+        _completed_sale(
+            branch, cashier, latte, quantity=1, unit_price="125.00", amount_tendered="200.00"
+        )
+
+        result = services.get_weekly_sales_trend_by_branch()
+        branch_names = {s["branch_name"] for s in result["series"]}
+
+        assert branch_names == {branch.name, other_branch.name}
+        assert len(result["week_labels"]) == 8
+        for series in result["series"]:
+            assert len(series["revenue"]) == 8
+
+    def test_revenue_reflects_transaction_wide_discount(self, branch, cashier, latte):
+        _completed_sale_with_discount(
+            branch,
+            cashier,
+            latte,
+            quantity=4,
+            unit_price="125.00",
+            discount_category="SC2",
+            discount_type="PERCENT",
+            discount_amount="20",
+        )
+        result = services.get_weekly_sales_trend_by_branch(weeks=1)
+        series = next(s for s in result["series"] if s["branch_name"] == branch.name)
+        assert series["revenue"][0] == pytest.approx(400.00)
+
+
+class TestReportsHubView:
+    """Reports & Export batch: the new hub combining all four real
+    report datasets (Sales & Trend, Product Performance, Resource
+    Consumption, Operational Performance) into one request."""
+
+    def test_owner_can_view(self, owner_client):
+        response = owner_client.get(reverse("analytics:reports_hub"))
+        assert response.status_code == 200
+
+    def test_non_owner_cannot_view(self, client, cashier):
+        client.force_login(cashier)
+        response = client.get(reverse("analytics:reports_hub"))
+        assert response.status_code == 403
+
+    def test_shell_context_present(self, owner_client):
+        response = owner_client.get(reverse("analytics:reports_hub"))
+        assert response.context["active_nav"] == "reports"
+        assert "branches" in response.context
+
+    def test_all_four_real_datasets_present_in_context(self, owner_client, branch, cashier, latte):
+        _completed_sale(
+            branch, cashier, latte, quantity=2, unit_price="125.00", amount_tendered="300.00"
+        )
+
+        response = owner_client.get(reverse("analytics:reports_hub"))
+        assert set(response.context["sales_summary"].keys()) >= {
+            "total_revenue",
+            "total_units_sold",
+        }
+        assert isinstance(response.context["product_performance"], list)
+        assert "total_cost" in response.context["consumption"]
+        assert "completion_rate" in response.context["operational"]
+
+    def test_days_filter_is_honored(self, owner_client, branch, cashier, latte):
+        response = owner_client.get(reverse("analytics:reports_hub"), {"days": 7})
+        assert response.context["days"] == 7
+
+    def test_no_fourth_url_invented_for_operational_performance(self):
+        """Regression guard for the real routing decision this batch
+        made: Operational Performance is a tab within reports_hub, not
+        a URL of its own -- there's no analytics:operational_performance
+        anywhere, by design."""
+        from django.urls import NoReverseMatch
+
+        with pytest.raises(NoReverseMatch):
+            reverse("analytics:operational_performance")

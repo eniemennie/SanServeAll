@@ -12,12 +12,52 @@ merely whether Owner/Admin is among a view's allowed roles.
 """
 
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 
 from apps.accounts.models import Role
 from apps.accounts.permissions import role_required
+from apps.inventory import services as inventory_services
 from apps.inventory.models import Product
 from apps.production import services
 from apps.production.models import ProductionRecord
+
+
+@role_required(Role.COMMISSARY_STAFF, Role.OWNER_ADMIN)
+def commissary_dashboard(request):
+    """Commissary Staff's landing page after login/branch selection.
+
+    Replaces the old generic `accounts.dashboard_placeholder` -- that view
+    was an explicitly temporary stand-in (per its own docstring) for
+    whichever role had no dedicated dashboard yet. Commissary Staff was
+    the only role still landing there; this gives them a real one built
+    from data this app already has, rather than a static welcome page.
+
+    Wrapped in the same admin_base.html shell as the Owner/Admin screens
+    for visual consistency -- that shell's sidebar/topbar are role-aware
+    (see admin_base.html's own docstring), so a Commissary Staff user only
+    ever sees the three links this role can actually reach (Dashboard,
+    Record Production, Batch Logs); the Owner-only links (Settings,
+    Reports, Forecasting, Product Availability, Resource Management) are
+    not rendered at all for this role, rather than shown and then 403ing
+    on click.
+    """
+    commissary = services.get_commissary_branch()
+    recent_records = ProductionRecord.objects.select_related("product").order_by("-created_at")[:5]
+    resource_status = (
+        inventory_services.get_resource_status_summary(branch=commissary) if commissary else None
+    )
+
+    return render(
+        request,
+        "production/commissary_dashboard.html",
+        {
+            "active_nav": "dashboard",
+            "total_output_30d": services.get_total_output(days=30),
+            "recent_records": recent_records,
+            "resource_status": resource_status,
+            "commissary": commissary,
+        },
+    )
 
 
 @role_required(Role.COMMISSARY_STAFF, Role.OWNER_ADMIN)
@@ -58,19 +98,71 @@ def record_production(request):
     return render(
         request,
         "production/production_entry.html",
-        {"error": error, "materials": materials, "finished_goods": finished_goods},
+        {
+            "active_nav": "record",
+            "error": error,
+            "materials": materials,
+            "finished_goods": finished_goods,
+        },
     )
 
 
 @role_required(Role.COMMISSARY_STAFF, Role.OWNER_ADMIN)
 def batch_management(request):
     """Batch Management Interface (Fig. 3-24): list of production
-    records with branch (always commissary), ingredient/material,
-    quantity, supplier, quality, status -- plus edit/delete actions."""
+    records with product, ingredient/material usage, supplier, quality,
+    status -- plus edit/delete actions.
+
+    NOTE: the reference design's table includes a per-row "Branch"
+    column (Batangas/Alangilan/Lipa tags). ProductionRecord has no
+    branch field at all -- production genuinely happens only at the
+    single commissary (see get_total_output's own docstring from the
+    Dashboard Home batch), so that column isn't rendered here rather
+    than filled with a fabricated value.
+
+    Wrapped in the same Admin Shell as the Owner/Admin screens (matching
+    the reference design). Commissary Staff can also reach this view --
+    admin_base.html's sidebar is role-aware, so a Commissary Staff user
+    sees only their own three links here, not the Owner-only ones.
+    """
+    status_filter = request.GET.get("status", "")
+    date_filter = request.GET.get("date", "")
+
     records = ProductionRecord.objects.select_related("product").prefetch_related(
         "ingredient_usages__material"
     )
-    return render(request, "production/batch_management.html", {"records": records})
+    if status_filter:
+        records = records.filter(status=status_filter)
+    if date_filter == "today":
+        records = records.filter(created_at__date=timezone.now().date())
+
+    total = records.count()
+    completed = records.filter(status=ProductionRecord.Status.COMPLETED).count()
+    in_progress = records.filter(status=ProductionRecord.Status.IN_PROGRESS).count()
+    pending = records.filter(status=ProductionRecord.Status.PENDING).count()
+    total_quantity = sum(r.quantity_produced for r in records)
+    quality_pass = records.filter(quality=ProductionRecord.Quality.PASS).count()
+    quality_rate = round((quality_pass / total) * 100) if total else 100
+
+    return render(
+        request,
+        "production/batch_management.html",
+        {
+            "active_nav": "batch",
+            "records": records,
+            "status_filter": status_filter,
+            "date_filter": date_filter,
+            "stats": {
+                "total": total,
+                "completed": completed,
+                "in_progress": in_progress,
+                "pending": pending,
+                "total_quantity": total_quantity,
+                "quality_rate": quality_rate,
+            },
+            "status_choices": ProductionRecord.Status.choices,
+        },
+    )
 
 
 @role_required(Role.COMMISSARY_STAFF, Role.OWNER_ADMIN)
@@ -85,4 +177,6 @@ def delete_production_record(request, record_id):
         record.delete()
         return redirect("production:batch_management")
 
-    return render(request, "production/confirm_delete.html", {"record": record})
+    return render(
+        request, "production/confirm_delete.html", {"active_nav": "batch", "record": record}
+    )

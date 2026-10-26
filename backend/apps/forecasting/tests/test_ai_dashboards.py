@@ -259,7 +259,7 @@ class TestGetLatestForecastBatch:
             product=latte,
             forecast_date=timezone.now().date(),
             predicted_quantity=8.0,
-            model_used="ARIMA(1, 1, 1)",
+            model_used="HoltWinters(seasonal=7)",
         )
 
         batch = list(services.get_latest_forecast_batch(branch))
@@ -280,7 +280,7 @@ class TestGetForecastingDashboardSummary:
             product=latte,
             forecast_date=timezone.now().date(),
             predicted_quantity=8.0,
-            model_used="ARIMA(1, 1, 1)",
+            model_used="HoltWinters(seasonal=7)",
             mae=1.5,
         )
         Forecast.objects.create(
@@ -294,7 +294,7 @@ class TestGetForecastingDashboardSummary:
         summary = services.get_forecasting_dashboard_summary(branch)
         assert summary["predictions_made"] == 2
         assert summary["products_forecasted"] == 2
-        assert summary["arima_count"] == 1
+        assert summary["model_count"] == 1
         assert summary["naive_count"] == 1
         assert summary["avg_mae"] == 1.5
 
@@ -308,14 +308,14 @@ class TestGetWeeklyDemandPattern:
             product=latte,
             forecast_date=target_date,
             predicted_quantity=5.0,
-            model_used="ARIMA(1, 1, 1)",
+            model_used="HoltWinters(seasonal=7)",
         )
         Forecast.objects.create(
             branch=branch,
             product=cake,
             forecast_date=target_date,
             predicted_quantity=3.0,
-            model_used="ARIMA(1, 1, 1)",
+            model_used="HoltWinters(seasonal=7)",
         )
 
         pattern = services.get_weekly_demand_pattern(branch)
@@ -360,6 +360,15 @@ class TestForecastingDashboardView:
         response = owner_client.get(reverse("forecasting:forecasting_dashboard"))
         assert b"chart.umd.min.js" in response.content
 
+    def test_shell_context_present(self, owner_client):
+        """Demand Forecasting batch: now extends admin_base.html, which
+        needs active_nav for the sidebar highlight. This screen and AI
+        Insights (decision_support) share the same 'forecast' nav slot
+        since Demand Forecasting is the top-level item and AI Insights
+        is reached as an in-page cross-link from it."""
+        response = owner_client.get(reverse("forecasting:forecasting_dashboard"))
+        assert response.context["active_nav"] == "forecast"
+
 
 class TestResourceManagementDashboardView:
     def test_owner_can_view(self, owner_client):
@@ -394,3 +403,95 @@ class TestResourceManagementDashboardView:
 
         response = owner_client.get(reverse("forecasting:resource_management_dashboard"))
         assert b"Flour (kg)" in response.content
+
+    def test_shell_context_present_for_admin_base_extension(self, owner_client):
+        """Batch 2 (Resource Management + AI Insights): this view now
+        extends admin_base.html, which needs active_nav/branches in
+        context to render the sidebar highlight and topbar dropdown."""
+        response = owner_client.get(reverse("forecasting:resource_management_dashboard"))
+        assert response.context["active_nav"] == "resource"
+        assert "branches" in response.context
+
+    def test_finished_goods_section_reflects_the_selected_branch(self, owner_client, branch):
+        """The new Finished-Goods Stock Health section (added in Batch 2)
+        is branch-scoped by the shell's own branch dropdown, separately
+        from the commissary-wide materials data above it."""
+        from apps.inventory.models import Inventory, Product as InventoryProduct
+
+        other_branch = Branch.objects.create(name="Alangilan", code="ALANGILAN")
+        cashew = InventoryProduct.objects.create(
+            name="Cashew Nuts", price="650.00", reorder_threshold=10
+        )
+        Inventory.objects.create(branch=branch, product=cashew, quantity_on_hand=0)
+        Inventory.objects.create(branch=other_branch, product=cashew, quantity_on_hand=50)
+
+        scoped = owner_client.get(
+            reverse("forecasting:resource_management_dashboard"), {"branch": branch.pk}
+        )
+        assert scoped.context["resource_status"]["critical_count"] == 1
+
+        unscoped_other = owner_client.get(
+            reverse("forecasting:resource_management_dashboard"), {"branch": other_branch.pk}
+        )
+        assert unscoped_other.context["resource_status"]["critical_count"] == 0
+
+
+class TestExportResourceReportView:
+    """Export Report button (Resource Management topbar): a CSV mirroring
+    exactly what's on screen for the currently selected branch."""
+
+    def test_owner_can_export(self, owner_client):
+        response = owner_client.get(reverse("forecasting:export_resource_report"))
+        assert response.status_code == 200
+        assert response["Content-Type"] == "text/csv"
+        assert "attachment;" in response["Content-Disposition"]
+
+    def test_non_owner_cannot_export(self, client, cashier):
+        client.force_login(cashier)
+        response = client.get(reverse("forecasting:export_resource_report"))
+        assert response.status_code == 403
+
+    def test_material_alert_appears_in_csv(self, owner_client):
+        commissary = Branch.objects.create(
+            name="Commissary", code="COMMISSARY2", is_commissary=True
+        )
+        flour = Product.objects.create(
+            name="Flour (kg)", price="55.00", product_type=Product.ProductType.MATERIAL
+        )
+        InventoryRiskScore.objects.create(
+            branch=commissary,
+            product=flour,
+            risk_level="HIGH",
+            quantity_on_hand=2,
+            avg_daily_demand=5.0,
+            days_of_stock_left=0.4,
+        )
+
+        response = owner_client.get(reverse("forecasting:export_resource_report"))
+        assert b"Flour (kg)" in response.content
+
+    def test_finished_goods_section_reflects_the_selected_branch(self, owner_client, branch):
+        from apps.inventory.models import Inventory, Product as InventoryProduct
+
+        cashew = InventoryProduct.objects.create(
+            name="Cashew Nuts", price="650.00", reorder_threshold=10
+        )
+        Inventory.objects.create(branch=branch, product=cashew, quantity_on_hand=0)
+
+        response = owner_client.get(
+            reverse("forecasting:export_resource_report"), {"branch": branch.pk}
+        )
+        assert branch.name.encode() in response.content
+        assert b"Cashew Nuts" in response.content
+
+
+class TestDecisionSupportShellContext:
+    """Batch 2: decision_support now extends admin_base.html too."""
+
+    def test_active_nav_highlights_demand_forecasting(self, owner_client):
+        """decision_support is reached as a cross-link from Demand
+        Forecasting, not its own top-level sidebar item (see the Admin
+        Shell batch's routing note) -- active_nav is 'forecast', not
+        some 'insights' key that doesn't exist in the sidebar."""
+        response = owner_client.get(reverse("forecasting:decision_support"))
+        assert response.context["active_nav"] == "forecast"

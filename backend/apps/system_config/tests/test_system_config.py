@@ -102,7 +102,7 @@ class TestAIInsightsToggle:
     def test_disabled_toggle_never_calls_the_api_even_with_a_key_configured(self, settings):
         from apps.forecasting.ml.insight_generator import generate_insight
 
-        settings.CLAUDE_API_KEY = "fake-key-that-would-otherwise-be-used"
+        settings.GEMINI_API_KEY = "fake-key-that-would-otherwise-be-used"
         with patch("apps.forecasting.ml.insight_generator.requests.post") as mock_post:
             message, generated_by_ai = generate_insight(
                 "STOCKOUT_WARNING",
@@ -154,6 +154,14 @@ class TestSystemSettingsView:
         )
         assert response.status_code == 200
         assert b"valid number" in response.content
+
+    def test_shell_context_present(self, owner_client):
+        """Settings batch: now extends admin_base.html, which needs
+        active_nav for the sidebar highlight. Shares the 'settings' slot
+        with System Configuration, reached as an in-page cross-link from
+        here (same pattern as Demand Forecasting/AI Insights)."""
+        response = owner_client.get(reverse("system_config:system_settings"))
+        assert response.context["active_nav"] == "settings"
 
 
 class TestSystemConfigurationView:
@@ -223,3 +231,10 @@ class TestSystemConfigurationView:
         )
         config = SystemConfiguration.load()
         assert config.ai_insights_enabled is False
+
+    def test_shell_context_present(self, owner_client):
+        """Settings batch: System Configuration also extends
+        admin_base.html now, sharing the same 'settings' nav slot as
+        System Settings (reached via the in-page cross-link)."""
+        response = owner_client.get(reverse("system_config:system_configuration"))
+        assert response.context["active_nav"] == "settings"

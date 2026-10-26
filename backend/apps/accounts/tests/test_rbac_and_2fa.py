@@ -229,6 +229,18 @@ class TestTwoFactorVerify:
         assert response.status_code == 200
         assert b"Incorrect code" in response.content
 
+    def test_verify_page_uses_the_shared_auth_page_styling(self, client, admin):
+        """Verify screen was redesigned (Row 12) to match Admin Login's
+        jc-auth-* styling rather than the old generic Bootstrap card, so
+        the two screens in one login flow don't visually disagree."""
+        TOTPDevice.objects.create(user=admin, name="default", confirmed=True)
+        client.force_login(admin)
+
+        response = client.get(reverse("accounts:admin_2fa_verify"))
+        assert response.status_code == 200
+        assert b"jc-auth-card" in response.content
+        assert b"Enter Authenticator Code" in response.content
+
 
 class TestAdminDashboardEnforcement:
     """End-to-end proof of the full chain this batch builds: role AND
@@ -257,4 +269,9 @@ class TestAdminDashboardEnforcement:
 
         dashboard_response = client.get(reverse("accounts:admin_dashboard"))
         assert dashboard_response.status_code == 200
-        assert b"Admin Dashboard" in dashboard_response.content
+        # Was "Admin Dashboard" (the old placeholder's own heading) --
+        # updated to the real Dashboard Home content's defining heading
+        # now that the placeholder has been replaced (Dashboard Home
+        # batch). Still verifies the same thing: login -> 2FA -> the
+        # real dashboard actually renders, not just a 200 with any body.
+        assert b"Branch Performance Overview" in dashboard_response.content

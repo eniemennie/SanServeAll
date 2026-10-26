@@ -66,6 +66,42 @@
         #receipt-print-area { position: absolute; top: 0; left: 0; width: 100%; }
         .jc-print-hide { display: none !important; }
     }
+
+    /* Responsive: topbar and customization-modal grids on phones/small
+       tablets. The catalog/summary two-column layout below already
+       stacks correctly via Bootstrap's col-lg-7/col-lg-5, and the
+       product grid and category-tab strip already have their own
+       responsive/scrollable behavior, so neither needs changes here. */
+    @media (max-width: 575.98px) {
+        .jc-pos-topbar {
+            flex-wrap: wrap;
+            row-gap: 0.5rem;
+        }
+        .jc-branch-label {
+            order: 3;
+            flex-basis: 100%;
+            text-align: center;
+        }
+
+        /* Five equal sugar-level buttons get too narrow for their
+           labels on a phone-width modal; three per row with wrapping
+           keeps each tap target a reasonable size. */
+        #customize-sugar-section .row-cols-5 > * {
+            flex: 0 0 auto;
+            width: 33.3333%;
+        }
+
+        /* Discount / Save / Payment action row: three equal thirds is
+           too narrow for "% Discount" on a phone, so stack Discount
+           full-width above the other two. */
+        .jc-summary-col .row.g-2 {
+            row-gap: 0.5rem;
+        }
+        .jc-summary-col .row.g-2 > .col-4:first-child {
+            flex: 0 0 100%;
+            max-width: 100%;
+        }
+    }
 </style>
 {% endblock %}
 {% block content %}
@@ -831,6 +867,22 @@
     bindSetting("setting-left-handed", "leftHanded", true);
     bindSetting("setting-show-order-type", "showOrderType", true);
     bindSetting("setting-print-receipt", "printReceipt", true);
+})();
+
+(function () {
+    // Category tab clicks are plain links (?category=...), so selecting
+    // one triggers a full server-side page reload rather than a
+    // client-side filter -- and a freshly loaded page always resets a
+    // scrollable element back to its start. That meant clicking a
+    // category further right than the visible strip (e.g. "Bakery and
+    // Pasalubong") always snapped the bar back to showing "All" again,
+    // hiding the tab the cashier just selected. Scrolling the active
+    // tab into view once the page loads keeps the strip positioned
+    // where the selection actually is, instead of always resetting left.
+    var activeTab = document.querySelector("#category-tabs .jc-category-tab.active");
+    if (activeTab) {
+        activeTab.scrollIntoView({ inline: "center", block: "nearest" });
+    }
 })();
 
 {% if completed_transaction %}

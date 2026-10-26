@@ -5,18 +5,38 @@ Shared Admin Shell -- topbar (logo, branch selector, user identity, logout)
 + collapsible sidebar nav. Every Owner/Admin screen extends this instead of
 base.html directly, so the chrome is built once here rather than duplicated
 per screen (Dashboard, Batch Logs, Demand Forecasting, Resource Management,
-Reports & Export, Product Availability, Settings).
+Reports, Product Availability, Settings).
+
+Nav label is "Reports" (not "Reports & Export") -- no CSV/PDF export
+feature exists anywhere in this codebase; "Export" was dropped from the
+label rather than left promising something unbuilt (adviser compliance
+review, item re: the Reports & Export screen's naming).
 
 Required/optional context from the view:
-  active_nav      -- one of: dashboard, batch, forecast, resource, reports,
-                     availability, settings. Highlights the matching nav
-                     item. Omit and nothing is highlighted (fails safe).
+  active_nav      -- Owner/Admin: one of dashboard, batch, forecast,
+                     resource, reports, availability, settings.
+                     Commissary Staff: one of dashboard, record, batch.
+                     Highlights the matching nav item. Omit and nothing is
+                     highlighted (fails safe).
   branches        -- queryset/list of Branch for the dropdown. Falls back
-                     to an empty list if not provided.
+                     to an empty list if not provided. Owner/Admin only.
   selected_branch -- the currently selected Branch, or None for "All
                      Branches". Matches the ?branch=<id> GET-param pattern
                      already used by analytics/forecasting views, so the
                      dropdown here is a real filter, not decorative.
+                     Owner/Admin only.
+
+Role-aware sidebar (Row 18 follow-up): the sidebar and topbar branch
+control below branch on `user.role.name` so this ONE shell serves both
+Owner/Admin screens and the Commissary Staff screens (Dashboard, Record
+Production, Batch Logs are the only three Commissary Staff can actually
+reach -- role_required already 403s everything else, this just stops the
+sidebar from advertising links that would 403). Checking the role here
+rather than passing a flag from every view means a page already shared
+between both roles (Batch Logs, Record Production) renders correctly for
+whichever role is viewing it with zero view-level changes. Owner/Admin's
+own rendered output is unchanged by this -- the role check only ever
+takes the branch this shell already took for them.
 
 Usage in a screen template:
   {% extends "admin_base.html" %}
@@ -41,7 +61,18 @@ Usage in a screen template:
     <div class="text-muted" style="font-size: 0.75rem;">Enterprise Operations System</div>
   </div>
 
-  <form method="get" class="mx-auto" style="min-width: 260px; max-width: 340px; width: 100%;" id="jc-branch-form">
+  {% if user.role.name == "COMMISSARY_STAFF" %}
+  {% comment %}
+    Commissary Staff isn't scoped by the ?branch= filter the dropdown
+    below drives (no view in production/ reads it) -- showing it here
+    would look like a working filter and do nothing. This shows their
+    one actual branch (always the commissary) as plain text instead.
+  {% endcomment %}
+  <div class="mx-auto text-center jc-branch-filter">
+    <span class="jc-badge jc-badge-info">{{ user.branch.name|default:"Commissary" }}</span>
+  </div>
+  {% else %}
+  <form method="get" class="mx-auto jc-branch-filter" id="jc-branch-form">
     <select name="branch" class="form-select form-select-sm" onchange="this.form.submit()" aria-label="Select branch">
       <option value=""{% if not selected_branch %} selected{% endif %}>All Branches</option>
       {% for b in branches %}
@@ -49,6 +80,7 @@ Usage in a screen template:
       {% endfor %}
     </select>
   </form>
+  {% endif %}
 
   <div class="d-none d-sm-flex align-items-center gap-2 flex-shrink-0">
     <div class="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0"
@@ -69,7 +101,28 @@ Usage in a screen template:
 </header>
 
 <div class="d-flex align-items-stretch">
-  <nav class="jc-sidebar d-flex flex-column flex-shrink-0" id="jc-sidebar" data-expanded="false">
+  {% comment %}
+    Defaults to expanded (labels visible) rather than icon-only, per
+    adviser feedback on navigation usability -- every nav item already
+    has a real text label in the markup below; this just makes that the
+    first thing a viewer sees instead of requiring a click to reveal it.
+    Still collapsible via the hamburger toggle for anyone who prefers
+    the icon-only view.
+
+    NOTE: keep this a block comment. Django's short hash-style comment
+    only works on a single line; a multi-line one renders as visible
+    text on the page.
+  {% endcomment %}
+  {% comment %}
+    Mobile/tablet only (<768px, see main.css): a tap-to-close backdrop
+    behind the drawer. Hidden entirely at desktop widths via CSS, and
+    hidden by default here (jc-sidebar-backdrop-visible added/removed by
+    the same toggle script below) so it never intercepts clicks when the
+    drawer is closed.
+  {% endcomment %}
+  <div class="jc-sidebar-backdrop" id="jc-sidebar-backdrop"></div>
+
+  <nav class="jc-sidebar d-flex flex-column flex-shrink-0" id="jc-sidebar" data-expanded="true">
     <div class="py-2 d-flex" style="padding-left: 12px;">
       <button type="button" class="btn btn-link p-2 text-muted" id="jc-sidebar-toggle" aria-label="Toggle sidebar">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
@@ -77,6 +130,23 @@ Usage in a screen template:
     </div>
 
     <div class="d-flex flex-column gap-1 px-2 flex-grow-1">
+      {% if user.role.name == "COMMISSARY_STAFF" %}
+      {% comment %} Commissary Staff: only the three screens this role can
+      actually reach (role_required 403s everything else) -- no Owner-only
+      links shown that would just dead-end. {% endcomment %}
+      <a href="{% url 'production:dashboard' %}" class="jc-nav-item {% if active_nav == 'dashboard' %}active{% endif %}">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+        <span class="jc-nav-label">Dashboard</span>
+      </a>
+      <a href="{% url 'production:record' %}" class="jc-nav-item {% if active_nav == 'record' %}active{% endif %}">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+        <span class="jc-nav-label">Record Production</span>
+      </a>
+      <a href="{% url 'production:batch_management' %}" class="jc-nav-item {% if active_nav == 'batch' %}active{% endif %}">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"></path></svg>
+        <span class="jc-nav-label">Batch Logs</span>
+      </a>
+      {% else %}
       <a href="{% url 'accounts:admin_dashboard' %}" class="jc-nav-item {% if active_nav == 'dashboard' %}active{% endif %}">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
         <span class="jc-nav-label">Dashboard</span>
@@ -93,22 +163,25 @@ Usage in a screen template:
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
         <span class="jc-nav-label">Resource Management</span>
       </a>
-      <a href="{% url 'analytics:sales_dashboard' %}" class="jc-nav-item {% if active_nav == 'reports' %}active{% endif %}">
+      <a href="{% url 'analytics:reports_hub' %}" class="jc-nav-item {% if active_nav == 'reports' %}active{% endif %}">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
-        <span class="jc-nav-label">Reports &amp; Export</span>
+        <span class="jc-nav-label">Reports</span>
       </a>
       <a href="{% url 'inventory:product_management' %}" class="jc-nav-item {% if active_nav == 'availability' %}active{% endif %}">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2.5 12.5V2.5h10l8.09 8.09a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
         <span class="jc-nav-label">Product Availability</span>
       </a>
+      {% endif %}
     </div>
 
+    {% if user.role.name != "COMMISSARY_STAFF" %}
     <div class="px-2 py-2" style="border-top: 1px solid #EEF0F2;">
       <a href="{% url 'system_config:system_settings' %}" class="jc-nav-item {% if active_nav == 'settings' %}active{% endif %}">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
         <span class="jc-nav-label">Settings</span>
       </a>
     </div>
+    {% endif %}
   </nav>
 
   <main class="flex-grow-1 min-w-0 p-4">
@@ -122,11 +195,37 @@ Usage in a screen template:
   (function () {
     var sidebar = document.getElementById('jc-sidebar');
     var toggle = document.getElementById('jc-sidebar-toggle');
+    var backdrop = document.getElementById('jc-sidebar-backdrop');
     if (!sidebar || !toggle) return;
+
+    // Below 768px the sidebar becomes an off-canvas drawer (see
+    // main.css) instead of the desktop width-collapse behavior, so it
+    // must start CLOSED there -- the server always renders
+    // data-expanded="true" (the desktop default), which would otherwise
+    // cover the whole screen with the drawer on first load on a phone.
+    // Only runs once, on load, so a person's own toggle click afterward
+    // (in either mode) is never overridden.
+    var MOBILE_BREAKPOINT = 768;
+    function setExpanded(expanded) {
+      sidebar.setAttribute('data-expanded', String(expanded));
+      if (backdrop) {
+        backdrop.classList.toggle('jc-sidebar-backdrop-visible', expanded && window.innerWidth < MOBILE_BREAKPOINT);
+      }
+    }
+    if (window.innerWidth < MOBILE_BREAKPOINT) {
+      setExpanded(false);
+    }
+
     toggle.addEventListener('click', function () {
       var expanded = sidebar.getAttribute('data-expanded') === 'true';
-      sidebar.setAttribute('data-expanded', String(!expanded));
+      setExpanded(!expanded);
     });
+
+    if (backdrop) {
+      backdrop.addEventListener('click', function () {
+        setExpanded(false);
+      });
+    }
   })();
 </script>
 {% endblock %}
