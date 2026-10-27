@@ -37,16 +37,24 @@ def _make_batch(branch, owner, *, status, total_rows, success_count, error_count
 
 def test_has_warnings_false_when_all_rows_succeed(branch, owner):
     batch = _make_batch(
-        branch, owner, status=KaheroImportBatch.Status.COMPLETED,
-        total_rows=2, success_count=2, error_count=0,
+        branch,
+        owner,
+        status=KaheroImportBatch.Status.COMPLETED,
+        total_rows=2,
+        success_count=2,
+        error_count=0,
     )
     assert batch.has_warnings is False
 
 
 def test_has_warnings_true_when_completed_with_skipped_rows(branch, owner):
     batch = _make_batch(
-        branch, owner, status=KaheroImportBatch.Status.COMPLETED,
-        total_rows=2, success_count=1, error_count=1,
+        branch,
+        owner,
+        status=KaheroImportBatch.Status.COMPLETED,
+        total_rows=2,
+        success_count=1,
+        error_count=1,
     )
     assert batch.has_warnings is True
 
@@ -55,7 +63,11 @@ def test_has_warnings_false_when_batch_failed_outright(branch, owner):
     # A FAILED batch already shows a red "Failed" badge -- has_warnings
     # is specifically for a batch that LOOKS successful but isn't fully.
     batch = _make_batch(
-        branch, owner, status=KaheroImportBatch.Status.FAILED,
-        total_rows=1, success_count=0, error_count=1,
+        branch,
+        owner,
+        status=KaheroImportBatch.Status.FAILED,
+        total_rows=1,
+        success_count=0,
+        error_count=1,
     )
     assert batch.has_warnings is False
