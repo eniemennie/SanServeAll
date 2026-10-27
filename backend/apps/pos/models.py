@@ -61,12 +61,13 @@ class SalesTransaction(models.Model):
         VOIDED = "VOIDED", "Voided"
 
     class PaymentMethod(models.TextChoices):
-        # GCash is deliberately not a selectable option (simplification
-        # decision) -- a GCash payment is now recorded under
-        # OTHER_DIGITAL_BANKS instead. CASH stays the primary mode; CARD
-        # and OTHER_DIGITAL_BANKS are both reached through the payment
-        # page's "Other Payment" category (see payment.html).
+        # All four shown as equal, top-level buttons on the payment page
+        # (payment.html) -- GCash stays a first-class option (it's one of
+        # the most commonly used channels for Jorge's Café's customers),
+        # alongside a generic "Other Digital Banks" catch-all for anything
+        # that isn't Cash/GCash/Card.
         CASH = "CASH", "Cash"
+        GCASH = "GCASH", "GCash"
         CARD = "CARD", "Debit/Credit Card"
         OTHER_DIGITAL_BANKS = "OTHER_DIGITAL_BANKS", "Other Digital Banks"
 

@@ -168,46 +168,35 @@ class TestPaymentView:
         assert response.status_code == 200
         assert b"Spanish Latte" in response.content
 
-    def test_shows_cash_and_other_payment_category_buttons(
-        self, unlocked_client, cashier, branch, product
-    ):
-        """Payment method simplification: GCash is no longer a
-        standalone top-level option. The page shows Cash and an "Other
-        Payment" category button; the two underlying methods reachable
-        through "Other Payment" (Debit/Credit Card, Other Digital Banks)
-        are present in the markup too (initially hidden, revealed by
-        the category button's own JS), but GCash as a name must not
-        appear anywhere."""
+    def test_shows_all_four_payment_modes(self, unlocked_client, cashier, branch, product):
+        """Payment method reorganization: Cash, GCash, Debit/Credit Card,
+        and Other Digital Banks are all shown as equal, top-level
+        buttons -- one click each, no sub-menu and no free-text field."""
         draft = services.get_or_create_draft_transaction(cashier, branch)
         services.add_catalog_item(draft, product.pk, 1)
 
         response = unlocked_client.get(reverse("pos:payment"))
         assert b"Cash" in response.content
-        assert b"Other Payment" in response.content
+        assert b"GCash" in response.content
         assert b"Debit/Credit Card" in response.content
         assert b"Other Digital Banks" in response.content
-        assert b"GCash" not in response.content
 
-    def test_other_payment_methods_exclude_cash(self, unlocked_client, cashier, branch, product):
-        """The "Other Payment" category's button group must only ever
-        contain the non-cash methods -- Cash has its own top-level
-        button and should never be duplicated inside the category."""
+    def test_payment_methods_context_has_all_four_in_order(
+        self, unlocked_client, cashier, branch, product
+    ):
         draft = services.get_or_create_draft_transaction(cashier, branch)
         services.add_catalog_item(draft, product.pk, 1)
 
         response = unlocked_client.get(reverse("pos:payment"))
-        other_methods = response.context["other_payment_methods"]
-        values = [value for value, _ in other_methods]
-        assert "CASH" not in values
-        assert "CARD" in values
-        assert "OTHER_DIGITAL_BANKS" in values
+        values = [value for value, _ in response.context["payment_methods"]]
+        assert values == ["CASH", "GCASH", "CARD", "OTHER_DIGITAL_BANKS"]
 
-    def test_card_and_other_digital_banks_payments_complete_successfully(
+    def test_all_four_payment_methods_complete_successfully(
         self, unlocked_client, cashier, branch, product
     ):
-        """End-to-end: both non-cash categories must still be valid,
-        recordable payment methods, not just visible buttons."""
-        for method in ["CARD", "OTHER_DIGITAL_BANKS"]:
+        """End-to-end: every one of the four methods must be a valid,
+        recordable payment method, not just a visible button."""
+        for method in ["CASH", "GCASH", "CARD", "OTHER_DIGITAL_BANKS"]:
             draft = services.get_or_create_draft_transaction(cashier, branch)
             services.add_catalog_item(draft, product.pk, 1)
             draft.refresh_from_db()
