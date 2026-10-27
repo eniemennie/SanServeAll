@@ -61,9 +61,14 @@ class SalesTransaction(models.Model):
         VOIDED = "VOIDED", "Voided"
 
     class PaymentMethod(models.TextChoices):
+        # GCash is deliberately not a selectable option (simplification
+        # decision) -- a GCash payment is now recorded under
+        # OTHER_DIGITAL_BANKS instead. CASH stays the primary mode; CARD
+        # and OTHER_DIGITAL_BANKS are both reached through the payment
+        # page's "Other Payment" category (see payment.html).
         CASH = "CASH", "Cash"
-        GCASH = "GCASH", "GCash"
-        CARD = "CARD", "Credit Card"
+        CARD = "CARD", "Debit/Credit Card"
+        OTHER_DIGITAL_BANKS = "OTHER_DIGITAL_BANKS", "Other Digital Banks"
 
     class DiningOption(models.TextChoices):
         DINE_IN = "DINE_IN", "Dine-in"

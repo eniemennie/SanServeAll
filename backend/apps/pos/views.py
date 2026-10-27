@@ -245,6 +245,14 @@ def payment(request):
             "draft": draft,
             "error": error,
             "payment_methods": SalesTransaction.PaymentMethod.choices,
+            # Everything except CASH -- reached through the payment
+            # page's "Other Payment" category button rather than shown
+            # as its own top-level mode (see payment.html).
+            "other_payment_methods": [
+                (value, label)
+                for value, label in SalesTransaction.PaymentMethod.choices
+                if value != SalesTransaction.PaymentMethod.CASH
+            ],
         },
     )
 

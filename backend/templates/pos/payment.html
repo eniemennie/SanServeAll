@@ -98,10 +98,22 @@
                     <div class="form-control jc-change-display mb-3" id="change-display">₱0.00</div>
 
                     <label class="form-label fw-semibold small text-muted">Mode of Payment</label>
-                    <div class="row row-cols-3 g-2 mb-3">
-                        {% for value, label in payment_methods %}
+                    <div class="row row-cols-2 g-2 mb-2">
                         <div class="col">
-                            <button type="button" class="jc-mode-btn w-100 js-payment-mode {% if value == 'CASH' %}active{% endif %}" data-value="{{ value }}">
+                            <button type="button" class="jc-mode-btn w-100 js-payment-category active" data-category="CASH">
+                                Cash
+                            </button>
+                        </div>
+                        <div class="col">
+                            <button type="button" class="jc-mode-btn w-100 js-payment-category" data-category="OTHER">
+                                Other Payment
+                            </button>
+                        </div>
+                    </div>
+                    <div class="row row-cols-2 g-2 mb-3 d-none" id="other-payment-methods">
+                        {% for value, label in other_payment_methods %}
+                        <div class="col">
+                            <button type="button" class="jc-mode-btn w-100 js-payment-mode {% if forloop.first %}active{% endif %}" data-value="{{ value }}">
                                 {{ label }}
                             </button>
                         </div>
@@ -164,11 +176,40 @@
     });
 
     const methodInput = document.getElementById("payment-method-input");
-    document.querySelectorAll(".js-payment-mode").forEach(function (btn) {
+    const otherMethodsRow = document.getElementById("other-payment-methods");
+    const categoryBtns = document.querySelectorAll(".js-payment-category");
+    const otherModeBtns = document.querySelectorAll(".js-payment-mode");
+
+    function selectOtherMode(btn) {
+        otherModeBtns.forEach(function (b) { b.classList.remove("active"); });
+        btn.classList.add("active");
+        methodInput.value = btn.dataset.value;
+    }
+
+    categoryBtns.forEach(function (btn) {
         btn.addEventListener("click", function () {
-            document.querySelectorAll(".js-payment-mode").forEach(function (b) { b.classList.remove("active"); });
+            categoryBtns.forEach(function (b) { b.classList.remove("active"); });
             btn.classList.add("active");
-            methodInput.value = btn.dataset.value;
+
+            if (btn.dataset.category === "CASH") {
+                otherMethodsRow.classList.add("d-none");
+                methodInput.value = "CASH";
+            } else {
+                otherMethodsRow.classList.remove("d-none");
+                // Opening "Other Payment" always leaves one of its two
+                // buttons selected (defaults to whichever is marked
+                // active in the template, i.e. the first one) so the
+                // form stays in a valid, submittable state without
+                // requiring the cashier to type anything.
+                const alreadySelected = document.querySelector(".js-payment-mode.active");
+                selectOtherMode(alreadySelected || otherModeBtns[0]);
+            }
+        });
+    });
+
+    otherModeBtns.forEach(function (btn) {
+        btn.addEventListener("click", function () {
+            selectOtherMode(btn);
         });
     });
 })();

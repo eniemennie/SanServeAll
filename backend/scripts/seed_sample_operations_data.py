@@ -323,7 +323,7 @@ def _simulate_day_of_sales(day_date, branch, cashier, catalog, best_sellers):
                     [
                         SalesTransaction.PaymentMethod.CASH,
                         SalesTransaction.PaymentMethod.CASH,
-                        SalesTransaction.PaymentMethod.GCASH,
+                        SalesTransaction.PaymentMethod.OTHER_DIGITAL_BANKS,
                         SalesTransaction.PaymentMethod.CARD,
                     ]
                 ),
