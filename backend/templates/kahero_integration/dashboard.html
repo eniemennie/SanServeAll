@@ -56,6 +56,11 @@
                 <td>{{ batch.branch.name }}</td>
                 <td>{{ batch.uploaded_by.get_username }}</td>
                 <td>
+                    {% if batch.has_warnings %}
+                    <span class="badge bg-warning text-dark" title="Completed, but some rows were skipped -- see batch detail for the row errors.">
+                        Completed (warnings)
+                    </span>
+                    {% else %}
                     <span class="badge
                         {% if batch.status == 'COMPLETED' %}bg-success
                         {% elif batch.status == 'FAILED' %}bg-danger
@@ -63,6 +68,7 @@
                         {% else %}bg-secondary{% endif %}">
                         {{ batch.get_status_display }}
                     </span>
+                    {% endif %}
                 </td>
                 <td>{{ batch.success_count }} / {{ batch.total_rows }}</td>
                 <td>{% if batch.quality_rate is not None %}{{ batch.quality_rate }}%{% else %}&mdash;{% endif %}</td>
