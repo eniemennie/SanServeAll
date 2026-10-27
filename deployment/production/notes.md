@@ -3,7 +3,9 @@
 Promotion flow: only deploy here via a merged `staging -> main` PR (Phase 5),
 verified on staging first, ideally during low-traffic hours (after closing).
 
-1. Create the production PythonAnywhere web app + MySQL database (`sanserveall_production`).
+1. Create the production PythonAnywhere web app. No separate database to create --
+   the app uses SQLite (see `env.production.example`'s `SQLITE_DB_PATH` comment),
+   and its file is created automatically on first migrate.
 2. Point the WSGI config file at `deployment/production/wsgi_production.py`.
 3. Copy `deployment/production/env.production.example` -> `.env`, fill in real values.
 4. `pip install -r backend/requirements/production.txt`
