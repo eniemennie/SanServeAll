@@ -58,12 +58,33 @@
     .jc-add-custom-tile:hover { background-color: rgba(232, 139, 90, 0.06); }
 
     /* Printing the Transaction Complete modal (Row 3 redesign) should
-       produce a clean receipt-only printout, not the whole POS page
-       (product grid, cart, other modals) bleeding through. */
+       produce a clean, single-page receipt printout, not the whole POS
+       page (product grid, cart, other modals) bleeding through.
+
+       Bug fixed here: the previous approach used `visibility: hidden`
+       on every other element, which hides them visually but leaves
+       their layout height intact -- the full (invisible) POS page
+       still occupies several pages' worth of height. Bootstrap's
+       `.modal` is `position: fixed`, and fixed-position elements are
+       redrawn on every paginated print page by the browser, so the
+       receipt was printed once per leftover (invisible) page --
+       "3 identical copies" for a POS page tall enough to paginate into
+       3 pages. Hiding every other direct child of <body> with
+       `display: none` instead actually removes them from layout
+       (collapsing the page to one page's worth of height), and
+       dropping the modal's fixed positioning during print stops it
+       from being treated as a repeating per-page element. */
     @media print {
-        body * { visibility: hidden; }
-        #receipt-print-area, #receipt-print-area * { visibility: visible; }
-        #receipt-print-area { position: absolute; top: 0; left: 0; width: 100%; }
+        body > *:not(#transactionCompleteModal) { display: none !important; }
+        #transactionCompleteModal {
+            position: static !important;
+            display: block !important;
+        }
+        #transactionCompleteModal .modal-dialog {
+            margin: 0 !important;
+            max-width: 100% !important;
+            min-height: 0 !important;
+        }
         .jc-print-hide { display: none !important; }
     }
 
