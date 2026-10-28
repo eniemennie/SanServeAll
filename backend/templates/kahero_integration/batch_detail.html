@@ -20,6 +20,13 @@
         <dd class="col-sm-9">{% if batch.quality_rate is not None %}{{ batch.quality_rate }}%{% else %}&mdash;{% endif %}</dd>
     </dl>
 
+    {% if batch.has_warnings %}
+    <div class="alert alert-warning py-2 mt-3">
+        This batch completed, but {{ batch.error_count }} of {{ batch.total_rows }} row(s) were
+        skipped and were not imported. Review the errors below before relying on this data.
+    </div>
+    {% endif %}
+
     {% if batch.error_log %}
     <h2 class="h6 mt-4">Row Errors</h2>
     <ul class="list-group">

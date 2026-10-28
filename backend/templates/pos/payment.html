@@ -98,7 +98,7 @@
                     <div class="form-control jc-change-display mb-3" id="change-display">₱0.00</div>
 
                     <label class="form-label fw-semibold small text-muted">Mode of Payment</label>
-                    <div class="row row-cols-3 g-2 mb-3">
+                    <div class="row row-cols-4 g-2 mb-3">
                         {% for value, label in payment_methods %}
                         <div class="col">
                             <button type="button" class="jc-mode-btn w-100 js-payment-mode {% if value == 'CASH' %}active{% endif %}" data-value="{{ value }}">

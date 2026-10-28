@@ -43,6 +43,16 @@ class KaheroImportBatch(models.Model):
         return f"Batch #{self.pk} ({self.status}) - {self.original_filename}"
 
     @property
+    def has_warnings(self):
+        """True for a batch that reports overall success (COMPLETED --
+        at least one row ingested) but still skipped one or more rows.
+        Row-level errors are always recorded in error_log regardless, but
+        a plain "Completed" status alone doesn't tell staff at a glance
+        that some rows never made it in -- this flags that case for the
+        dashboard/detail views to call out explicitly."""
+        return self.status == self.Status.COMPLETED and self.error_count > 0
+
+    @property
     def quality_rate(self):
         """Percentage of rows successfully ingested -- the "quality rate"
         metric for the Batch Processing Analytics Dashboard (Fig. 3-23,

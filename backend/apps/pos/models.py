@@ -61,9 +61,15 @@ class SalesTransaction(models.Model):
         VOIDED = "VOIDED", "Voided"
 
     class PaymentMethod(models.TextChoices):
+        # All four shown as equal, top-level buttons on the payment page
+        # (payment.html) -- GCash stays a first-class option (it's one of
+        # the most commonly used channels for Jorge's Café's customers),
+        # alongside a generic "Other Digital Banks" catch-all for anything
+        # that isn't Cash/GCash/Card.
         CASH = "CASH", "Cash"
         GCASH = "GCASH", "GCash"
-        CARD = "CARD", "Credit Card"
+        CARD = "CARD", "Debit/Credit Card"
+        OTHER_DIGITAL_BANKS = "OTHER_DIGITAL_BANKS", "Other Digital Banks"
 
     class DiningOption(models.TextChoices):
         DINE_IN = "DINE_IN", "Dine-in"

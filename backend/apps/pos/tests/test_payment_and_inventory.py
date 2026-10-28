@@ -168,16 +168,48 @@ class TestPaymentView:
         assert response.status_code == 200
         assert b"Spanish Latte" in response.content
 
-    def test_shows_all_three_payment_modes(self, unlocked_client, cashier, branch, product):
-        """Row 3 redesign: the payment page now shows Cash/GCash/Credit
-        Card as real selectable buttons, not just Cash."""
+    def test_shows_all_four_payment_modes(self, unlocked_client, cashier, branch, product):
+        """Payment method reorganization: Cash, GCash, Debit/Credit Card,
+        and Other Digital Banks are all shown as equal, top-level
+        buttons -- one click each, no sub-menu and no free-text field."""
         draft = services.get_or_create_draft_transaction(cashier, branch)
         services.add_catalog_item(draft, product.pk, 1)
 
         response = unlocked_client.get(reverse("pos:payment"))
         assert b"Cash" in response.content
         assert b"GCash" in response.content
-        assert b"Credit Card" in response.content
+        assert b"Debit/Credit Card" in response.content
+        assert b"Other Digital Banks" in response.content
+
+    def test_payment_methods_context_has_all_four_in_order(
+        self, unlocked_client, cashier, branch, product
+    ):
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 1)
+
+        response = unlocked_client.get(reverse("pos:payment"))
+        values = [value for value, _ in response.context["payment_methods"]]
+        assert values == ["CASH", "GCASH", "CARD", "OTHER_DIGITAL_BANKS"]
+
+    def test_all_four_payment_methods_complete_successfully(
+        self, unlocked_client, cashier, branch, product
+    ):
+        """End-to-end: every one of the four methods must be a valid,
+        recordable payment method, not just a visible button."""
+        for method in ["CASH", "GCASH", "CARD", "OTHER_DIGITAL_BANKS"]:
+            draft = services.get_or_create_draft_transaction(cashier, branch)
+            services.add_catalog_item(draft, product.pk, 1)
+            draft.refresh_from_db()
+
+            response = unlocked_client.post(
+                reverse("pos:payment"),
+                {"payment_method": method, "amount_tendered": str(draft.grand_total)},
+            )
+            assert response.status_code == 302
+
+            draft.refresh_from_db()
+            assert draft.status == SalesTransaction.Status.COMPLETED
+            assert draft.payment_method == method
 
     def test_shows_the_quick_amount_buttons(self, unlocked_client, cashier, branch, product):
         draft = services.get_or_create_draft_transaction(cashier, branch)
