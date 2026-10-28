@@ -271,6 +271,43 @@ class TestPaymentView:
         second_load = unlocked_client.get(reverse("pos:ordering"))
         assert b'id="transactionCompleteModal"' not in second_load.content
 
+    def test_print_css_isolates_the_modal_without_a_fixed_position_bug(
+        self, unlocked_client, cashier, branch, product
+    ):
+        """Regression test for the "3 identical copies" print/PDF bug:
+        the old @media print rule only used `visibility: hidden` on the
+        rest of the page, which doesn't collapse layout height, while
+        the modal itself kept Bootstrap's `position: fixed` -- a
+        fixed-position element is redrawn on every paginated print
+        page, so a tall (invisible) POS page produced that many
+        identical printed copies of the receipt. The fix hides every
+        other direct child of <body> with `display: none` (actually
+        removing them from layout) and drops the modal's fixed
+        positioning during print. This only checks the rule is present
+        in the rendered page -- Django's test client can't execute
+        real browser pagination -- so it guards against someone
+        reverting to the old `visibility`-only approach by accident."""
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 1)
+        unlocked_client.post(
+            reverse("pos:payment"), {"payment_method": "CASH", "amount_tendered": "200.00"}
+        )
+
+        response = unlocked_client.get(reverse("pos:ordering"))
+
+        # The fix: other direct children of <body> are actually removed
+        # from layout (not just hidden), and the modal's fixed
+        # positioning is dropped during print.
+        assert b"body > *:not(#transactionCompleteModal) { display: none !important; }" in (
+            response.content
+        )
+        assert b"position: static !important;" in response.content
+
+        # The old buggy pattern must not come back: visibility alone
+        # doesn't collapse layout height, which is what caused the
+        # multi-page repeat in the first place.
+        assert b"body * { visibility: hidden; }" not in response.content
+
     def test_insufficient_payment_shows_error_and_stays_on_page(
         self, unlocked_client, cashier, branch, product
     ):
