@@ -1,5 +1,18 @@
 # Production Deployment Notes (PythonAnywhere)
 
+**Current status (as of October 2026): intentionally not deployed.**
+PythonAnywhere's free tier allows exactly one web app per account, and
+the team's one app is the staging deployment -- which already serves as
+the live, real system used for verification, demos, and adviser/client
+review. Standing up a genuinely separate production app would require a
+paid plan (e.g. the "Hacker" tier), which the team has decided isn't
+worth it for a capstone project with no real need for two live
+environments. This file is kept as-is (accurate and ready to follow) in
+case that decision changes later -- e.g. if the system goes into real
+use at Jorge's Café beyond the capstone -- but there is currently no
+second PythonAnywhere app to set up, and `staging` is the branch that
+matters for any live deployment question.
+
 Promotion flow: only deploy here via a merged `staging -> main` PR (Phase 5),
 verified on staging first, ideally during low-traffic hours (after closing).
 
