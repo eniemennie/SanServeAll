@@ -1,0 +1,102 @@
+{% extends "admin_base.html" %}
+{% block admin_title %}Stock Transfers{% endblock %}
+{% block admin_content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h5 mb-0">Stock Transfers</h1>
+</div>
+
+{% if error %}
+    <div class="alert alert-danger py-2">{{ error }}</div>
+{% endif %}
+
+<div class="card mb-3">
+    <div class="card-body">
+        <h2 class="h6">Dispatch Stock to a Branch</h2>
+        <p class="text-muted small">Sends finished goods from the commissary's own stock to a branch. The quantity leaves the commissary's inventory immediately; it only reaches the destination branch once the order is marked Delivered.</p>
+        <form method="post">
+            {% csrf_token %}
+            <div class="row g-2">
+                <div class="col-md-4">
+                    <select name="product_id" class="form-select" required>
+                        <option value="" selected disabled>Select product</option>
+                        {% for p in finished_goods %}
+                        <option value="{{ p.pk }}">{{ p.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <select name="destination_branch_id" class="form-select" required>
+                        <option value="" selected disabled>Select destination branch</option>
+                        {% for b in destination_branches %}
+                        <option value="{{ b.pk }}">{{ b.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <input type="number" name="quantity" min="1" class="form-control" placeholder="Quantity" required>
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn w-100" style="background: var(--jc-orange); color: #fff;">Dispatch</button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="jc-card p-3">
+    <div class="table-responsive">
+    <table class="table table-sm mb-0">
+        <thead>
+            <tr>
+                <th>Order</th>
+                <th>Product</th>
+                <th>Qty</th>
+                <th>From</th>
+                <th>To</th>
+                <th>Status</th>
+                <th>Dispatched</th>
+                <th>Delivered</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for order in orders %}
+            <tr>
+                <td>#{{ order.pk }}</td>
+                <td>{{ order.product.name }}</td>
+                <td>{{ order.quantity }}</td>
+                <td>{{ order.source_branch.name }}</td>
+                <td>{{ order.destination_branch.name }}</td>
+                <td>
+                    <span class="jc-badge {% if order.status == 'DELIVERED' %}jc-badge-adequate{% elif order.status == 'IN_TRANSIT' %}jc-badge-info{% else %}jc-badge-low{% endif %}">
+                        {{ order.get_status_display }}
+                    </span>
+                </td>
+                <td>{{ order.created_at|date:"M d, Y H:i" }}</td>
+                <td>{{ order.delivered_at|date:"M d, Y H:i"|default:"&mdash;" }}</td>
+                <td>
+                    {% if order.status == "PROCESSING" %}
+                    <form method="post" action="{% url 'production:advance_stock_transfer' order.pk %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="next_status" value="IN_TRANSIT">
+                        <button type="submit" class="btn btn-outline-secondary btn-sm">Mark In Transit</button>
+                    </form>
+                    {% elif order.status == "IN_TRANSIT" %}
+                    <form method="post" action="{% url 'production:advance_stock_transfer' order.pk %}">
+                        {% csrf_token %}
+                        <input type="hidden" name="next_status" value="DELIVERED">
+                        <button type="submit" class="btn btn-outline-secondary btn-sm">Mark Delivered</button>
+                    </form>
+                    {% endif %}
+                </td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="9" class="text-center text-muted py-3">No stock transfer orders yet.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+</div>
+
+{% endblock %}

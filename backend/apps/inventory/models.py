@@ -151,6 +151,13 @@ class InventoryTransaction(models.Model):
         # both are automatic, neither is a manual override.
         PRODUCTION_CONSUMPTION = "PRODUCTION_CONSUMPTION", "Production Consumption"
         PRODUCTION_OUTPUT = "PRODUCTION_OUTPUT", "Production Output"
+        # Week N: stock distribution from the commissary to a branch
+        # (production.StockTransferOrder) -- OUT logged against the
+        # commissary the moment an order is dispatched (PROCESSING), IN
+        # logged against the destination branch only once DELIVERED is
+        # confirmed.
+        TRANSFER_OUT = "TRANSFER_OUT", "Transfer Out"
+        TRANSFER_IN = "TRANSFER_IN", "Transfer In"
 
     branch = models.ForeignKey("accounts.Branch", on_delete=models.PROTECT)
     product = models.ForeignKey(Product, on_delete=models.PROTECT)

@@ -14,12 +14,12 @@ merely whether Owner/Admin is among a view's allowed roles.
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
-from apps.accounts.models import Role
+from apps.accounts.models import Branch, Role
 from apps.accounts.permissions import role_required
 from apps.inventory import services as inventory_services
 from apps.inventory.models import Product
 from apps.production import services
-from apps.production.models import ProductionRecord
+from apps.production.models import ProductionRecord, StockTransferOrder
 
 
 @role_required(Role.COMMISSARY_STAFF, Role.OWNER_ADMIN)
@@ -180,3 +180,64 @@ def delete_production_record(request, record_id):
     return render(
         request, "production/confirm_delete.html", {"active_nav": "batch", "record": record}
     )
+
+
+@role_required(Role.COMMISSARY_STAFF, Role.OWNER_ADMIN)
+def stock_transfers(request):
+    """Stock order status tracking (processing/in transit/delivered) --
+    the manuscript's "Supply distribution record updates per branch".
+    Lists existing StockTransferOrders and handles creating a new one;
+    advancing an order's status is its own view (advance_stock_transfer)
+    below, same split as record_production/batch_management above.
+    """
+    error = None
+    finished_goods = Product.objects.filter(
+        product_type=Product.ProductType.FINISHED_GOOD, is_active=True
+    )
+    destination_branches = Branch.objects.filter(is_commissary=False, is_active=True)
+
+    if request.method == "POST":
+        try:
+            services.create_stock_transfer_order(
+                commissary_staff=request.user,
+                destination_branch_id=request.POST.get("destination_branch_id"),
+                product_id=request.POST.get("product_id"),
+                quantity=request.POST.get("quantity"),
+            )
+            return redirect("production:stock_transfers")
+        except services.StockTransferError as exc:
+            error = str(exc)
+
+    orders = StockTransferOrder.objects.select_related(
+        "product", "source_branch", "destination_branch"
+    )
+
+    return render(
+        request,
+        "production/stock_transfers.html",
+        {
+            "active_nav": "transfers",
+            "error": error,
+            "orders": orders,
+            "finished_goods": finished_goods,
+            "destination_branches": destination_branches,
+            "status_choices": StockTransferOrder.Status.choices,
+        },
+    )
+
+
+@role_required(Role.COMMISSARY_STAFF, Role.OWNER_ADMIN)
+def advance_stock_transfer(request, order_id):
+    """Advances one StockTransferOrder exactly one step forward
+    (PROCESSING -> IN_TRANSIT -> DELIVERED). A thin wrapper over the
+    service, matching quick_sale's POST-and-redirect-back pattern --
+    no separate confirmation page for a single forward status step."""
+    order = get_object_or_404(StockTransferOrder, pk=order_id)
+    if request.method == "POST":
+        next_status = request.POST.get("next_status")
+        try:
+            services.advance_stock_transfer_status(order, next_status)
+        except services.StockTransferError:
+            pass  # Stay on the page; the list view shows the order's real, unchanged status.
+
+    return redirect("production:stock_transfers")

@@ -12,11 +12,15 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from apps.inventory.models import Inventory, InventoryTransaction, Product
-from apps.production.models import IngredientUsage, ProductionRecord
+from apps.production.models import IngredientUsage, ProductionRecord, StockTransferOrder
 
 
 class ProductionError(Exception):
     """Raised when a production run can't be recorded as requested."""
+
+
+class StockTransferError(Exception):
+    """Raised when a stock transfer order can't be created or advanced as requested."""
 
 
 def get_commissary_branch():
@@ -129,3 +133,124 @@ def record_production(commissary_staff, product_id, quantity_produced, ingredien
         )
 
     return record
+
+
+# Forward-only lifecycle -- the only legal "next status" from each status.
+# Enforced in advance_stock_transfer_status rather than left to callers,
+# so skipping a step or going backward is a service-level error, not a
+# silently-accepted write.
+_NEXT_TRANSFER_STATUS = {
+    StockTransferOrder.Status.PROCESSING: StockTransferOrder.Status.IN_TRANSIT,
+    StockTransferOrder.Status.IN_TRANSIT: StockTransferOrder.Status.DELIVERED,
+}
+
+
+def create_stock_transfer_order(commissary_staff, destination_branch_id, product_id, quantity):
+    """Dispatches finished goods from the commissary to a branch (Fig.
+    3-24/3-27's "stock order" -- processing/in transit/delivered).
+
+    Stock leaves the commissary's own Inventory immediately, the same
+    moment the order is created (status=PROCESSING) -- once dispatched
+    it is genuinely no longer on hand there, matching how record_production
+    above deducts materials up front rather than waiting for some later
+    confirmation step.
+    """
+    from apps.accounts.models import Branch
+
+    commissary = get_commissary_branch()
+    if commissary is None:
+        raise StockTransferError("No commissary branch is configured.")
+
+    try:
+        destination = Branch.objects.get(pk=destination_branch_id)
+    except Branch.DoesNotExist:
+        raise StockTransferError("Destination branch does not exist.")
+
+    if destination.pk == commissary.pk:
+        raise StockTransferError("Destination branch cannot be the commissary itself.")
+    if destination.is_commissary:
+        raise StockTransferError("Destination branch cannot be another commissary.")
+
+    try:
+        product = Product.objects.get(pk=product_id)
+    except Product.DoesNotExist:
+        raise StockTransferError("Selected product does not exist.")
+
+    try:
+        quantity = int(quantity)
+    except (TypeError, ValueError):
+        raise StockTransferError("Enter a whole number for the quantity.")
+    if quantity <= 0:
+        raise StockTransferError("Quantity must be greater than zero.")
+
+    with db_transaction.atomic():
+        source_inventory, _ = Inventory.objects.get_or_create(branch=commissary, product=product)
+        if source_inventory.quantity_on_hand < quantity:
+            raise StockTransferError(
+                f"Not enough {product.name} on hand at the commissary "
+                f"(have {source_inventory.quantity_on_hand}, need {quantity})."
+            )
+
+        order = StockTransferOrder.objects.create(
+            commissary_staff=commissary_staff,
+            source_branch=commissary,
+            destination_branch=destination,
+            product=product,
+            quantity=quantity,
+            status=StockTransferOrder.Status.PROCESSING,
+        )
+
+        source_inventory.quantity_on_hand -= quantity
+        source_inventory.save()
+        InventoryTransaction.objects.create(
+            branch=commissary,
+            product=product,
+            movement_type=InventoryTransaction.MovementType.TRANSFER_OUT,
+            quantity_change=-quantity,
+        )
+
+    return order
+
+
+def advance_stock_transfer_status(order, new_status):
+    """Moves a StockTransferOrder forward one step
+    (PROCESSING -> IN_TRANSIT -> DELIVERED only -- no skipping, no going
+    backward). Reaching DELIVERED is the one moment the destination
+    branch's own Inventory actually receives the stock; while IN_TRANSIT,
+    the quantity is accounted for by this order alone, not counted as
+    available at either branch.
+    """
+    allowed_next = _NEXT_TRANSFER_STATUS.get(order.status)
+    if allowed_next is None:
+        raise StockTransferError(
+            f"Order is already {order.get_status_display()} -- "
+            "no further status change is possible."
+        )
+    if new_status != allowed_next:
+        raise StockTransferError(
+            f"Cannot move from {order.get_status_display()} directly to "
+            f"{StockTransferOrder.Status(new_status).label} -- the next step must be "
+            f"{allowed_next.label}."
+        )
+
+    with db_transaction.atomic():
+        order.status = new_status
+        if new_status == StockTransferOrder.Status.DELIVERED:
+            order.delivered_at = timezone.now()
+            order.save()
+
+            destination_inventory, _ = Inventory.objects.get_or_create(
+                branch=order.destination_branch, product=order.product
+            )
+            destination_inventory.quantity_on_hand += order.quantity
+            destination_inventory.save()
+            InventoryTransaction.objects.create(
+                branch=order.destination_branch,
+                product=order.product,
+                movement_type=InventoryTransaction.MovementType.TRANSFER_IN,
+                quantity_change=order.quantity,
+            )
+        else:
+            order.save()
+
+    return order
