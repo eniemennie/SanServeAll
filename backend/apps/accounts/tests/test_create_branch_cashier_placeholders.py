@@ -84,3 +84,23 @@ class TestCreateBranchCashierPlaceholders:
     def test_dry_run_creates_nothing(self, batangas, lipa):
         call_command("create_branch_cashier_placeholders", "--dry-run")
         assert User.objects.count() == 0
+
+    def test_does_not_skip_a_branch_with_only_an_inactive_historical_import_account(self, batangas):
+        """Regression test: the sales-history import command creates one
+        INACTIVE "historical_import_<branch>" BRANCH_STAFF user per branch,
+        purely as the required FK target for imported SalesTransactions --
+        never meant to be a real, selectable cashier. A branch with only
+        that leftover account must still get a real placeholder account,
+        not be wrongly treated as "already staffed" (caught via a real
+        staging dry-run before this ever created a wrong state there)."""
+        role = Role.objects.create(name=Role.BRANCH_STAFF)
+        User.objects.create_user(
+            username="historical_import_batangas",
+            role=role,
+            branch=batangas,
+            is_active=False,
+        )
+
+        call_command("create_branch_cashier_placeholders")
+
+        assert User.objects.filter(branch=batangas, username="batangas_cashier").exists()
