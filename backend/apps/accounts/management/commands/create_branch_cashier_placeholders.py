@@ -47,9 +47,15 @@ Which branches get an account, and why:
 Idempotent: re-running this command does not create duplicates or
 overwrite an account that has already been given real details. A branch
 is skipped (reported, not silently ignored) if it already has at least
-one BRANCH_STAFF user assigned to it -- covering both "already handled by
-this command" and "the client's real account already exists" -- so this
-command only ever fills a genuine gap.
+one ACTIVE BRANCH_STAFF user assigned to it -- covering both "already
+handled by this command" and "the client's real account already exists"
+-- so this command only ever fills a genuine gap. The check is
+deliberately scoped to is_active=True: it must not count an inactive
+placeholder such as the historical-import attribution accounts the
+sales-history import command creates (one per branch, is_active=False,
+no name, no PIN, never meant to be a real selectable cashier) as
+"already staffed," or a branch with only that kind of leftover account
+would be wrongly skipped and never get a real, selectable account.
 """
 
 from django.contrib.auth import get_user_model
@@ -103,7 +109,7 @@ class Command(BaseCommand):
         with transaction.atomic():
             for branch in branches:
                 already_staffed = User.objects.filter(
-                    role=branch_staff_role, branch=branch
+                    role=branch_staff_role, branch=branch, is_active=True
                 ).exists()
                 if already_staffed:
                     skipped.append(branch)
