@@ -37,8 +37,17 @@ logger = logging.getLogger(__name__)
 # deprecations) is the place to check for its replacement. Flash (not
 # Pro) deliberately chosen: free-tier eligible, and this task (one plain
 # sentence from a short structured summary) doesn't need a larger model.
+#
+# Switched from gemini-2.5-flash (Oct 2026): confirmed via a live
+# staging run that it now returns 404 Not Found on generateContent for
+# this project's API key, even though models.list still advertises it.
+# Per Google's own changelog, the 2.5 series is access-restricted (not
+# deprecated) to keys that actively used it before this project's key
+# was created -- new keys get this exact 404. Google's changelog
+# recommends gemini-3.8-flash (GA since September 2026) for new
+# projects, so that's what's used here now.
 GEMINI_API_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
 )
 REQUEST_TIMEOUT_SECONDS = 15
 
