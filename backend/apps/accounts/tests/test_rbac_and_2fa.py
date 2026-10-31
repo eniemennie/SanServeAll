@@ -219,7 +219,7 @@ class TestTwoFactorVerify:
             reverse("accounts:admin_2fa_verify"), {"token": _valid_token(device)}
         )
         assert response.status_code == 302
-        assert response.url == reverse("accounts:select_branch")
+        assert response.url == reverse("accounts:admin_dashboard")
 
     def test_incorrect_token_is_rejected(self, client, admin):
         TOTPDevice.objects.create(user=admin, name="default", confirmed=True)
@@ -266,6 +266,11 @@ class TestAdminDashboardEnforcement:
             reverse("accounts:admin_2fa_verify"), {"token": _valid_token(device)}
         )
         assert verify_response.status_code == 302
+        # Owner/Admin goes straight to the dashboard after 2FA -- no
+        # Branch Selection step, since that role isn't scoped to one
+        # branch and the dashboard's own branch filter is a separate,
+        # on-page control, not a login gate.
+        assert verify_response.url == reverse("accounts:admin_dashboard")
 
         dashboard_response = client.get(reverse("accounts:admin_dashboard"))
         assert dashboard_response.status_code == 200

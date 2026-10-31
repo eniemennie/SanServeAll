@@ -126,8 +126,18 @@ class BranchSelectionView(LoginRequiredMixin, View):
 
     Branch-scoped users (Branch Staff, Commissary Staff) have exactly one
     selectable branch and are routed straight through without being shown
-    a picker -- the screen only meaningfully appears for Owner/Admin, who
-    is choosing dashboard context rather than a work assignment.
+    a picker.
+
+    Owner/Admin already has access to every branch and is no longer routed
+    here as part of login (see TwoFactorVerifyView / the 2FA setup
+    confirmation, which go straight to admin_dashboard instead) -- forcing
+    a branch choice before even reaching the dashboard was unnecessary
+    friction for a role that isn't scoped to one branch in the first
+    place. This view and URL stay in place for Owner/Admin regardless:
+    features that need a specific branch context on demand -- e.g.
+    Inventory Monitoring's `_require_selected_branch` check -- still
+    redirect here to ask for one, and that picker still needs to work for
+    Owner/Admin when it does.
     """
 
     template_name = "accounts/branch_selection.html"
@@ -360,13 +370,13 @@ class TwoFactorVerifyView(LoginRequiredMixin, View):
         for device in TOTPDevice.objects.filter(user=request.user, confirmed=True):
             if device.verify_token(token):
                 otp_login(request, device)
-                return redirect("accounts:select_branch")
+                return redirect("accounts:admin_dashboard")
 
         if verify_and_consume_backup_code(request.user, token):
             device = TOTPDevice.objects.filter(user=request.user, confirmed=True).first()
             if device is not None:
                 otp_login(request, device)
-            return redirect("accounts:select_branch")
+            return redirect("accounts:admin_dashboard")
 
         return render(
             request,
