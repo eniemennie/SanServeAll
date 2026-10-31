@@ -150,6 +150,15 @@ class SalesTransaction(models.Model):
         receipts must all use, not total_amount alone."""
         return self.total_amount - self.transaction_discount_value
 
+    # Discount categories that are legally VAT-exempt under BIR rules for
+    # Senior Citizen / PWD transactions, not merely price-reduced -- the
+    # whole sale carries no VAT at all, rather than VAT computed on the
+    # already-discounted total like every other discount category.
+    VAT_EXEMPT_DISCOUNT_CATEGORIES = (
+        DiscountCategory.SC2,
+        DiscountCategory.PWD2,
+    )
+
     def vat_breakdown(self, tax_rate_percent):
         """Splits grand_total into its VAT-exclusive amount and VAT
         portion, given grand_total is VAT-inclusive pricing (Row 3
@@ -157,8 +166,18 @@ class SalesTransaction(models.Model):
         VAT-exclusive = grand_total / (1 + rate), VAT = grand_total minus
         that. Takes the rate as a parameter rather than importing
         SystemConfiguration directly, keeping this model free of a
-        cross-app import for one property."""
+        cross-app import for one property.
+
+        EXCEPTION: when the whole-order discount category is Senior
+        Citizen (SC2) or PWD (PWD2), BIR rules make the entire sale
+        VAT-exempt, not just discounted -- so no VAT is extracted at all,
+        and the full grand_total is "VATable" sales of zero plus exempt
+        sales equal to grand_total. Returning (grand_total, 0) here keeps
+        every caller (receipt, order summary, reports) correct without
+        each of them needing to know about this special case."""
         grand_total = self.grand_total
+        if self.transaction_discount_category in self.VAT_EXEMPT_DISCOUNT_CATEGORIES:
+            return grand_total.quantize(Decimal("0.01")), Decimal("0.00")
         rate = Decimal(str(tax_rate_percent)) / Decimal("100")
         vat_exclusive = grand_total / (Decimal("1") + rate)
         vat_amount = grand_total - vat_exclusive

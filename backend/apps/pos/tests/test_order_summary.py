@@ -87,6 +87,26 @@ class TestGrandTotalAndDiscountMath:
         assert vat_exclusive == Decimal("200.89")
         assert vat_amount == Decimal("24.11")
 
+    @pytest.mark.parametrize("category", ["SC2", "PWD2"])
+    def test_vat_is_fully_exempt_for_senior_and_pwd_discounts(self, draft, item, category):
+        """BIR rules: a Senior Citizen (SC2) or PWD (PWD2) sale is VAT-
+        exempt outright, not merely VAT computed on a discounted total --
+        the whole grand_total must come back as VAT-exempt sales with
+        zero VAT, not the usual 1/1.12 split."""
+        services.apply_transaction_discount(draft, category, "PERCENT", "20")
+        vat_exclusive, vat_amount = draft.vat_breakdown(Decimal("12.00"))
+        assert vat_amount == Decimal("0.00")
+        assert vat_exclusive == draft.grand_total
+
+    def test_vat_is_still_split_normally_for_non_exempt_discount_categories(self, draft, item):
+        """Confirms the exemption is category-specific, not a blanket
+        "any discount means no VAT" regression -- a regular discount (SD)
+        still goes through the normal VAT-inclusive split."""
+        services.apply_transaction_discount(draft, "SD", "PERCENT", "20")
+        vat_exclusive, vat_amount = draft.vat_breakdown(Decimal("12.00"))
+        assert vat_amount > Decimal("0.00")
+        assert vat_exclusive + vat_amount == draft.grand_total
+
     def test_transaction_discount_amount_reduces_grand_total(self, draft, item):
         services.apply_transaction_discount(draft, "SD", "AMOUNT", "20.00")
         assert draft.grand_total == Decimal("105.00")  # 125 - 20
