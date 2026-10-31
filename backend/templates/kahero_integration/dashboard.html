@@ -1,41 +1,42 @@
-{% extends "base.html" %}
-{% block title %}Batch Processing Dashboard - SanServeAll{% endblock %}
-{% block content %}
-<div class="container py-4">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h4">Batch Processing Analytics</h1>
-        <a href="{% url 'kahero:upload' %}" class="btn btn-primary btn-sm">Upload New Batch</a>
-    </div>
+{% extends "admin_base.html" %}
+{% block admin_title %}Batch Processing Dashboard{% endblock %}
+{% block admin_content %}
 
-    <div class="row g-3 mb-4">
-        <div class="col-md-3">
-            <div class="card text-center"><div class="card-body">
-                <div class="text-muted small">Total Batches</div>
-                <div class="fs-3 fw-bold">{{ total_batches }}</div>
-            </div></div>
-        </div>
-        <div class="col-md-3">
-            <div class="card text-center"><div class="card-body">
-                <div class="text-muted small">Completed</div>
-                <div class="fs-3 fw-bold text-success">{{ status_counts.Completed }}</div>
-            </div></div>
-        </div>
-        <div class="col-md-3">
-            <div class="card text-center"><div class="card-body">
-                <div class="text-muted small">Failed</div>
-                <div class="fs-3 fw-bold text-danger">{{ status_counts.Failed }}</div>
-            </div></div>
-        </div>
-        <div class="col-md-3">
-            <div class="card text-center"><div class="card-body">
-                <div class="text-muted small">Total Rows Received</div>
-                <div class="fs-3 fw-bold">{{ total_rows_received }}</div>
-            </div></div>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h5 mb-0" style="color: var(--jc-text);">Batch Processing Analytics</h1>
+    <a href="{% url 'kahero:upload' %}" class="btn btn-jc-primary btn-sm">Upload New Batch</a>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-3">
+        <div class="jc-card p-3 h-100 text-center">
+            <div class="text-muted small mb-1">Total Batches</div>
+            <div class="fs-4 fw-bold">{{ total_batches }}</div>
         </div>
     </div>
+    <div class="col-md-3">
+        <div class="jc-card p-3 h-100 text-center">
+            <div class="text-muted small mb-1">Completed</div>
+            <div class="fs-4 fw-bold" style="color: var(--jc-adequate);">{{ status_counts.Completed }}</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="jc-card p-3 h-100 text-center">
+            <div class="text-muted small mb-1">Failed</div>
+            <div class="fs-4 fw-bold" style="color: var(--jc-critical);">{{ status_counts.Failed }}</div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="jc-card p-3 h-100 text-center">
+            <div class="text-muted small mb-1">Total Rows Received</div>
+            <div class="fs-4 fw-bold">{{ total_rows_received }}</div>
+        </div>
+    </div>
+</div>
 
+<div class="jc-card p-3">
     <div class="table-responsive">
-    <table class="table table-sm table-hover bg-white">
+    <table class="table table-sm table-hover mb-0">
         <thead>
             <tr>
                 <th>Batch</th>
@@ -57,15 +58,14 @@
                 <td>{{ batch.uploaded_by.get_username }}</td>
                 <td>
                     {% if batch.has_warnings %}
-                    <span class="badge bg-warning text-dark" title="Completed, but some rows were skipped -- see batch detail for the row errors.">
+                    <span class="jc-badge jc-badge-low" title="Completed, but some rows were skipped -- see batch detail for the row errors.">
                         Completed (warnings)
                     </span>
                     {% else %}
-                    <span class="badge
-                        {% if batch.status == 'COMPLETED' %}bg-success
-                        {% elif batch.status == 'FAILED' %}bg-danger
-                        {% elif batch.status == 'PROCESSING' %}bg-info
-                        {% else %}bg-secondary{% endif %}">
+                    <span class="jc-badge
+                        {% if batch.status == 'COMPLETED' %}jc-badge-adequate
+                        {% elif batch.status == 'FAILED' %}jc-badge-critical
+                        {% else %}jc-badge-info{% endif %}">
                         {{ batch.get_status_display }}
                     </span>
                     {% endif %}
