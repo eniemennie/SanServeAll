@@ -8,6 +8,7 @@ import pytest
 from django.urls import reverse
 
 from apps.accounts.models import Branch, CashierPIN, Role, User
+from apps.accounts.services import PIN_LOCKOUT_THRESHOLD
 
 pytestmark = pytest.mark.django_db
 
@@ -165,6 +166,27 @@ class TestCashierPin:
         assert response.status_code == 200
         assert "pos_unlocked" not in client.session
         assert b"Incorrect PIN" in response.content
+
+    def test_lockout_after_threshold_failed_attempts_blocks_even_the_correct_pin(
+        self, client, cashier
+    ):
+        """This screen guards the same POS-unlock boundary as the
+        tap-to-select Cashier Lock flow and must get the same brute-force
+        protection -- previously this path called the unprotected
+        verify_cashier_pin, so unlimited guesses were possible here even
+        though CashierLockView was already locked down."""
+        client.force_login(cashier)
+        session = client.session
+        session["selected_branch_id"] = cashier.branch_id
+        session.save()
+
+        for _ in range(PIN_LOCKOUT_THRESHOLD):
+            client.post(reverse("accounts:cashier_pin"), {"pin": "0000"})
+
+        response = client.post(reverse("accounts:cashier_pin"), {"pin": "1234"})
+        assert response.status_code == 200
+        assert "pos_unlocked" not in client.session
+        assert b"Too many incorrect attempts" in response.content
 
 
 class TestLogout:
