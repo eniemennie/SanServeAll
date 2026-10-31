@@ -5,17 +5,21 @@ FR-04. Uses the raw HTTP API via `requests` rather than Google's SDK --
 one fewer dependency, and this only needs a single simple
 request/response, not the SDK's full feature surface.
 
-Uses the Gemini API (free tier via Google AI Studio -- no credit card,
-no expiration) rather than a paid provider, since this system's actual
-usage (a handful of one-sentence calls per night, see
-generate_insights_for_all_branches) is nowhere near the free tier's rate
-limits, and a capstone project with no maintenance budget shouldn't
-carry an ongoing paid dependency for this. Only aggregated, non-
-identifying data is ever sent (branch names, product names, computed
-risk levels -- never raw transactions or PII, matching the Responsible
-Use of AI data-minimization commitment already made elsewhere), which
-keeps the free tier's "prompts may be used to improve Google's
-products" caveat low-risk for this specific use case.
+Uses the Gemini API rather than Claude/OpenAI as FR-04 originally
+specified -- a confirmed deviation (discussed and approved with the
+project owner before switching, same as the ARIMA -> Holt-Winters swap
+in apps.forecasting.ml.forecast_model), made for the group's own
+financial reasons: a capstone project with no maintenance budget
+shouldn't carry an ongoing paid API dependency for a handful of one-
+sentence calls per night. Gemini's free tier (via Google AI Studio --
+no credit card, no expiration) comfortably covers this system's actual
+usage (see generate_insights_for_all_branches), nowhere near the free
+tier's rate limits. Only aggregated, non-identifying data is ever sent
+(branch names, product names, computed risk levels -- never raw
+transactions or PII, matching the Responsible Use of AI data-
+minimization commitment already made elsewhere), which keeps the free
+tier's "prompts may be used to improve Google's products" caveat
+low-risk for this specific use case.
 
 Falls back to a plain, clearly-labeled template message when no API key
 is configured or the API call fails -- the Decision Support System must
