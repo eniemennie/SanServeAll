@@ -27,6 +27,7 @@ from django_otp.decorators import otp_required
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from apps.accounts.models import Branch, Role, User
+from apps.inventory.models import Product
 from apps.accounts.permissions import role_required
 from apps.accounts.services import (
     generate_backup_codes,
@@ -405,11 +406,13 @@ def regenerate_backup_codes(request):
 @otp_required(login_url="accounts:admin_login")
 def admin_dashboard(request):
     """Dashboard Home (Fig. 3-19/3-28): Branch Performance, KPI cards,
-    Sales Analytics + Top Products, Resource Monitoring, and the
-    AI-Powered Insights feed. Protected by BOTH role (only OWNER_ADMIN)
-    and OTP verification (must have completed 2FA this session) --
-    demonstrates the full enforcement chain built in the Admin Shell
-    batch: Admin Login -> 2FA -> Branch Selection -> here.
+    Sales Analytics + Top Products, Resource Monitoring (raw materials),
+    Low Stock Orders Tracking, and the AI-Powered Insights feed.
+    Protected by BOTH role (only OWNER_ADMIN) and OTP verification (must
+    have completed 2FA this session) -- demonstrates the full enforcement
+    chain built in the Admin Shell batch: Admin Login -> 2FA -> here
+    (Branch Selection is no longer part of this chain -- see
+    TwoFactorVerifyView).
 
     Renamed from admin_dashboard_placeholder now that it renders real
     content rather than a placeholder; the URL name (accounts:admin_
@@ -420,9 +423,27 @@ def admin_dashboard(request):
     default to matching the reference screenshot's own default toggle
     states: Include Additional Sales ON, Exclude Discounts OFF, Exclude
     VAT OFF.
+
+    Branch Performance Overview is only meaningful when comparing
+    branches against each other -- once a specific branch is selected,
+    every other section on this page already shows that branch's own
+    numbers, so the template hides this section rather than repeating a
+    multi-branch comparison the admin didn't ask to see. Still computed
+    unconditionally here (cheap -- a handful of branches) so it's ready
+    the moment "All Branches" is selected again.
+
+    Resource Monitoring and Low Stock Orders Tracking are raw-materials
+    sections, deliberately NOT scoped to the selected branch: raw
+    materials only ever have Inventory rows at the commissary (Week 8's
+    design, same reasoning already applied to Production Output above
+    and to the Resource Management dashboard, Fig. 3-26) -- a branch
+    filter here would silently show empty results for Batangas/Lipa/
+    Alangilan every time, masking real restocking alerts rather than
+    scoping them usefully.
     """
     branch_id = request.GET.get("branch")
     selected_branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
+    commissary_branch = Branch.objects.filter(is_commissary=True, is_active=True).first()
 
     include_additional_sales = request.GET.get("additional", "1") == "1"
     exclude_discounts = request.GET.get("exclude_discounts") == "1"
@@ -435,9 +456,20 @@ def admin_dashboard(request):
         exclude_vat=exclude_vat,
     )
     branch_performance = analytics_services.get_branch_performance()
-    top_products = analytics_services.get_top_products(branch=selected_branch)
+    top_products = list(analytics_services.get_top_products(branch=selected_branch))
+    total_units_sold = analytics_services.get_total_units_sold(branch=selected_branch)
     forecast_label = forecasting_services.get_demand_forecast_label(branch=selected_branch)
     resource_status = inventory_services.get_resource_status_summary(branch=selected_branch)
+    material_resource_status = (
+        inventory_services.get_resource_status_summary(
+            branch=commissary_branch, product_type=Product.ProductType.MATERIAL
+        )
+        if commissary_branch
+        else None
+    )
+    material_low_stock_alerts = forecasting_services.get_resource_management_dashboard_data()[
+        "material_alerts"
+    ]
     production_output = production_services.get_total_output()
     insights = (
         AIInsight.objects.filter(branch=selected_branch)
@@ -463,6 +495,29 @@ def admin_dashboard(request):
     else:
         trend_chart = analytics_services.get_weekly_sales_trend_by_branch()
 
+    # Each shown product's share of total_units_sold, not of the top-N
+    # subset alone -- so an honest "Others" slice can absorb whatever the
+    # ranked list leaves out, and the shown percentages still add up to
+    # (approximately, after rounding) 100% of what was actually sold.
+    top_products_chart_data = []
+    shown_units = 0
+    if total_units_sold > 0:
+        for p in top_products:
+            pct = round((p["units_sold"] / total_units_sold) * 100)
+            shown_units += p["units_sold"]
+            top_products_chart_data.append(
+                {"name": p["product__name"], "units": p["units_sold"], "pct": pct}
+            )
+        others_units = total_units_sold - shown_units
+        if others_units > 0:
+            top_products_chart_data.append(
+                {
+                    "name": "Others",
+                    "units": others_units,
+                    "pct": round((others_units / total_units_sold) * 100),
+                }
+            )
+
     return render(
         request,
         "accounts/admin_dashboard.html",
@@ -475,6 +530,8 @@ def admin_dashboard(request):
             "top_products": top_products,
             "forecast_label": forecast_label,
             "resource_status": resource_status,
+            "material_resource_status": material_resource_status,
+            "material_low_stock_alerts": material_low_stock_alerts,
             "production_output": production_output,
             "insights": insights,
             "critical_alerts": critical_alerts,
@@ -482,9 +539,7 @@ def admin_dashboard(request):
             "peak_hour": peak_hour,
             "anomalies": anomalies,
             "trend_chart_json": json.dumps(trend_chart),
-            "top_products_json": json.dumps(
-                [{"name": p["product__name"], "units": p["units_sold"]} for p in top_products]
-            ),
+            "top_products_json": json.dumps(top_products_chart_data),
             "include_additional_sales": include_additional_sales,
             "exclude_discounts": exclude_discounts,
             "exclude_vat": exclude_vat,

@@ -287,6 +287,25 @@ def get_top_products(branch=None, days=30, limit=5):
     )
 
 
+def get_total_units_sold(branch=None, days=30):
+    """Total units sold across every product over the window -- the same
+    filter criteria as get_top_products (completed transactions, same
+    window/branch), used as the denominator for that panel's per-product
+    percentage share (Dashboard Home's Top Products pie chart). Kept as
+    its own small query rather than summing get_top_products' own
+    (limited, ranked) results, since the percentages need to reflect
+    every product sold, not just the top N shown."""
+    since = timezone.now() - timedelta(days=days)
+    items = SalesItem.objects.filter(
+        transaction__status=SalesTransaction.Status.COMPLETED,
+        transaction__completed_at__gte=since,
+    )
+    if branch is not None:
+        items = items.filter(transaction__branch=branch)
+
+    return items.aggregate(total=Sum("quantity"))["total"] or 0
+
+
 def get_product_performance(days=30):
     """Per-product performance and growth rate (Fig. 3-29): units sold in
     the current window vs. the equally-sized window immediately before

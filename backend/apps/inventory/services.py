@@ -79,7 +79,7 @@ def get_branch_inventory(branch, product_type=None, low_stock_only=False):
     return queryset
 
 
-def get_resource_status_summary(branch=None):
+def get_resource_status_summary(branch=None, product_type=None):
     """Stock-health snapshot for the Dashboard Home Resource Status KPI
     card (Fig. 3-19) and the Resource Monitoring list underneath it.
 
@@ -94,6 +94,13 @@ def get_resource_status_summary(branch=None):
     branch=None aggregates across every active, non-commissary branch
     (the Dashboard's "All Branches" state); a specific branch filters to
     just that one.
+
+    product_type=None (the default) includes every product type, same as
+    before this parameter existed -- the KPI card's "overall sufficiency"
+    is meant to cover everything tracked. Pass Product.ProductType.MATERIAL
+    to scope this to raw materials only (Dashboard Home's Resource
+    Monitoring list, Row N), typically combined with branch=<the
+    commissary> since materials only ever have Inventory rows there.
     """
     from apps.accounts.models import Branch
 
@@ -104,6 +111,8 @@ def get_resource_status_summary(branch=None):
         queryset = queryset.filter(
             branch__in=Branch.objects.filter(is_active=True, is_commissary=False)
         )
+    if product_type is not None:
+        queryset = queryset.filter(product__product_type=product_type)
 
     items = list(queryset)
     critical_items = [i for i in items if i.is_out_of_stock]
