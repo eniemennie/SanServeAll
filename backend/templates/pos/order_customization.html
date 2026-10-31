@@ -2,8 +2,7 @@
 {% block title %}Customize Order - SanServeAll{% endblock %}
 {% block content %}
 <div class="container d-flex align-items-center justify-content-center" style="min-height: 100vh;">
-    <div class="card shadow-sm" style="max-width: 420px; width: 100%;">
-        <div class="card-body p-4">
+    <div class="jc-card shadow-sm p-4" style="max-width: 420px; width: 100%;">
             <h1 class="h4 mb-1">{{ item.display_name }}</h1>
             <p class="text-muted small mb-3">Customize this item</p>
 
@@ -51,11 +50,10 @@
                            value="{{ item.customizations.notes }}" class="form-control">
                 </div>
                 <div class="d-flex gap-2">
-                    <a href="{% url 'pos:ordering' %}" class="btn btn-outline-secondary w-50">Cancel</a>
-                    <button type="submit" class="btn btn-primary w-50">Save</button>
+                    <a href="{% url 'pos:ordering' %}" class="btn btn-jc-outline w-50">Cancel</a>
+                    <button type="submit" class="btn btn-jc-primary w-50">Save</button>
                 </div>
             </form>
-        </div>
     </div>
 </div>
 {% endblock %}
