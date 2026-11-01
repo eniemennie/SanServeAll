@@ -143,6 +143,21 @@ class TestGetBranchInventory:
         result = services.get_branch_inventory(branch, low_stock_only=True)
         assert len(result) == 1
 
+    def test_discontinued_product_is_excluded(self, branch):
+        """Backend gap assessment: a discontinued product (is_active=
+        False) with leftover stock was still showing up here as if it
+        were a normal, orderable item."""
+        discontinued = Product.objects.create(
+            name="Discontinued Item", price="10.00", is_active=False
+        )
+        active = Product.objects.create(name="Active Item", price="10.00")
+        Inventory.objects.create(branch=branch, product=discontinued, quantity_on_hand=25)
+        Inventory.objects.create(branch=branch, product=active, quantity_on_hand=10)
+
+        result = services.get_branch_inventory(branch)
+        assert len(result) == 1
+        assert result[0].product == active
+
 
 class TestAdjustStock:
     def test_positive_adjustment_increases_stock(self, branch):
@@ -405,6 +420,21 @@ class TestResourceStatusSummary:
         assert summary["total_items"] == 0
         assert summary["sufficiency_pct"] == 100
 
+    def test_discontinued_product_does_not_count_toward_sufficiency(self, branch):
+        """A discontinued item shouldn't count toward or against the
+        sufficiency percentage shown on the Dashboard KPI card."""
+        discontinued = Product.objects.create(
+            name="Discontinued Item", price="10.00", reorder_threshold=10, is_active=False
+        )
+        Inventory.objects.create(branch=branch, product=discontinued, quantity_on_hand=0)
+        adequate = Product.objects.create(name="Flour", price="45.00", reorder_threshold=10)
+        Inventory.objects.create(branch=branch, product=adequate, quantity_on_hand=50)
+
+        summary = services.get_resource_status_summary(branch=branch)
+        assert summary["total_items"] == 1
+        assert summary["critical_count"] == 0
+        assert summary["sufficiency_pct"] == 100
+
 
 class TestProductAvailabilityEnhancements:
     """Product Availability batch: real cross-branch stock, stats,
@@ -429,6 +459,19 @@ class TestProductAvailabilityEnhancements:
         assert stats["critical_count"] == 1
         assert stats["available_count"] == 1
         assert stats["total_stock"] == 50
+
+    def test_discontinued_product_is_excluded_from_the_list_and_stats(
+        self, owner_client, branch
+    ):
+        discontinued = Product.objects.create(
+            name="Discontinued Item", price="10.00", is_active=False
+        )
+        Inventory.objects.create(branch=branch, product=discontinued, quantity_on_hand=25)
+
+        response = owner_client.get(reverse("inventory:product_management"))
+        assert response.context["stats"]["total_products"] == 0
+        assert len(response.context["items"]) == 0
+        assert b"Discontinued Item" not in response.content
 
     def test_total_stock_stat_does_not_go_negative_from_an_oversold_item(
         self, owner_client, branch, other_branch
