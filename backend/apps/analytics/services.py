@@ -429,3 +429,55 @@ def get_low_stock_alert_count(branch):
     not a second source of truth for what counts as low stock."""
     items = get_branch_inventory(branch, low_stock_only=True)
     return len(items)
+
+
+def get_sales_history(branch=None, cashier_id=None, date_from=None, date_to=None):
+    """Transaction-level Sales History (backend gap assessment: "add a
+    filterable sales-history view (branch/cashier/date)"). Unlike the
+    other functions in this module, which aggregate across many
+    transactions, this returns the individual completed transactions
+    themselves -- for looking up or auditing a specific sale, not for
+    dashboard totals.
+
+    Only COMPLETED transactions -- a DRAFT (abandoned mid-order) or
+    VOIDED sale was never a real, collected sale and has no place in a
+    sales history (same exclusion get_sales_summary already applies).
+
+    `date_from`/`date_to` are inclusive calendar dates (not datetimes) in
+    the business's own local time (settings.TIME_ZONE), matching how an
+    Owner/Admin actually thinks about "show me Tuesday's sales" rather
+    than requiring them to reason about UTC boundaries.
+    """
+    qs = (
+        SalesTransaction.objects.filter(status=SalesTransaction.Status.COMPLETED)
+        .select_related("branch", "cashier")
+        .prefetch_related("items")
+    )
+
+    if branch is not None:
+        qs = qs.filter(branch=branch)
+    if cashier_id:
+        qs = qs.filter(cashier_id=cashier_id)
+    if date_from:
+        qs = qs.filter(completed_at__date__gte=date_from)
+    if date_to:
+        qs = qs.filter(completed_at__date__lte=date_to)
+
+    return qs.order_by("-completed_at")
+
+
+def get_cashiers_with_sales_history():
+    """Cashiers to offer in the Sales History filter dropdown -- everyone
+    who has at least one COMPLETED transaction, including an account
+    since deactivated (a past sale by a now-former cashier is still part
+    of the history and still needs to be findable), rather than every
+    currently-active Branch Staff account regardless of whether they've
+    ever actually made a sale."""
+    from django.contrib.auth import get_user_model
+
+    cashier_ids = (
+        SalesTransaction.objects.filter(status=SalesTransaction.Status.COMPLETED)
+        .values_list("cashier_id", flat=True)
+        .distinct()
+    )
+    return get_user_model().objects.filter(pk__in=cashier_ids).order_by("username")
