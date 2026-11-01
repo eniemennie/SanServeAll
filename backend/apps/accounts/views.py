@@ -30,9 +30,14 @@ from apps.accounts.models import Branch, Role, User
 from apps.inventory.models import Product
 from apps.accounts.permissions import role_required
 from apps.accounts.services import (
+    AccountManagementError,
+    create_staff_account,
     generate_backup_codes,
+    get_manageable_accounts,
     get_selectable_branches,
     get_selectable_cashiers,
+    reset_cashier_pin,
+    update_staff_account,
     user_can_select_branch,
     user_requires_cashier_pin,
     verify_and_consume_backup_code,
@@ -543,5 +548,102 @@ def admin_dashboard(request):
             "include_additional_sales": include_additional_sales,
             "exclude_discounts": exclude_discounts,
             "exclude_vat": exclude_vat,
+        },
+    )
+
+
+@role_required(Role.OWNER_ADMIN)
+@otp_required(login_url="accounts:admin_login")
+def account_management(request):
+    """Account Management (backend gap assessment finding: no in-app way
+    to create/edit a staff account, assign branch/role, or reset a PIN --
+    today this is only possible via a one-off management command
+    (create_branch_cashier_placeholders) or the raw Django admin).
+    Protected by both role AND OTP verification, same as admin_dashboard
+    -- creating accounts and generating PINs is at least as sensitive as
+    anything else gated that way.
+
+    Handles listing + creating here; editing an existing account and
+    resetting its PIN are handled by account_edit below, since those
+    need a target user already in hand.
+    """
+    error = None
+    generated_pin = None
+    created_username = None
+
+    if request.method == "POST":
+        try:
+            user, generated_pin = create_staff_account(
+                username=request.POST.get("username", ""),
+                role_name=request.POST.get("role", ""),
+                branch_id=request.POST.get("branch") or None,
+                password=request.POST.get("password", ""),
+                first_name=request.POST.get("first_name", ""),
+                last_name=request.POST.get("last_name", ""),
+                email=request.POST.get("email", ""),
+                employee_id=request.POST.get("employee_id", ""),
+                phone_number=request.POST.get("phone_number", ""),
+            )
+            created_username = user.username
+        except AccountManagementError as exc:
+            error = str(exc)
+
+    return render(
+        request,
+        "accounts/account_management.html",
+        {
+            "active_nav": "accounts",
+            "accounts": get_manageable_accounts(),
+            "branches": Branch.objects.filter(is_active=True).order_by("name"),
+            "role_choices": Role.ROLE_CHOICES,
+            "error": error,
+            "generated_pin": generated_pin,
+            "created_username": created_username,
+        },
+    )
+
+
+@role_required(Role.OWNER_ADMIN)
+@otp_required(login_url="accounts:admin_login")
+def account_edit(request, user_id):
+    """Edit an existing staff account (branch, active status, contact
+    info) and/or reset its PIN, distinguished by the submitted form's
+    `action` field so both actions live on one page without a redirect
+    losing the just-generated PIN. Role is deliberately NOT editable
+    here -- see update_staff_account's docstring for why."""
+    target = get_object_or_404(User, pk=user_id, role__isnull=False)
+    error = None
+    generated_pin = None
+
+    if request.method == "POST":
+        if request.POST.get("action") == "reset_pin":
+            try:
+                generated_pin = reset_cashier_pin(target)
+            except AccountManagementError as exc:
+                error = str(exc)
+        else:
+            try:
+                update_staff_account(
+                    target,
+                    branch_id=request.POST.get("branch") or None,
+                    is_active=request.POST.get("is_active") == "on",
+                    employee_id=request.POST.get("employee_id", ""),
+                    phone_number=request.POST.get("phone_number", ""),
+                    first_name=request.POST.get("first_name", ""),
+                    last_name=request.POST.get("last_name", ""),
+                )
+                return redirect("accounts:account_management")
+            except AccountManagementError as exc:
+                error = str(exc)
+
+    return render(
+        request,
+        "accounts/account_edit.html",
+        {
+            "active_nav": "accounts",
+            "target": target,
+            "branches": Branch.objects.filter(is_active=True).order_by("name"),
+            "error": error,
+            "generated_pin": generated_pin,
         },
     )

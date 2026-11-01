@@ -188,3 +188,161 @@ def verify_and_consume_backup_code(user, raw_code):
 
 def count_remaining_backup_codes(user):
     return TwoFactorBackupCode.objects.filter(user=user, used_at__isnull=True).count()
+
+
+class AccountManagementError(Exception):
+    """Raised for any reason a staff-account create/edit/PIN-reset can't
+    be applied (duplicate username, missing branch, etc.)."""
+
+
+PIN_ALPHABET = string.digits
+
+
+def _generate_pin():
+    """A fresh random 4-digit PIN -- same shape as the existing
+    PLACEHOLDER_PIN convention, but actually random per account rather
+    than a single known value, since this is meant to be handed to a
+    real cashier rather than left as a documented placeholder."""
+    return "".join(secrets.choice(PIN_ALPHABET) for _ in range(4))
+
+
+def get_manageable_accounts():
+    """Every account an Owner/Admin might need to administer through the
+    in-app Account Management screen (Row: backend gap assessment --
+    "build an in-app account-management view"). Excludes bare Django
+    superuser/staff accounts with no role assigned (e.g. one created via
+    `createsuperuser` for /admin/ access) -- those aren't SanServeAll
+    staff accounts and have nothing for this screen to manage."""
+    return (
+        get_user_model()
+        .objects.filter(role__isnull=False)
+        .select_related("role", "branch")
+        .order_by("role__name", "branch__name", "username")
+    )
+
+
+def create_staff_account(
+    *,
+    username,
+    role_name,
+    branch_id=None,
+    password="",
+    first_name="",
+    last_name="",
+    email="",
+    employee_id="",
+    phone_number="",
+):
+    """Creates a new staff account from the Account Management screen.
+
+    Mirrors the two existing account "shapes" already established
+    elsewhere in this codebase rather than inventing a third:
+      - BRANCH_STAFF: PIN-only login (CashierLockView/CashierPinView),
+        same as create_branch_cashier_placeholders.py -- gets an
+        unusable password and a freshly generated CashierPIN, returned
+        here so the caller can show it to the admin exactly once.
+      - OWNER_ADMIN / COMMISSARY_STAFF: password login -- the admin
+        supplies the initial password directly (no separate PIN).
+
+    Returns (user, generated_pin). generated_pin is None for the
+    password-login roles.
+    """
+    username = (username or "").strip()
+    if not username:
+        raise AccountManagementError("Username is required.")
+
+    User = get_user_model()
+    if User.objects.filter(username__iexact=username).exists():
+        raise AccountManagementError("That username is already taken.")
+
+    try:
+        role = Role.objects.get(name=role_name)
+    except Role.DoesNotExist:
+        raise AccountManagementError("Select a valid role.")
+
+    branch = None
+    if role.name in (Role.BRANCH_STAFF, Role.COMMISSARY_STAFF):
+        if not branch_id:
+            raise AccountManagementError("Select a branch for this role.")
+        try:
+            branch = Branch.objects.get(pk=branch_id, is_active=True)
+        except (Branch.DoesNotExist, ValueError, TypeError):
+            raise AccountManagementError("Select a valid, active branch.")
+
+    if role.name != Role.BRANCH_STAFF and not password:
+        raise AccountManagementError("A password is required for this role.")
+
+    user = User(
+        username=username,
+        role=role,
+        branch=branch,
+        first_name=first_name.strip(),
+        last_name=last_name.strip(),
+        email=email.strip(),
+        employee_id=employee_id.strip() or None,
+        phone_number=phone_number.strip(),
+    )
+
+    generated_pin = None
+    if role.name == Role.BRANCH_STAFF:
+        user.set_unusable_password()
+    else:
+        user.set_password(password)
+
+    user.save()
+
+    if role.name == Role.BRANCH_STAFF:
+        generated_pin = _generate_pin()
+        pin_record = CashierPIN(user=user)
+        pin_record.set_pin(generated_pin)
+        pin_record.save()
+
+    return user, generated_pin
+
+
+def update_staff_account(
+    user, *, branch_id=None, is_active=True, employee_id="", phone_number="", first_name="", last_name=""
+):
+    """Edits an existing staff account. Role is deliberately NOT editable
+    here -- changing role would orphan the account's PIN/password setup
+    (see create_staff_account's two shapes above), which is a bigger,
+    riskier change than this screen's stated scope ("assign branch/role,
+    reset PIN"). Reassigning role is still possible via Django admin if
+    ever genuinely needed; this screen covers the routine edits (branch
+    transfer, deactivation, contact info) that come up day to day.
+    """
+    if user.role and user.role.name in (Role.BRANCH_STAFF, Role.COMMISSARY_STAFF):
+        if not branch_id:
+            raise AccountManagementError("Select a branch for this role.")
+        try:
+            user.branch = Branch.objects.get(pk=branch_id, is_active=True)
+        except (Branch.DoesNotExist, ValueError, TypeError):
+            raise AccountManagementError("Select a valid, active branch.")
+
+    user.is_active = is_active
+    user.employee_id = employee_id.strip() or None
+    user.phone_number = phone_number.strip()
+    user.first_name = first_name.strip()
+    user.last_name = last_name.strip()
+    user.save()
+    return user
+
+
+def reset_cashier_pin(user):
+    """Generates and sets a fresh random PIN for a BRANCH_STAFF account,
+    clearing any existing lockout too -- the Account Management screen's
+    "reset PIN" action for a cashier who forgot theirs or is suspected of
+    having a compromised one. Returns the new PIN in plaintext, the only
+    moment it exists in that form; the caller must show it to the admin
+    immediately, same one-time-reveal pattern as generate_backup_codes."""
+    if not (user.role and user.role.name == Role.BRANCH_STAFF):
+        raise AccountManagementError("Only Branch Staff accounts have a PIN to reset.")
+
+    new_pin = _generate_pin()
+    pin_record, _ = CashierPIN.objects.get_or_create(user=user)
+    pin_record.set_pin(new_pin)
+    pin_record.is_active = True
+    pin_record.failed_attempts = 0
+    pin_record.locked_until = None
+    pin_record.save()
+    return new_pin
