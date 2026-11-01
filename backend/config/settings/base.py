@@ -112,6 +112,18 @@ APSCHEDULER_AUTOSTART = True
 # than failing when this isn't configured.
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
+# Email (backend gap assessment: password-reset flow needs one to send
+# reset links). Console backend for now, by deliberate decision -- it
+# prints the email (including the reset link) to the server log instead
+# of actually sending it, which is enough to build and exercise the full
+# flow without signing up for a provider first. Override EMAIL_BACKEND
+# (and DEFAULT_FROM_EMAIL) via env vars once a real SMTP/API provider is
+# chosen; nothing else in the password-reset code needs to change.
+EMAIL_BACKEND = os.environ.get(
+    "EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend"
+)
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "no-reply@sanserveall.local")
+
 # Auth flow (Week 3): unauthenticated requests to a login-required view
 # land on the Login/Start Screen; a successful login's default next-step
 # is Branch Selection unless a view overrides get_success_url() itself.
