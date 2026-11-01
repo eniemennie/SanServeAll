@@ -16,6 +16,24 @@ class Product(models.Model):
         FINISHED_GOOD = "FINISHED_GOOD", "Finished Good"
         MATERIAL = "MATERIAL", "Raw Material"
 
+    class UnitOfMeasure(models.TextChoices):
+        """Backend gap assessment item 28: quantities everywhere else in
+        this project (quantity_on_hand, quantity_used, etc.) are plain
+        integers with no unit attached -- 10 could mean 10 pieces, kg, or
+        liters depending on the item. Purely descriptive for now (no
+        conversion math exists or is needed yet); it exists so a person
+        reading a quantity knows what it actually counts, and so any
+        future recipe/BOM math has a real unit to validate against
+        instead of silently assuming everything is in the same unit."""
+
+        PIECE = "PIECE", "pc"
+        KILOGRAM = "KILOGRAM", "kg"
+        GRAM = "GRAM", "g"
+        LITER = "LITER", "L"
+        MILLILITER = "MILLILITER", "mL"
+        PACK = "PACK", "pack"
+        BOX = "BOX", "box"
+
     class Category(models.TextChoices):
         COFFEE = "COFFEE", "Coffee"
         COFFEE_FRAPPE = "COFFEE_FRAPPE", "Coffee Frappe"
@@ -50,6 +68,9 @@ class Product(models.Model):
     # (Row 6.4). Zero means "don't flag" rather than "always flag" -- a
     # product with no threshold configured yet shouldn't spam alerts.
     reorder_threshold = models.PositiveIntegerField(default=0)
+    unit_of_measure = models.CharField(
+        max_length=16, choices=UnitOfMeasure.choices, default=UnitOfMeasure.PIECE
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
