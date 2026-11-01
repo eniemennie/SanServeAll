@@ -191,6 +191,45 @@ class TestAdjustStock:
         assert movement.quantity_change == 5
 
 
+class TestGetLowStockAlertsForAllBranches:
+    """Backend gap assessment item 20: the data behind proactive
+    low-stock alerting. Reuses get_resource_status_summary's own
+    detection, so this can never disagree with what the Dashboard/
+    Monitoring screens show for the same branch."""
+
+    def test_branch_with_nothing_low_is_excluded(self, branch):
+        healthy = Product.objects.create(name="Flour", price="45.00", reorder_threshold=10)
+        Inventory.objects.create(branch=branch, product=healthy, quantity_on_hand=50)
+
+        alerts = services.get_low_stock_alerts_for_all_branches()
+        assert alerts == []
+
+    def test_branch_with_a_critical_item_is_included(self, branch, other_branch):
+        healthy = Product.objects.create(name="Flour", price="45.00", reorder_threshold=10)
+        Inventory.objects.create(branch=other_branch, product=healthy, quantity_on_hand=50)
+
+        critical = Product.objects.create(name="Cashews", price="650.00", reorder_threshold=10)
+        Inventory.objects.create(branch=branch, product=critical, quantity_on_hand=0)
+
+        alerts = services.get_low_stock_alerts_for_all_branches()
+        assert len(alerts) == 1
+        assert alerts[0]["branch"] == branch
+        assert alerts[0]["critical_count"] == 1
+
+    def test_includes_the_commissary_branch_too(self):
+        """Raw-material shortages at the commissary matter just as much
+        as finished-good shortages at a native branch."""
+        commissary = Branch.objects.create(name="Central Kitchen", code="CK", is_commissary=True)
+        material = Product.objects.create(
+            name="Milk", price="80.00", reorder_threshold=20, product_type=Product.ProductType.MATERIAL
+        )
+        Inventory.objects.create(branch=commissary, product=material, quantity_on_hand=5)
+
+        alerts = services.get_low_stock_alerts_for_all_branches()
+        assert len(alerts) == 1
+        assert alerts[0]["branch"] == commissary
+
+
 class TestCreateProduct:
     def test_creates_a_product_with_given_fields(self):
         product = services.create_product(

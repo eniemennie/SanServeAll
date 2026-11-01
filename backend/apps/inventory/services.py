@@ -214,3 +214,27 @@ def create_product(name, price, product_type, reorder_threshold=0, branch_ids=No
             get_or_create_inventory_row(branch, product)
 
     return product
+
+
+def get_low_stock_alerts_for_all_branches():
+    """Per-branch low-stock status, across every active branch
+    (including the commissary, so raw-material shortages are caught
+    too) -- the basis for proactive low-stock alerting (backend gap
+    assessment item 20).
+
+    Reuses get_resource_status_summary's own real detection logic
+    rather than building a second, parallel "is this low" check, so this
+    can never disagree with what the Dashboard/Monitoring screens
+    already show for the same branch.
+
+    Returns only the branches that actually have a critical or low-stock
+    item right now, each with that branch's own summary dict merged in.
+    """
+    from apps.accounts.models import Branch
+
+    alerts = []
+    for branch in Branch.objects.filter(is_active=True).order_by("name"):
+        summary = get_resource_status_summary(branch=branch)
+        if summary["critical_count"] or summary["low_count"]:
+            alerts.append({"branch": branch, **summary})
+    return alerts
