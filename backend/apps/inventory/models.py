@@ -158,6 +158,12 @@ class InventoryTransaction(models.Model):
         # confirmed.
         TRANSFER_OUT = "TRANSFER_OUT", "Transfer Out"
         TRANSFER_IN = "TRANSFER_IN", "Transfer In"
+        # Backend gap assessment item 24: a cancelled StockTransferOrder
+        # (PROCESSING or IN_TRANSIT only -- DELIVERED is final) returns
+        # the quantity to the commissary's own Inventory. Logged
+        # separately from TRANSFER_OUT/IN so the audit trail shows a
+        # cancellation happened, not an ordinary second transfer.
+        TRANSFER_CANCELLED = "TRANSFER_CANCELLED", "Transfer Cancelled"
 
     branch = models.ForeignKey("accounts.Branch", on_delete=models.PROTECT)
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
