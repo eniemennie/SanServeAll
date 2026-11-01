@@ -37,9 +37,14 @@
 
 <div class="jc-card p-3 mb-4">
     <div class="fw-semibold mb-2">Critical Alerts &amp; Restocking Recommendations</div>
+    <p class="text-muted small mb-2">
+        Based on trailing 30-day actual sales, not the Holt-Winters forecast on the
+        <a href="{% url 'forecasting:forecasting_dashboard' %}">Forecasting</a> page &mdash;
+        the two are tracked separately so a short-horizon prediction can't skew how much to reorder.
+    </p>
     <div class="table-responsive">
     <table class="table table-sm mb-0">
-        <thead><tr><th>Product</th><th>Branch</th><th>Stock</th><th>Days Left</th><th>Recommended Reorder</th></tr></thead>
+        <thead><tr><th>Product</th><th>Branch</th><th>Stock</th><th>Days Left</th><th>Recommended Reorder (30-day avg)</th></tr></thead>
         <tbody>
             {% for alert in critical_alerts %}
             <tr>
