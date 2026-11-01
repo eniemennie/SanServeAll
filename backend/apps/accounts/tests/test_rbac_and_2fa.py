@@ -175,6 +175,48 @@ class TestAdminLogin:
         assert response.status_code == 200
         assert not response.wsgi_request.user.is_authenticated
 
+    def test_locks_out_after_threshold_wrong_passwords_even_the_correct_one(
+        self, client, admin
+    ):
+        """Previously unlimited -- any number of wrong passwords could be
+        tried against the admin login with no lockout at all, unlike the
+        Cashier PIN flow which already had one."""
+        from apps.accounts.services import LOGIN_LOCKOUT_THRESHOLD
+
+        for _ in range(LOGIN_LOCKOUT_THRESHOLD):
+            client.post(
+                reverse("accounts:admin_login"),
+                {"email": "owner@example.com", "password": "wrongpassword"},
+            )
+
+        response = client.post(
+            reverse("accounts:admin_login"),
+            {"email": "owner@example.com", "password": "adminpass123"},
+        )
+        assert response.status_code == 200
+        assert not response.wsgi_request.user.is_authenticated
+        assert b"Too many incorrect attempts" in response.content
+
+    def test_a_correct_password_on_the_wrong_role_does_not_count_toward_lockout(
+        self, client, cashier
+    ):
+        """A Branch Staff account's own correct password, tried on the
+        admin-only door, is refused -- but shouldn't move that account
+        toward locking its REAL login path, since the attacker didn't
+        fail to guess that account's password."""
+        cashier.email = "cashier@example.com"
+        cashier.save()
+
+        for _ in range(10):
+            client.post(
+                reverse("accounts:admin_login"),
+                {"email": "cashier@example.com", "password": "testpass123"},
+            )
+
+        cashier.refresh_from_db()
+        assert cashier.failed_attempts == 0
+        assert cashier.locked_until is None
+
 
 class TestTwoFactorSetup:
     def test_setup_page_shows_a_secret(self, client, admin):

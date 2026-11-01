@@ -14,7 +14,6 @@ import io
 import json
 
 import qrcode
-from django.contrib.auth import authenticate
 from django.contrib.auth import login as auth_login
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_required
@@ -30,6 +29,7 @@ from apps.accounts.models import Branch, Role, User
 from apps.inventory.models import Product
 from apps.accounts.permissions import role_required
 from apps.accounts.services import (
+    authenticate_with_lockout,
     generate_backup_codes,
     get_selectable_branches,
     get_selectable_cashiers,
@@ -246,17 +246,15 @@ class AdminLoginView(View):
         password = request.POST.get("password", "")
 
         candidate = User.objects.filter(email__iexact=email).first()
-        user = None
-        if candidate is not None:
-            authed = authenticate(request, username=candidate.username, password=password)
-            if authed is not None and authed.role and authed.role.name == Role.OWNER_ADMIN:
-                user = authed
+        user, lockout_error = authenticate_with_lockout(
+            request, candidate, password, Role.OWNER_ADMIN
+        )
 
         if user is None:
             return render(
                 request,
                 self.template_name,
-                {"error": "Invalid email or password."},
+                {"error": lockout_error or "Invalid email or password."},
             )
 
         auth_login(request, user)
@@ -296,16 +294,16 @@ class CommissaryLoginView(View):
         username = request.POST.get("username", "").strip()
         password = request.POST.get("password", "")
 
-        authed = authenticate(request, username=username, password=password)
-        user = None
-        if authed is not None and authed.role and authed.role.name == Role.COMMISSARY_STAFF:
-            user = authed
+        candidate = User.objects.filter(username__iexact=username).first()
+        user, lockout_error = authenticate_with_lockout(
+            request, candidate, password, Role.COMMISSARY_STAFF
+        )
 
         if user is None:
             return render(
                 request,
                 self.template_name,
-                {"error": "Invalid username or password."},
+                {"error": lockout_error or "Invalid username or password."},
             )
 
         auth_login(request, user)

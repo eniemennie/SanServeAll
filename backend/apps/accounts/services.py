@@ -10,7 +10,7 @@ import secrets
 import string
 from datetime import timedelta
 
-from django.contrib.auth import get_user_model
+from django.contrib.auth import authenticate, get_user_model
 from django.utils import timezone
 
 from apps.accounts.models import Branch, CashierPIN, Role, TwoFactorBackupCode
@@ -131,6 +131,72 @@ def verify_cashier_pin_with_lockout(user, raw_pin):
 
     pin_record.save()
     return False, "Incorrect PIN. Please try again."
+
+
+LOGIN_LOCKOUT_THRESHOLD = 5
+LOGIN_LOCKOUT_DURATION_MINUTES = 5
+
+
+def authenticate_with_lockout(request, candidate, password, required_role):
+    """Password-based login with the same brute-force lockout policy as
+    verify_cashier_pin_with_lockout above -- for the two custom
+    password-door views (AdminLoginView, CommissaryLoginView) that
+    previously had no attempt limit at all, unlike the PIN-based Cashier
+    flow.
+
+    `candidate` is the User row matched by email/username before this is
+    called (or None if no such account exists) -- this function doesn't
+    look it up itself, so the caller's own "don't leak which accounts
+    exist" wording stays exactly as each view already has it for every
+    outcome except a genuine lockout.
+
+    A correct password for the wrong role (e.g. a Branch Staff account's
+    real password entered on the Admin door) is refused but deliberately
+    NOT counted as a failed attempt -- the attacker didn't fail to guess
+    that account's password, so it shouldn't move that account toward a
+    lockout of its real login path.
+
+    Returns (user_or_None, error_message_or_None). A non-None error
+    message means "show this specific message" (currently only the
+    lockout case); None means the caller should show its own generic
+    invalid-credentials copy.
+    """
+    if candidate is not None and candidate.is_locked():
+        minutes_left = max(
+            1, int((candidate.locked_until - timezone.now()).total_seconds() // 60) + 1
+        )
+        return None, f"Too many incorrect attempts. Try again in {minutes_left} minute(s)."
+
+    # Always run a real authenticate() call, even with no matching
+    # account, so a nonexistent email/username takes the same code path
+    # as a wrong password for a real one rather than short-circuiting.
+    username = candidate.username if candidate is not None else "__no_such_account__"
+    authed = authenticate(request, username=username, password=password)
+
+    if authed is None:
+        if candidate is not None:
+            candidate.failed_attempts += 1
+            if candidate.failed_attempts >= LOGIN_LOCKOUT_THRESHOLD:
+                candidate.locked_until = timezone.now() + timedelta(
+                    minutes=LOGIN_LOCKOUT_DURATION_MINUTES
+                )
+                candidate.failed_attempts = 0
+                candidate.save(update_fields=["failed_attempts", "locked_until"])
+                return None, (
+                    f"Too many incorrect attempts. Try again in "
+                    f"{LOGIN_LOCKOUT_DURATION_MINUTES} minutes."
+                )
+            candidate.save(update_fields=["failed_attempts"])
+        return None, None
+
+    if not (authed.role and authed.role.name == required_role):
+        return None, None
+
+    if candidate.failed_attempts or candidate.locked_until:
+        candidate.failed_attempts = 0
+        candidate.locked_until = None
+        candidate.save(update_fields=["failed_attempts", "locked_until"])
+    return authed, None
 
 
 BACKUP_CODE_COUNT = 10
