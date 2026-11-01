@@ -219,6 +219,14 @@ def advance_stock_transfer_status(order, new_status):
     branch's own Inventory actually receives the stock; while IN_TRANSIT,
     the quantity is accounted for by this order alone, not counted as
     available at either branch.
+
+    Backend gap assessment item 25: `new_status` is validated against the
+    real set of status values before it's used anywhere, including in an
+    error message -- `StockTransferOrder.Status(new_status)` raises a
+    bare ValueError for anything that isn't a recognized value (garbage
+    input, or simply a missing/None POST field), which previously
+    surfaced as an uncaught 500 instead of the StockTransferError the
+    view already knows how to handle gracefully.
     """
     allowed_next = _NEXT_TRANSFER_STATUS.get(order.status)
     if allowed_next is None:
@@ -226,6 +234,9 @@ def advance_stock_transfer_status(order, new_status):
             f"Order is already {order.get_status_display()} -- "
             "no further status change is possible."
         )
+    valid_statuses = {choice.value for choice in StockTransferOrder.Status}
+    if new_status not in valid_statuses:
+        raise StockTransferError(f"'{new_status}' is not a recognized stock transfer status.")
     if new_status != allowed_next:
         raise StockTransferError(
             f"Cannot move from {order.get_status_display()} directly to "
