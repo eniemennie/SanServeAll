@@ -5,6 +5,7 @@ views (Row 7.1, 7.4).
 """
 
 import io
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -200,6 +201,67 @@ class TestIngestion:
         # has_warnings must flag that it wasn't a clean import.
         assert batch.status == KaheroImportBatch.Status.COMPLETED
         assert batch.has_warnings is True
+
+
+class TestCatchAllExceptionHandling:
+    """Backend gap assessment item 27: an unanticipated exception (a DB
+    issue, or anything else nobody wrote a specific handler for) must
+    never crash the request or leave the batch stuck at PROCESSING --
+    it must always resolve to a terminal FAILED status with the error
+    logged, same as any other, anticipated failure."""
+
+    def test_unexpected_error_during_parsing_fails_the_batch_cleanly(
+        self, kahero_branch, owner
+    ):
+        with patch(
+            "apps.kahero_integration.services.parse_kahero_file",
+            side_effect=RuntimeError("boom"),
+        ):
+            batch = services.process_kahero_upload(kahero_branch, owner, _make_csv(VALID_CSV))
+
+        assert batch.status == KaheroImportBatch.Status.FAILED
+        assert batch.completed_at is not None
+        assert "unexpected error" in batch.error_log[0]["message"].lower()
+
+    def test_unexpected_error_during_ingestion_fails_the_whole_batch_cleanly(
+        self, kahero_branch, owner, product
+    ):
+        with patch(
+            "apps.kahero_integration.services._ingest_rows",
+            side_effect=RuntimeError("boom"),
+        ):
+            batch = services.process_kahero_upload(kahero_branch, owner, _make_csv(VALID_CSV))
+
+        assert batch.status == KaheroImportBatch.Status.FAILED
+        assert batch.completed_at is not None
+        assert "unexpected error" in batch.error_log[0]["message"].lower()
+        # The batch never gets stuck at PROCESSING -- it always reaches
+        # a terminal status, even when the failure was unanticipated.
+        assert batch.status != KaheroImportBatch.Status.PROCESSING
+
+    def test_unexpected_error_on_one_row_is_skipped_not_fatal_to_the_batch(
+        self, kahero_branch, owner, product
+    ):
+        """A single bad row raising something nobody anticipated (here,
+        simulated via a broken date parse) must be recorded as a
+        row-level error and skipped -- the row(s) around it must still
+        be ingested, same tolerance as the already-handled "product not
+        found" / "invalid price" cases."""
+        csv_text = (
+            "transaction_date,product_name,quantity,unit_price\n"
+            "2026-08-01,Spanish Latte,2,125.00\n"
+            "2026-08-01,Spanish Latte,1,125.00\n"
+        )
+        with patch(
+            "apps.kahero_integration.services._parse_transaction_date",
+            side_effect=[RuntimeError("boom"), services._parse_transaction_date("2026-08-01")],
+        ):
+            batch = services.process_kahero_upload(kahero_branch, owner, _make_csv(csv_text))
+
+        assert batch.success_count == 1
+        assert batch.error_count == 1
+        assert batch.status == KaheroImportBatch.Status.COMPLETED
+        assert any("unexpected error" in e["message"].lower() for e in batch.error_log)
 
 
 class TestSilentSkipWarningUI:
