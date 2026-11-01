@@ -214,3 +214,46 @@ def create_product(name, price, product_type, reorder_threshold=0, branch_ids=No
             get_or_create_inventory_row(branch, product)
 
     return product
+
+
+def find_ledger_discrepancies():
+    """Backend gap assessment item 29: Inventory.quantity_on_hand (the
+    running balance) and InventoryTransaction (the paired audit ledger)
+    are written together in every service function in this app, but
+    nothing ever ties them back to each other afterward -- if a future
+    code path ever updated one without the other, the drift would go
+    undetected indefinitely.
+
+    This sums every InventoryTransaction.quantity_change for each
+    (branch, product) pair and compares that total to the Inventory
+    row's own quantity_on_hand. A brand-new Inventory row with no
+    transactions at all (e.g. one just provisioned via
+    get_or_create_inventory_row/create_product's branch_ids) is expected
+    to start at 0 either way, so it's naturally not a discrepancy.
+
+    Returns a list of dicts -- empty when everything reconciles cleanly
+    -- each with the Inventory row, the ledger's own total, the recorded
+    balance, and the signed difference between them (recorded - ledger),
+    so a positive difference means the balance is higher than the ledger
+    accounts for and a negative one means it's lower.
+    """
+    from django.db.models import Sum
+
+    discrepancies = []
+    for inventory in Inventory.objects.select_related("branch", "product"):
+        ledger_total = (
+            InventoryTransaction.objects.filter(
+                branch=inventory.branch, product=inventory.product
+            ).aggregate(total=Sum("quantity_change"))["total"]
+            or 0
+        )
+        if ledger_total != inventory.quantity_on_hand:
+            discrepancies.append(
+                {
+                    "inventory": inventory,
+                    "ledger_total": ledger_total,
+                    "recorded_balance": inventory.quantity_on_hand,
+                    "difference": inventory.quantity_on_hand - ledger_total,
+                }
+            )
+    return discrepancies
