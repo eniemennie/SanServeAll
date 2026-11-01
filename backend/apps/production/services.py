@@ -154,6 +154,18 @@ def create_stock_transfer_order(commissary_staff, destination_branch_id, product
     it is genuinely no longer on hand there, matching how record_production
     above deducts materials up front rather than waiting for some later
     confirmation step.
+
+    Backend gap assessment item 26 (same class of risk as the POS
+    double-submission race): locks the commissary's Inventory row with
+    select_for_update() before checking/deducting stock, inside the
+    atomic block. Without this, two near-simultaneous submissions (a
+    double-click, or a network retry) could both read the same
+    quantity_on_hand, both pass the "enough stock" check, and both
+    deduct -- creating two orders and debiting stock twice against a
+    quantity that only really covered one. With the lock, the second
+    request's read blocks until the first commits, then sees the
+    already-reduced quantity and is correctly rejected if there isn't
+    enough left.
     """
     from apps.accounts.models import Branch
 
@@ -185,6 +197,7 @@ def create_stock_transfer_order(commissary_staff, destination_branch_id, product
 
     with db_transaction.atomic():
         source_inventory, _ = Inventory.objects.get_or_create(branch=commissary, product=product)
+        source_inventory = Inventory.objects.select_for_update().get(pk=source_inventory.pk)
         if source_inventory.quantity_on_hand < quantity:
             raise StockTransferError(
                 f"Not enough {product.name} on hand at the commissary "
