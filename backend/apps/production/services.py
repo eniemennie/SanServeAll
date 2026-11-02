@@ -96,21 +96,36 @@ def record_production(commissary_staff, product_id, quantity_produced, ingredien
             )
         resolved_rows.append((material, quantity_used, inventory))
 
+    status = extra.get("status", ProductionRecord.Status.COMPLETED)
+    quality = extra.get("quality", ProductionRecord.Quality.PASS)
+
     with db_transaction.atomic():
         record = ProductionRecord.objects.create(
             commissary_staff=commissary_staff,
             product=product,
             quantity_produced=quantity_produced,
             supplier=extra.get("supplier", ""),
-            quality=extra.get("quality", ProductionRecord.Quality.PASS),
-            status=extra.get("status", ProductionRecord.Status.COMPLETED),
+            quality=quality,
+            status=status,
             notes=extra.get("notes", ""),
         )
+
+        # Backend gap assessment item 3 (Phase 1, critical): inventory
+        # should only move once a run has actually finished. A run still
+        # PENDING/IN_PROGRESS hasn't happened yet -- recording one lets
+        # staff log the plan without pretending materials were already
+        # consumed, so neither side of the ledger moves until COMPLETED.
+        if status != ProductionRecord.Status.COMPLETED:
+            return record
 
         for material, quantity_used, inventory in resolved_rows:
             IngredientUsage.objects.create(
                 production_record=record, material=material, quantity_used=quantity_used
             )
+            # Materials are consumed by the attempt itself, regardless of
+            # whether the output later passes QC -- a failed batch still
+            # used up real flour and sugar, so this deduction happens
+            # either way.
             inventory.quantity_on_hand -= quantity_used
             inventory.save()
             InventoryTransaction.objects.create(
@@ -119,6 +134,14 @@ def record_production(commissary_staff, product_id, quantity_produced, ingredien
                 movement_type=InventoryTransaction.MovementType.PRODUCTION_CONSUMPTION,
                 quantity_change=-quantity_used,
             )
+
+        # Only QUALITY.PASS output is fit to sell -- crediting a failed
+        # batch to the finished-good shelf would let a branch's POS sell
+        # it. A FAIL run still shows up in the batch log and still
+        # consumed its materials above; it just never becomes sellable
+        # stock.
+        if quality != ProductionRecord.Quality.PASS:
+            return record
 
         finished_good_inventory, _ = Inventory.objects.get_or_create(
             branch=commissary, product=product
@@ -154,6 +177,18 @@ def create_stock_transfer_order(commissary_staff, destination_branch_id, product
     it is genuinely no longer on hand there, matching how record_production
     above deducts materials up front rather than waiting for some later
     confirmation step.
+
+    Backend gap assessment item 26 (same class of risk as the POS
+    double-submission race): locks the commissary's Inventory row with
+    select_for_update() before checking/deducting stock, inside the
+    atomic block. Without this, two near-simultaneous submissions (a
+    double-click, or a network retry) could both read the same
+    quantity_on_hand, both pass the "enough stock" check, and both
+    deduct -- creating two orders and debiting stock twice against a
+    quantity that only really covered one. With the lock, the second
+    request's read blocks until the first commits, then sees the
+    already-reduced quantity and is correctly rejected if there isn't
+    enough left.
     """
     from apps.accounts.models import Branch
 
@@ -185,6 +220,7 @@ def create_stock_transfer_order(commissary_staff, destination_branch_id, product
 
     with db_transaction.atomic():
         source_inventory, _ = Inventory.objects.get_or_create(branch=commissary, product=product)
+        source_inventory = Inventory.objects.select_for_update().get(pk=source_inventory.pk)
         if source_inventory.quantity_on_hand < quantity:
             raise StockTransferError(
                 f"Not enough {product.name} on hand at the commissary "
@@ -262,6 +298,14 @@ def advance_stock_transfer_status(order, new_status):
     branch's own Inventory actually receives the stock; while IN_TRANSIT,
     the quantity is accounted for by this order alone, not counted as
     available at either branch.
+
+    Backend gap assessment item 25: `new_status` is validated against the
+    real set of status values before it's used anywhere, including in an
+    error message -- `StockTransferOrder.Status(new_status)` raises a
+    bare ValueError for anything that isn't a recognized value (garbage
+    input, or simply a missing/None POST field), which previously
+    surfaced as an uncaught 500 instead of the StockTransferError the
+    view already knows how to handle gracefully.
     """
     allowed_next = _NEXT_TRANSFER_STATUS.get(order.status)
     if allowed_next is None:
@@ -269,6 +313,9 @@ def advance_stock_transfer_status(order, new_status):
             f"Order is already {order.get_status_display()} -- "
             "no further status change is possible."
         )
+    valid_statuses = {choice.value for choice in StockTransferOrder.Status}
+    if new_status not in valid_statuses:
+        raise StockTransferError(f"'{new_status}' is not a recognized stock transfer status.")
     if new_status != allowed_next:
         raise StockTransferError(
             f"Cannot move from {order.get_status_display()} directly to "

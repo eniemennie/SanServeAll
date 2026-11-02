@@ -8,7 +8,7 @@ import pytest
 from django.urls import reverse
 
 from apps.accounts.models import Branch, CashierPIN, Role, User
-from apps.accounts.services import PIN_LOCKOUT_THRESHOLD
+from apps.accounts.services import LOGIN_LOCKOUT_THRESHOLD, PIN_LOCKOUT_THRESHOLD
 
 pytestmark = pytest.mark.django_db
 
@@ -283,3 +283,24 @@ class TestCommissaryLogin:
         assert response.status_code == 200
         assert not response.wsgi_request.user.is_authenticated
         assert "selected_branch_id" not in client.session
+
+    def test_locks_out_after_threshold_wrong_passwords_even_the_correct_one(
+        self, client, commissary_worker
+    ):
+        """Previously unlimited -- same lockout gap as the Admin login,
+        and this door's own docstring already flagged it as a known,
+        unaddressed exposure given the commissary account's seed
+        password is a fixed, committed string."""
+        for _ in range(LOGIN_LOCKOUT_THRESHOLD):
+            client.post(
+                reverse("accounts:commissary_login"),
+                {"username": "commissary1", "password": "wrongpassword"},
+            )
+
+        response = client.post(
+            reverse("accounts:commissary_login"),
+            {"username": "commissary1", "password": "testpass123"},
+        )
+        assert response.status_code == 200
+        assert not response.wsgi_request.user.is_authenticated
+        assert b"Too many incorrect attempts" in response.content
