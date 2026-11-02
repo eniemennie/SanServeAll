@@ -190,6 +190,31 @@ class TestAdjustStock:
         assert movement.movement_type == InventoryTransaction.MovementType.MANUAL_ADJUSTMENT
         assert movement.quantity_change == 5
 
+    def test_adjustment_records_reason_and_acting_user(self, branch, owner):
+        """Backend gap assessment: manual adjustments previously left no
+        record of who made them or why."""
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=10)
+
+        services.adjust_stock(inv, 5, reason="Corrected after physical count", user=owner)
+
+        movement = InventoryTransaction.objects.get(branch=branch, product=product)
+        assert movement.reason == "Corrected after physical count"
+        assert movement.created_by == owner
+
+    def test_adjustment_without_reason_or_user_still_works(self, branch):
+        """Backward compatible: existing callers (seed scripts, Quick
+        Sale's preset reason with no explicit user) that don't pass
+        these keep working, just with a blank/null audit trail."""
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=10)
+
+        services.adjust_stock(inv, 5)
+
+        movement = InventoryTransaction.objects.get(branch=branch, product=product)
+        assert movement.reason == ""
+        assert movement.created_by is None
+
 
 class TestCreateProduct:
     def test_creates_a_product_with_given_fields(self):
@@ -341,27 +366,47 @@ class TestAdjustStockView:
         response = staff_client.get(reverse("inventory:adjust_stock", args=[inv.pk]))
         assert response.status_code == 403
 
-    def test_owner_can_adjust_stock(self, owner_client, branch):
+    def test_owner_can_adjust_stock(self, owner_client, owner, branch):
         product = Product.objects.create(name="Widget", price="10.00")
         inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=10)
 
         response = owner_client.post(
-            reverse("inventory:adjust_stock", args=[inv.pk]), {"delta": "5"}
+            reverse("inventory:adjust_stock", args=[inv.pk]),
+            {"delta": "5", "reason": "Physical count correction"},
         )
         assert response.status_code == 302
 
         inv.refresh_from_db()
         assert inv.quantity_on_hand == 15
 
+        movement = InventoryTransaction.objects.get(branch=branch, product=product)
+        assert movement.reason == "Physical count correction"
+        assert movement.created_by == owner
+
     def test_invalid_adjustment_shows_error_on_page(self, owner_client, branch):
         product = Product.objects.create(name="Widget", price="10.00")
         inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=2)
 
         response = owner_client.post(
-            reverse("inventory:adjust_stock", args=[inv.pk]), {"delta": "-10"}
+            reverse("inventory:adjust_stock", args=[inv.pk]),
+            {"delta": "-10", "reason": "Testing"},
         )
         assert response.status_code == 200
         assert b"below zero" in response.content
+
+    def test_blank_reason_is_rejected_and_does_not_adjust_stock(self, owner_client, branch):
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=10)
+
+        response = owner_client.post(
+            reverse("inventory:adjust_stock", args=[inv.pk]), {"delta": "5", "reason": "   "}
+        )
+        assert response.status_code == 200
+        assert b"reason is required" in response.content
+
+        inv.refresh_from_db()
+        assert inv.quantity_on_hand == 10
+        assert not InventoryTransaction.objects.filter(branch=branch, product=product).exists()
 
 
 class TestResourceStatusSummary:
