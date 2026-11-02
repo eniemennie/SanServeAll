@@ -247,7 +247,9 @@ class TestAdvanceStockTransferStatus:
             product_id=cake.pk,
             quantity=10,
         )
-        with pytest.raises(services.StockTransferError, match="not a recognized stock transfer status"):
+        with pytest.raises(
+            services.StockTransferError, match="not a recognized stock transfer status"
+        ):
             services.advance_stock_transfer_status(order, "BOGUS")
         order.refresh_from_db()
         assert order.status == StockTransferOrder.Status.PROCESSING
@@ -263,7 +265,9 @@ class TestAdvanceStockTransferStatus:
             product_id=cake.pk,
             quantity=10,
         )
-        with pytest.raises(services.StockTransferError, match="not a recognized stock transfer status"):
+        with pytest.raises(
+            services.StockTransferError, match="not a recognized stock transfer status"
+        ):
             services.advance_stock_transfer_status(order, None)
 
 
