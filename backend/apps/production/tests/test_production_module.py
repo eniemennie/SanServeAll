@@ -9,7 +9,7 @@ from django.urls import reverse
 from apps.accounts.models import Branch, Role, User
 from apps.inventory.models import Inventory, InventoryTransaction, Product
 from apps.production import services
-from apps.production.models import ProductionRecord
+from apps.production.models import IngredientUsage, ProductionRecord
 from conftest import verify_otp_for_client
 
 pytestmark = pytest.mark.django_db
@@ -55,6 +55,27 @@ def cake():
     return Product.objects.create(
         name="Chocolate Cake", price="140.00", product_type=Product.ProductType.FINISHED_GOOD
     )
+
+
+class TestIngredientUsageStr:
+    def test_includes_the_materials_unit_of_measure(self, cake, commissary, commissary_staff):
+        """Backend gap assessment item 28: a bare quantity ("5 x Flour")
+        doesn't say whether that's 5 pieces, kg, or liters. The unit
+        should show up directly in how an IngredientUsage describes
+        itself."""
+        record = ProductionRecord.objects.create(
+            commissary_staff=commissary_staff, product=cake, quantity_produced=10
+        )
+        flour_kg = Product.objects.create(
+            name="Flour",
+            price="55.00",
+            product_type=Product.ProductType.MATERIAL,
+            unit_of_measure=Product.UnitOfMeasure.KILOGRAM,
+        )
+        usage = IngredientUsage.objects.create(
+            production_record=record, material=flour_kg, quantity_used=5
+        )
+        assert str(usage) == "5 kg x Flour"
 
 
 class TestRecordProduction:
@@ -158,6 +179,63 @@ class TestRecordProduction:
                 quantity_produced=10,
                 ingredient_rows=[],
             )
+
+    def test_pending_run_does_not_touch_inventory_at_all(
+        self, commissary, commissary_staff, cake, flour
+    ):
+        """Backend gap assessment item 3 (Phase 1, critical): a run still
+        PENDING/IN_PROGRESS hasn't actually happened yet, so neither the
+        material deduction nor the finished-good credit should fire."""
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 5}],
+            status=ProductionRecord.Status.PENDING,
+        )
+
+        flour_inventory = Inventory.objects.get(branch=commissary, product=flour)
+        assert flour_inventory.quantity_on_hand == 50  # untouched
+
+        assert not Inventory.objects.filter(branch=commissary, product=cake).exists()
+        assert not InventoryTransaction.objects.exists()
+
+    def test_in_progress_run_does_not_touch_inventory_either(
+        self, commissary, commissary_staff, cake, flour
+    ):
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 5}],
+            status=ProductionRecord.Status.IN_PROGRESS,
+        )
+
+        flour_inventory = Inventory.objects.get(branch=commissary, product=flour)
+        assert flour_inventory.quantity_on_hand == 50  # untouched
+
+    def test_completed_but_failed_run_deducts_materials_but_not_finished_good(
+        self, commissary, commissary_staff, cake, flour
+    ):
+        """Backend gap assessment item 3: a FAIL run still consumed its
+        real ingredients, but the resulting output isn't fit to sell, so
+        it must never land in finished-good inventory."""
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 5}],
+            status=ProductionRecord.Status.COMPLETED,
+            quality=ProductionRecord.Quality.FAIL,
+        )
+
+        flour_inventory = Inventory.objects.get(branch=commissary, product=flour)
+        assert flour_inventory.quantity_on_hand == 45  # materials still consumed
+
+        assert not Inventory.objects.filter(branch=commissary, product=cake).exists()
+        assert not InventoryTransaction.objects.filter(
+            movement_type=InventoryTransaction.MovementType.PRODUCTION_OUTPUT
+        ).exists()
 
     def test_no_commissary_configured_raises_clear_error(self):
         """Tested in isolation -- no commissary, no materials, no

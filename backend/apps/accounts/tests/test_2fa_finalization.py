@@ -130,7 +130,7 @@ class TestVerifyAcceptsBackupCode:
 
         response = client.post(reverse("accounts:admin_2fa_verify"), {"token": codes[0]})
         assert response.status_code == 302
-        assert response.url == reverse("accounts:select_branch")
+        assert response.url == reverse("accounts:admin_dashboard")
 
     def test_used_backup_code_cannot_be_reused(self, client, admin):
         TOTPDevice.objects.create(user=admin, name="default", confirmed=True)

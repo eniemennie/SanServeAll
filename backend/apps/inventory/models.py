@@ -8,6 +8,7 @@ built, so POS's and the deduction hook's existing FK references and
 behavior stay valid unchanged.
 """
 
+from django.core.validators import MinValueValidator
 from django.db import models
 
 
@@ -15,6 +16,29 @@ class Product(models.Model):
     class ProductType(models.TextChoices):
         FINISHED_GOOD = "FINISHED_GOOD", "Finished Good"
         MATERIAL = "MATERIAL", "Raw Material"
+
+    class UnitOfMeasure(models.TextChoices):
+        """Backend gap assessment item 28: quantities everywhere else in
+        this project (quantity_on_hand, quantity_used, etc.) are plain
+        integers with no unit attached -- 10 could mean 10 pieces, kg, or
+        liters depending on the item. Purely descriptive for now (no
+        conversion math exists or is needed yet); it exists so a person
+        reading a quantity knows what it actually counts, and so any
+        future recipe/BOM math has a real unit to validate against
+        instead of silently assuming everything is in the same unit."""
+
+        PIECE = "PIECE", "pc"
+        KILOGRAM = "KILOGRAM", "kg"
+        GRAM = "GRAM", "g"
+        LITER = "LITER", "L"
+        MILLILITER = "MILLILITER", "mL"
+        PACK = "PACK", "pack"
+        BOX = "BOX", "box"
+        # Client raw-data import (Packaging_Materials.xlsx): rolls of
+        # receipt/register tape, cling wrap, etc. -- distinct from PACK
+        # (a bundle of discrete pieces), not a value any existing unit
+        # could stand in for without losing information.
+        ROLL = "ROLL", "roll"
 
     class Category(models.TextChoices):
         COFFEE = "COFFEE", "Coffee"
@@ -46,10 +70,16 @@ class Product(models.Model):
     # (Row 3 redesign, POS category tabs), materials aren't browsed there.
     category = models.CharField(max_length=32, choices=Category.choices, blank=True)
     is_best_seller = models.BooleanField(default=False)
-    # Below this quantity_on_hand, Inventory.is_low_stock flags the item
-    # (Row 6.4). Zero means "don't flag" rather than "always flag" -- a
-    # product with no threshold configured yet shouldn't spam alerts.
-    reorder_threshold = models.PositiveIntegerField(default=0)
+    unit_of_measure = models.CharField(
+        max_length=16, choices=UnitOfMeasure.choices, default=UnitOfMeasure.PIECE
+    )
+    # Client raw-data import (Raw_Materials.xlsx / Packaging_Materials.xlsx):
+    # every material carries a real supplier name (e.g. "Juan Store",
+    # "Restaurant Depot"), consistent across every branch's row for that
+    # same material -- a genuine catalog-level fact with nowhere to live
+    # until now. Blank for finished goods and any material whose supplier
+    # isn't tracked yet.
+    supplier = models.CharField(max_length=150, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -87,7 +117,32 @@ class Inventory(models.Model):
 
     branch = models.ForeignKey("accounts.Branch", on_delete=models.PROTECT)
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
-    quantity_on_hand = models.IntegerField(default=0)
+    # Decimal, not Integer: the client's real Raw_Materials.xlsx tracks
+    # 175/206 raw-material rows to a fractional kg/liter (e.g. Ice: 0.3kg
+    # on hand) -- rounding to a whole unit would misstate real stock
+    # (0.3kg rounding to 0 is a false stockout; 0.9kg rounding to 1 hides
+    # a near-empty supply), so this holds the client's own numbers
+    # exactly rather than lying about them. Finished-goods counts (whole
+    # pieces) are unaffected -- every whole number is still an exact
+    # Decimal value.
+    # 3 places, not 2: widened for Ingredient_Usage.xlsx, which records
+    # some material consumption to a third decimal place (e.g. Cream of
+    # tartar: 0.019kg) -- a production run's deduction from this field
+    # must never be rounded at the boundary.
+    quantity_on_hand = models.DecimalField(max_digits=12, decimal_places=3, default=0)
+    # Backend gap assessment (client raw-data import): moved here from
+    # Product.reorder_threshold -- the client's own Raw_Materials.xlsx /
+    # Packaging_Materials.xlsx data showed real materials genuinely
+    # needing a different reorder point per branch (e.g. a branch that
+    # burns through coffee beans faster), which one global per-Product
+    # value could never represent. Zero means "don't flag" rather than
+    # "always flag" -- a row with no threshold configured yet shouldn't
+    # spam alerts, same convention the old Product field used. Decimal
+    # for the same reason as quantity_on_hand above -- 164/206 raw
+    # materials have a fractional reorder point in the client's data.
+    reorder_threshold = models.DecimalField(
+        max_digits=12, decimal_places=3, default=0, validators=[MinValueValidator(0)]
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -121,12 +176,12 @@ class Inventory(models.Model):
 
     @property
     def is_low_stock(self):
-        """True when stock is at or below the product's configured reorder
-        threshold, but still above zero (out-of-stock is its own, more
-        urgent status -- Fig. 3-20/3-32 distinguish the two)."""
-        if self.product.reorder_threshold <= 0:
+        """True when stock is at or below this branch's own configured
+        reorder threshold, but still above zero (out-of-stock is its own,
+        more urgent status -- Fig. 3-20/3-32 distinguish the two)."""
+        if self.reorder_threshold <= 0:
             return False
-        return 0 < self.quantity_on_hand <= self.product.reorder_threshold
+        return 0 < self.quantity_on_hand <= self.reorder_threshold
 
     @property
     def status_label(self):
@@ -151,18 +206,49 @@ class InventoryTransaction(models.Model):
         # both are automatic, neither is a manual override.
         PRODUCTION_CONSUMPTION = "PRODUCTION_CONSUMPTION", "Production Consumption"
         PRODUCTION_OUTPUT = "PRODUCTION_OUTPUT", "Production Output"
+        # Week N: stock distribution from the commissary to a branch
+        # (production.StockTransferOrder) -- OUT logged against the
+        # commissary the moment an order is dispatched (PROCESSING), IN
+        # logged against the destination branch only once DELIVERED is
+        # confirmed.
+        TRANSFER_OUT = "TRANSFER_OUT", "Transfer Out"
+        TRANSFER_IN = "TRANSFER_IN", "Transfer In"
+        # Backend gap assessment item 24: a cancelled StockTransferOrder
+        # (PROCESSING or IN_TRANSIT only -- DELIVERED is final) returns
+        # the quantity to the commissary's own Inventory. Logged
+        # separately from TRANSFER_OUT/IN so the audit trail shows a
+        # cancellation happened, not an ordinary second transfer.
+        TRANSFER_CANCELLED = "TRANSFER_CANCELLED", "Transfer Cancelled"
 
     branch = models.ForeignKey("accounts.Branch", on_delete=models.PROTECT)
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
     movement_type = models.CharField(max_length=32, choices=MovementType.choices)
     # Negative for deductions, positive for additions -- signed so a
     # simple sum() over a product's transactions reconstructs its history.
-    quantity_change = models.IntegerField()
+    # Decimal, matching Inventory.quantity_on_hand above, for the same
+    # reason: a raw-material adjustment can be a fractional kg/liter
+    # amount in the client's real data.
+    quantity_change = models.DecimalField(max_digits=12, decimal_places=3)
     # String FK: avoids a hard import-order dependency between inventory
     # and pos, since pos.SalesItem already references inventory.Product.
     related_sales_item = models.ForeignKey(
         "pos.SalesItem", on_delete=models.SET_NULL, null=True, blank=True
     )
+    # Audit trail for MANUAL_ADJUSTMENT rows (backend gap assessment:
+    # "who/why" fields were missing, so a stock correction left no record
+    # of who made it or why). Left null/blank for every other movement
+    # type, whose "why" is already implied by movement_type itself (a
+    # sale, a production run, a transfer) -- only a manual override needs
+    # a human-entered reason. SET_NULL rather than PROTECT: the audit row
+    # itself must survive a staff account later being deleted.
+    created_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="inventory_adjustments",
+    )
+    reason = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -60,26 +60,34 @@ def staff_client(client, branch_staff, branch):
 
 class TestInventoryModelStatus:
     def test_zero_threshold_never_flags_low_stock(self, branch):
-        product = Product.objects.create(name="Widget", price="10.00", reorder_threshold=0)
-        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=1)
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(
+            branch=branch, product=product, quantity_on_hand=1, reorder_threshold=0
+        )
         assert inv.is_low_stock is False
 
     def test_stock_at_or_below_threshold_is_low_stock(self, branch):
-        product = Product.objects.create(name="Widget", price="10.00", reorder_threshold=5)
-        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=5)
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(
+            branch=branch, product=product, quantity_on_hand=5, reorder_threshold=5
+        )
         assert inv.is_low_stock is True
         assert inv.status_label == "Low Stock"
 
     def test_zero_stock_is_out_of_stock_not_low_stock(self, branch):
-        product = Product.objects.create(name="Widget", price="10.00", reorder_threshold=5)
-        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=0)
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(
+            branch=branch, product=product, quantity_on_hand=0, reorder_threshold=5
+        )
         assert inv.is_out_of_stock is True
         assert inv.is_low_stock is False  # out-of-stock is the more urgent, distinct status
         assert inv.status_label == "Out of Stock"
 
     def test_stock_above_threshold_is_available(self, branch):
-        product = Product.objects.create(name="Widget", price="10.00", reorder_threshold=5)
-        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=20)
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(
+            branch=branch, product=product, quantity_on_hand=20, reorder_threshold=5
+        )
         assert inv.status_label == "Available"
 
     def test_negative_quantity_displays_as_zero(self, branch):
@@ -98,6 +106,26 @@ class TestInventoryModelStatus:
         product = Product.objects.create(name="Widget", price="10.00")
         inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=7)
         assert inv.display_quantity == 7
+
+    def test_fractional_quantity_and_threshold_work_like_the_clients_real_data(self, branch):
+        """Client raw-data import: Raw_Materials.xlsx tracks real
+        materials to a fractional kg/liter (e.g. Ice: 0.3kg on hand,
+        0.5kg reorder point) -- status logic must compare correctly on
+        these Decimal values, not just whole numbers."""
+        from decimal import Decimal
+
+        material = Product.objects.create(
+            name="Ice", price="6.00", product_type=Product.ProductType.MATERIAL
+        )
+        inv = Inventory.objects.create(
+            branch=branch,
+            product=material,
+            quantity_on_hand=Decimal("0.3"),
+            reorder_threshold=Decimal("0.5"),
+        )
+        assert inv.is_low_stock is True
+        assert inv.is_out_of_stock is False
+        assert inv.status_label == "Low Stock"
 
 
 class TestGetBranchInventory:
@@ -127,21 +155,42 @@ class TestGetBranchInventory:
         assert materials_only[0].product == material
 
     def test_low_stock_only_excludes_healthy_stock(self, branch):
-        low = Product.objects.create(name="Low Item", price="10.00", reorder_threshold=5)
-        healthy = Product.objects.create(name="Healthy Item", price="10.00", reorder_threshold=5)
-        Inventory.objects.create(branch=branch, product=low, quantity_on_hand=2)
-        Inventory.objects.create(branch=branch, product=healthy, quantity_on_hand=50)
+        low = Product.objects.create(name="Low Item", price="10.00")
+        healthy = Product.objects.create(name="Healthy Item", price="10.00")
+        Inventory.objects.create(
+            branch=branch, product=low, quantity_on_hand=2, reorder_threshold=5
+        )
+        Inventory.objects.create(
+            branch=branch, product=healthy, quantity_on_hand=50, reorder_threshold=5
+        )
 
         result = services.get_branch_inventory(branch, low_stock_only=True)
         assert len(result) == 1
         assert result[0].product == low
 
     def test_low_stock_only_includes_out_of_stock_items(self, branch):
-        product = Product.objects.create(name="Empty", price="10.00", reorder_threshold=5)
-        Inventory.objects.create(branch=branch, product=product, quantity_on_hand=0)
+        product = Product.objects.create(name="Empty", price="10.00")
+        Inventory.objects.create(
+            branch=branch, product=product, quantity_on_hand=0, reorder_threshold=5
+        )
 
         result = services.get_branch_inventory(branch, low_stock_only=True)
         assert len(result) == 1
+
+    def test_discontinued_product_is_excluded(self, branch):
+        """Backend gap assessment: a discontinued product (is_active=
+        False) with leftover stock was still showing up here as if it
+        were a normal, orderable item."""
+        discontinued = Product.objects.create(
+            name="Discontinued Item", price="10.00", is_active=False
+        )
+        active = Product.objects.create(name="Active Item", price="10.00")
+        Inventory.objects.create(branch=branch, product=discontinued, quantity_on_hand=25)
+        Inventory.objects.create(branch=branch, product=active, quantity_on_hand=10)
+
+        result = services.get_branch_inventory(branch)
+        assert len(result) == 1
+        assert result[0].product == active
 
 
 class TestAdjustStock:
@@ -190,14 +239,182 @@ class TestAdjustStock:
         assert movement.movement_type == InventoryTransaction.MovementType.MANUAL_ADJUSTMENT
         assert movement.quantity_change == 5
 
+    def test_adjustment_records_reason_and_acting_user(self, branch, owner):
+        """Backend gap assessment: manual adjustments previously left no
+        record of who made them or why."""
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=10)
+
+        services.adjust_stock(inv, 5, reason="Corrected after physical count", user=owner)
+
+        movement = InventoryTransaction.objects.get(branch=branch, product=product)
+        assert movement.reason == "Corrected after physical count"
+        assert movement.created_by == owner
+
+    def test_adjustment_without_reason_or_user_still_works(self, branch):
+        """Backward compatible: existing callers (seed scripts, Quick
+        Sale's preset reason with no explicit user) that don't pass
+        these keep working, just with a blank/null audit trail."""
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=10)
+
+        services.adjust_stock(inv, 5)
+
+        movement = InventoryTransaction.objects.get(branch=branch, product=product)
+        assert movement.reason == ""
+        assert movement.created_by is None
+
+    def test_fractional_adjustment_is_accepted_for_raw_materials(self, branch):
+        """Client raw-data import: quantity_on_hand is Decimal, not
+        Integer -- a fractional kg/liter correction (e.g. a physical
+        recount of a material) must work, not just whole-piece counts."""
+        from decimal import Decimal
+
+        material = Product.objects.create(
+            name="White sugar", price="82.00", product_type=Product.ProductType.MATERIAL
+        )
+        inv = Inventory.objects.create(branch=branch, product=material, quantity_on_hand="10.5")
+
+        services.adjust_stock(inv, "-0.8")
+
+        inv.refresh_from_db()
+        assert inv.quantity_on_hand == Decimal("9.7")
+        movement = InventoryTransaction.objects.get(branch=branch, product=material)
+        assert movement.quantity_change == Decimal("-0.8")
+
+    def test_non_numeric_adjustment_is_rejected(self, branch):
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=10)
+
+        with pytest.raises(services.InventoryServiceError, match="Enter a number"):
+            services.adjust_stock(inv, "not-a-number")
+
+
+class TestGetLowStockAlertsForAllBranches:
+    """Backend gap assessment item 20: the data behind proactive
+    low-stock alerting. Reuses get_resource_status_summary's own
+    detection, so this can never disagree with what the Dashboard/
+    Monitoring screens show for the same branch."""
+
+    def test_branch_with_nothing_low_is_excluded(self, branch):
+        healthy = Product.objects.create(name="Flour", price="45.00")
+        Inventory.objects.create(
+            branch=branch, product=healthy, quantity_on_hand=50, reorder_threshold=10
+        )
+
+        alerts = services.get_low_stock_alerts_for_all_branches()
+        assert alerts == []
+
+    def test_branch_with_a_critical_item_is_included(self, branch, other_branch):
+        healthy = Product.objects.create(name="Flour", price="45.00")
+        Inventory.objects.create(
+            branch=other_branch, product=healthy, quantity_on_hand=50, reorder_threshold=10
+        )
+
+        critical = Product.objects.create(name="Cashews", price="650.00")
+        Inventory.objects.create(
+            branch=branch, product=critical, quantity_on_hand=0, reorder_threshold=10
+        )
+
+        alerts = services.get_low_stock_alerts_for_all_branches()
+        assert len(alerts) == 1
+        assert alerts[0]["branch"] == branch
+        assert alerts[0]["critical_count"] == 1
+
+    def test_includes_the_commissary_branch_too(self):
+        """Raw-material shortages at the commissary matter just as much
+        as finished-good shortages at a native branch."""
+        commissary = Branch.objects.create(name="Central Kitchen", code="CK", is_commissary=True)
+        material = Product.objects.create(
+            name="Milk",
+            price="80.00",
+            product_type=Product.ProductType.MATERIAL,
+        )
+        Inventory.objects.create(
+            branch=commissary, product=material, quantity_on_hand=5, reorder_threshold=20
+        )
+
+        alerts = services.get_low_stock_alerts_for_all_branches()
+        assert len(alerts) == 1
+        assert alerts[0]["branch"] == commissary
+
+
+class TestFindLedgerDiscrepancies:
+    """Backend gap assessment item 29: a periodic check summing
+    InventoryTransaction deltas and comparing the total to
+    Inventory.quantity_on_hand, since the two are written together in
+    every service function but nothing ties them back to each other
+    afterward."""
+
+    def test_an_inventory_row_built_up_entirely_through_adjust_stock_reconciles_cleanly(
+        self, branch
+    ):
+        product = Product.objects.create(name="Widget", price="10.00")
+        # Starts at 0 with no transaction -- a brand-new row with
+        # nothing in the ledger yet is not itself a discrepancy, since
+        # 0 == sum([]).
+        inv = services.get_or_create_inventory_row(branch, product)
+        services.adjust_stock(inv, 10)
+        services.adjust_stock(inv, -3)
+
+        assert services.find_ledger_discrepancies() == []
+
+    def test_detects_a_balance_that_drifted_from_its_own_ledger(self, branch):
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = services.get_or_create_inventory_row(branch, product)
+        services.adjust_stock(inv, 10)  # ledger now sums to 10, balance is 10
+
+        # Simulate the exact bug this check exists to catch: some future
+        # code path updates quantity_on_hand directly without writing a
+        # matching InventoryTransaction.
+        inv.quantity_on_hand = 25
+        inv.save()
+
+        discrepancies = services.find_ledger_discrepancies()
+        assert len(discrepancies) == 1
+        entry = discrepancies[0]
+        assert entry["inventory"] == inv
+        assert entry["ledger_total"] == 10
+        assert entry["recorded_balance"] == 25
+        assert entry["difference"] == 15
+
+    def test_multiple_branches_and_products_are_each_checked_independently(
+        self, branch, other_branch
+    ):
+        product = Product.objects.create(name="Widget", price="10.00")
+        clean_inv = services.get_or_create_inventory_row(branch, product)
+        services.adjust_stock(clean_inv, 5)
+
+        drifted_inv = services.get_or_create_inventory_row(other_branch, product)
+        services.adjust_stock(drifted_inv, 5)
+        drifted_inv.quantity_on_hand = 999
+        drifted_inv.save()
+
+        discrepancies = services.find_ledger_discrepancies()
+        assert len(discrepancies) == 1
+        assert discrepancies[0]["inventory"] == drifted_inv
+
 
 class TestCreateProduct:
     def test_creates_a_product_with_given_fields(self):
-        product = services.create_product(
-            "New Item", "99.00", Product.ProductType.FINISHED_GOOD, reorder_threshold=10
-        )
+        product = services.create_product("New Item", "99.00", Product.ProductType.FINISHED_GOOD)
         assert product.name == "New Item"
-        assert product.reorder_threshold == 10
+
+    def test_reorder_threshold_applies_to_each_provisioned_branchs_inventory_row(
+        self, branch, other_branch
+    ):
+        """reorder_threshold now lives on Inventory, not Product (client
+        raw-data import: real reorder points differ per branch), so it's
+        applied to every Inventory row create_product provisions."""
+        product = services.create_product(
+            "New Item",
+            "99.00",
+            Product.ProductType.FINISHED_GOOD,
+            reorder_threshold=10,
+            branch_ids=[branch.pk, other_branch.pk],
+        )
+        assert Inventory.objects.get(branch=branch, product=product).reorder_threshold == 10
+        assert Inventory.objects.get(branch=other_branch, product=product).reorder_threshold == 10
 
     def test_blank_name_is_rejected(self):
         with pytest.raises(services.InventoryServiceError, match="name is required"):
@@ -223,6 +440,30 @@ class TestCreateProduct:
         assert not Inventory.objects.filter(branch=other_branch, product=product).exists()
         inv = Inventory.objects.get(branch=branch, product=product)
         assert inv.quantity_on_hand == 0
+
+    def test_defaults_to_piece_when_unit_of_measure_omitted(self):
+        """Backend gap assessment item 28: existing callers that don't
+        pass unit_of_measure at all must be unaffected."""
+        product = services.create_product("New Item", "10.00", Product.ProductType.FINISHED_GOOD)
+        assert product.unit_of_measure == Product.UnitOfMeasure.PIECE
+
+    def test_accepts_a_valid_unit_of_measure(self):
+        product = services.create_product(
+            "Flour",
+            "45.00",
+            Product.ProductType.MATERIAL,
+            unit_of_measure=Product.UnitOfMeasure.KILOGRAM,
+        )
+        assert product.unit_of_measure == Product.UnitOfMeasure.KILOGRAM
+
+    def test_rejects_an_unrecognized_unit_of_measure(self):
+        with pytest.raises(services.InventoryServiceError, match="not a recognized unit"):
+            services.create_product(
+                "Flour",
+                "45.00",
+                Product.ProductType.MATERIAL,
+                unit_of_measure="BOGUS",
+            )
 
 
 class TestInventoryMonitoringView:
@@ -260,10 +501,14 @@ class TestInventoryMonitoringView:
         assert response.context["items"][0].display_quantity == 0
 
     def test_low_stock_toggle_filters_results(self, staff_client, branch):
-        low = Product.objects.create(name="Low Item", price="10.00", reorder_threshold=5)
-        healthy = Product.objects.create(name="Healthy Item", price="10.00", reorder_threshold=5)
-        Inventory.objects.create(branch=branch, product=low, quantity_on_hand=1)
-        Inventory.objects.create(branch=branch, product=healthy, quantity_on_hand=99)
+        low = Product.objects.create(name="Low Item", price="10.00")
+        healthy = Product.objects.create(name="Healthy Item", price="10.00")
+        Inventory.objects.create(
+            branch=branch, product=low, quantity_on_hand=1, reorder_threshold=5
+        )
+        Inventory.objects.create(
+            branch=branch, product=healthy, quantity_on_hand=99, reorder_threshold=5
+        )
 
         response = staff_client.get(reverse("inventory:monitoring"), {"low_stock": "1"})
         assert b"Low Item" in response.content
@@ -292,6 +537,22 @@ class TestProductManagementView:
         )
         assert response.status_code == 302
         assert Product.objects.filter(name="New Latte").exists()
+
+    def test_owner_can_set_the_unit_of_measure_when_adding_a_product(self, owner_client, branch):
+        response = owner_client.post(
+            reverse("inventory:product_management"),
+            {
+                "name": "Sugar",
+                "price": "60.00",
+                "product_type": Product.ProductType.MATERIAL,
+                "reorder_threshold": "5",
+                "unit_of_measure": Product.UnitOfMeasure.KILOGRAM,
+                "branches": [branch.pk],
+            },
+        )
+        assert response.status_code == 302
+        product = Product.objects.get(name="Sugar")
+        assert product.unit_of_measure == Product.UnitOfMeasure.KILOGRAM
 
     def test_adding_a_product_provisions_it_only_at_the_selected_branch(
         self, owner_client, branch, other_branch
@@ -341,27 +602,47 @@ class TestAdjustStockView:
         response = staff_client.get(reverse("inventory:adjust_stock", args=[inv.pk]))
         assert response.status_code == 403
 
-    def test_owner_can_adjust_stock(self, owner_client, branch):
+    def test_owner_can_adjust_stock(self, owner_client, owner, branch):
         product = Product.objects.create(name="Widget", price="10.00")
         inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=10)
 
         response = owner_client.post(
-            reverse("inventory:adjust_stock", args=[inv.pk]), {"delta": "5"}
+            reverse("inventory:adjust_stock", args=[inv.pk]),
+            {"delta": "5", "reason": "Physical count correction"},
         )
         assert response.status_code == 302
 
         inv.refresh_from_db()
         assert inv.quantity_on_hand == 15
 
+        movement = InventoryTransaction.objects.get(branch=branch, product=product)
+        assert movement.reason == "Physical count correction"
+        assert movement.created_by == owner
+
     def test_invalid_adjustment_shows_error_on_page(self, owner_client, branch):
         product = Product.objects.create(name="Widget", price="10.00")
         inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=2)
 
         response = owner_client.post(
-            reverse("inventory:adjust_stock", args=[inv.pk]), {"delta": "-10"}
+            reverse("inventory:adjust_stock", args=[inv.pk]),
+            {"delta": "-10", "reason": "Testing"},
         )
         assert response.status_code == 200
         assert b"below zero" in response.content
+
+    def test_blank_reason_is_rejected_and_does_not_adjust_stock(self, owner_client, branch):
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=10)
+
+        response = owner_client.post(
+            reverse("inventory:adjust_stock", args=[inv.pk]), {"delta": "5", "reason": "   "}
+        )
+        assert response.status_code == 200
+        assert b"reason is required" in response.content
+
+        inv.refresh_from_db()
+        assert inv.quantity_on_hand == 10
+        assert not InventoryTransaction.objects.filter(branch=branch, product=product).exists()
 
 
 class TestResourceStatusSummary:
@@ -370,14 +651,18 @@ class TestResourceStatusSummary:
     (Critical/Low/Adequate) documented in get_resource_status_summary."""
 
     def test_collapses_to_three_real_tiers_with_correct_counts(self, branch):
-        critical_product = Product.objects.create(
-            name="Cashew Nuts", price="650.00", reorder_threshold=10
+        critical_product = Product.objects.create(name="Cashew Nuts", price="650.00")
+        low_product = Product.objects.create(name="Butter", price="280.00")
+        adequate_product = Product.objects.create(name="Flour", price="45.00")
+        Inventory.objects.create(
+            branch=branch, product=critical_product, quantity_on_hand=0, reorder_threshold=10
         )
-        low_product = Product.objects.create(name="Butter", price="280.00", reorder_threshold=10)
-        adequate_product = Product.objects.create(name="Flour", price="45.00", reorder_threshold=10)
-        Inventory.objects.create(branch=branch, product=critical_product, quantity_on_hand=0)
-        Inventory.objects.create(branch=branch, product=low_product, quantity_on_hand=5)
-        Inventory.objects.create(branch=branch, product=adequate_product, quantity_on_hand=50)
+        Inventory.objects.create(
+            branch=branch, product=low_product, quantity_on_hand=5, reorder_threshold=10
+        )
+        Inventory.objects.create(
+            branch=branch, product=adequate_product, quantity_on_hand=50, reorder_threshold=10
+        )
 
         summary = services.get_resource_status_summary(branch=branch)
 
@@ -392,9 +677,13 @@ class TestResourceStatusSummary:
 
     def test_all_branches_aggregates_active_non_commissary_only(self, branch):
         commissary = Branch.objects.create(name="Central Kitchen", code="CK", is_commissary=True)
-        product = Product.objects.create(name="Sugar", price="55.00", reorder_threshold=10)
-        Inventory.objects.create(branch=branch, product=product, quantity_on_hand=50)
-        Inventory.objects.create(branch=commissary, product=product, quantity_on_hand=200)
+        product = Product.objects.create(name="Sugar", price="55.00")
+        Inventory.objects.create(
+            branch=branch, product=product, quantity_on_hand=50, reorder_threshold=10
+        )
+        Inventory.objects.create(
+            branch=commissary, product=product, quantity_on_hand=200, reorder_threshold=10
+        )
 
         summary = services.get_resource_status_summary(branch=None)
 
@@ -403,6 +692,25 @@ class TestResourceStatusSummary:
     def test_empty_inventory_defaults_to_full_sufficiency_not_a_crash(self, branch):
         summary = services.get_resource_status_summary(branch=branch)
         assert summary["total_items"] == 0
+        assert summary["sufficiency_pct"] == 100
+
+    def test_discontinued_product_does_not_count_toward_sufficiency(self, branch):
+        """A discontinued item shouldn't count toward or against the
+        sufficiency percentage shown on the Dashboard KPI card."""
+        discontinued = Product.objects.create(
+            name="Discontinued Item", price="10.00", is_active=False
+        )
+        Inventory.objects.create(
+            branch=branch, product=discontinued, quantity_on_hand=0, reorder_threshold=10
+        )
+        adequate = Product.objects.create(name="Flour", price="45.00")
+        Inventory.objects.create(
+            branch=branch, product=adequate, quantity_on_hand=50, reorder_threshold=10
+        )
+
+        summary = services.get_resource_status_summary(branch=branch)
+        assert summary["total_items"] == 1
+        assert summary["critical_count"] == 0
         assert summary["sufficiency_pct"] == 100
 
 
@@ -418,10 +726,14 @@ class TestProductAvailabilityEnhancements:
     def test_stats_reflect_real_inventory_across_all_branches(
         self, owner_client, branch, other_branch
     ):
-        cashew = Product.objects.create(name="Cashew Nuts", price="650.00", reorder_threshold=10)
-        flour = Product.objects.create(name="Flour", price="45.00", reorder_threshold=10)
-        Inventory.objects.create(branch=branch, product=cashew, quantity_on_hand=0)
-        Inventory.objects.create(branch=other_branch, product=flour, quantity_on_hand=50)
+        cashew = Product.objects.create(name="Cashew Nuts", price="650.00")
+        flour = Product.objects.create(name="Flour", price="45.00")
+        Inventory.objects.create(
+            branch=branch, product=cashew, quantity_on_hand=0, reorder_threshold=10
+        )
+        Inventory.objects.create(
+            branch=other_branch, product=flour, quantity_on_hand=50, reorder_threshold=10
+        )
 
         response = owner_client.get(reverse("inventory:product_management"))
         stats = response.context["stats"]
@@ -429,6 +741,17 @@ class TestProductAvailabilityEnhancements:
         assert stats["critical_count"] == 1
         assert stats["available_count"] == 1
         assert stats["total_stock"] == 50
+
+    def test_discontinued_product_is_excluded_from_the_list_and_stats(self, owner_client, branch):
+        discontinued = Product.objects.create(
+            name="Discontinued Item", price="10.00", is_active=False
+        )
+        Inventory.objects.create(branch=branch, product=discontinued, quantity_on_hand=25)
+
+        response = owner_client.get(reverse("inventory:product_management"))
+        assert response.context["stats"]["total_products"] == 0
+        assert len(response.context["items"]) == 0
+        assert b"Discontinued Item" not in response.content
 
     def test_total_stock_stat_does_not_go_negative_from_an_oversold_item(
         self, owner_client, branch, other_branch

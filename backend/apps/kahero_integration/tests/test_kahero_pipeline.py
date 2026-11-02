@@ -5,6 +5,7 @@ views (Row 7.1, 7.4).
 """
 
 import io
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -188,6 +189,51 @@ class TestIngestion:
         assert batch.status == KaheroImportBatch.Status.FAILED
         assert batch.error_log[0]["message"]  # some message recorded
 
+    def test_reuploading_the_same_file_skips_every_row_as_duplicate(
+        self, kahero_branch, owner, product
+    ):
+        """Backend gap assessment item 4 (Phase 1, critical): KaHero
+        exports carry no external ID, so a staff member re-uploading the
+        same file (accidentally, or because KaHero re-sent it) must not
+        silently double every sale."""
+        services.process_kahero_upload(kahero_branch, owner, _make_csv(VALID_CSV))
+        assert SalesTransaction.objects.filter(branch=kahero_branch).count() == 2
+
+        second_batch = services.process_kahero_upload(kahero_branch, owner, _make_csv(VALID_CSV))
+
+        # No new sales created the second time around.
+        assert SalesTransaction.objects.filter(branch=kahero_branch).count() == 2
+        assert second_batch.success_count == 0
+        assert second_batch.error_count == 2
+        assert all("Duplicate" in e["message"] for e in second_batch.error_log)
+
+    def test_duplicate_detection_is_scoped_per_branch(self, owner, product):
+        """The same sale figures showing up at a different branch's own
+        export is not a duplicate of this branch's import -- each branch
+        reconciles its own KaHero data independently."""
+        # Only one branch may carry is_kahero_branch=True at a time (backend
+        # gap assessment: accounts.Branch.unique_kahero_branch constraint) --
+        # that flag is unrelated to process_kahero_upload's own scoping, so
+        # branch_b is a plain branch here, not a second KaHero branch.
+        branch_a = Branch.objects.create(name="Alangilan", code="ALANGILAN", is_kahero_branch=True)
+        branch_b = Branch.objects.create(name="Batangas", code="BATANGAS")
+
+        services.process_kahero_upload(branch_a, owner, _make_csv(VALID_CSV))
+        second_batch = services.process_kahero_upload(branch_b, owner, _make_csv(VALID_CSV))
+
+        assert second_batch.success_count == 2
+        assert SalesTransaction.objects.filter(branch=branch_b).count() == 2
+
+    def test_two_distinct_rows_with_the_same_product_and_date_are_not_flagged(
+        self, kahero_branch, owner, product
+    ):
+        """VALID_CSV's two rows share a product and date but differ in
+        quantity -- real, distinct sales, not a duplicate re-import."""
+        batch = services.process_kahero_upload(kahero_branch, owner, _make_csv(VALID_CSV))
+
+        assert batch.success_count == 2
+        assert batch.error_count == 0
+
     def test_quality_rate_reflects_success_ratio(self, kahero_branch, owner, product):
         csv_text = (
             "transaction_date,product_name,quantity,unit_price\n"
@@ -200,6 +246,65 @@ class TestIngestion:
         # has_warnings must flag that it wasn't a clean import.
         assert batch.status == KaheroImportBatch.Status.COMPLETED
         assert batch.has_warnings is True
+
+
+class TestCatchAllExceptionHandling:
+    """Backend gap assessment item 27: an unanticipated exception (a DB
+    issue, or anything else nobody wrote a specific handler for) must
+    never crash the request or leave the batch stuck at PROCESSING --
+    it must always resolve to a terminal FAILED status with the error
+    logged, same as any other, anticipated failure."""
+
+    def test_unexpected_error_during_parsing_fails_the_batch_cleanly(self, kahero_branch, owner):
+        with patch(
+            "apps.kahero_integration.services.parse_kahero_file",
+            side_effect=RuntimeError("boom"),
+        ):
+            batch = services.process_kahero_upload(kahero_branch, owner, _make_csv(VALID_CSV))
+
+        assert batch.status == KaheroImportBatch.Status.FAILED
+        assert batch.completed_at is not None
+        assert "unexpected error" in batch.error_log[0]["message"].lower()
+
+    def test_unexpected_error_during_ingestion_fails_the_whole_batch_cleanly(
+        self, kahero_branch, owner, product
+    ):
+        with patch(
+            "apps.kahero_integration.services._ingest_rows",
+            side_effect=RuntimeError("boom"),
+        ):
+            batch = services.process_kahero_upload(kahero_branch, owner, _make_csv(VALID_CSV))
+
+        assert batch.status == KaheroImportBatch.Status.FAILED
+        assert batch.completed_at is not None
+        assert "unexpected error" in batch.error_log[0]["message"].lower()
+        # The batch never gets stuck at PROCESSING -- it always reaches
+        # a terminal status, even when the failure was unanticipated.
+        assert batch.status != KaheroImportBatch.Status.PROCESSING
+
+    def test_unexpected_error_on_one_row_is_skipped_not_fatal_to_the_batch(
+        self, kahero_branch, owner, product
+    ):
+        """A single bad row raising something nobody anticipated (here,
+        simulated via a broken date parse) must be recorded as a
+        row-level error and skipped -- the row(s) around it must still
+        be ingested, same tolerance as the already-handled "product not
+        found" / "invalid price" cases."""
+        csv_text = (
+            "transaction_date,product_name,quantity,unit_price\n"
+            "2026-08-01,Spanish Latte,2,125.00\n"
+            "2026-08-01,Spanish Latte,1,125.00\n"
+        )
+        with patch(
+            "apps.kahero_integration.services._parse_transaction_date",
+            side_effect=[RuntimeError("boom"), services._parse_transaction_date("2026-08-01")],
+        ):
+            batch = services.process_kahero_upload(kahero_branch, owner, _make_csv(csv_text))
+
+        assert batch.success_count == 1
+        assert batch.error_count == 1
+        assert batch.status == KaheroImportBatch.Status.COMPLETED
+        assert any("unexpected error" in e["message"].lower() for e in batch.error_log)
 
 
 class TestSilentSkipWarningUI:

@@ -1,0 +1,97 @@
+{% extends "admin_base.html" %}
+{% block admin_title %}Edit Account{% endblock %}
+{% block admin_content %}
+
+<div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+        <h1 class="h5 mb-1">Edit Account &mdash; {{ target.username }}</h1>
+        <p class="text-muted small mb-0">
+            {{ target.role.get_name_display }}
+            {% if target.branch %} &middot; {{ target.branch.name }}{% endif %}
+        </p>
+    </div>
+    <a href="{% url 'accounts:account_management' %}" class="btn btn-sm btn-outline-secondary">
+        &larr; All Accounts
+    </a>
+</div>
+
+{% if error %}
+<div class="alert alert-danger py-2">{{ error }}</div>
+{% endif %}
+
+{% if generated_pin %}
+<div class="alert alert-success py-2">
+    New PIN for {{ target.username }}: <strong>{{ generated_pin }}</strong> &mdash; write it down
+    now, it won't be shown again.
+</div>
+{% endif %}
+
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="jc-card p-4">
+            <h2 class="h6 mb-3">Details</h2>
+            <form method="post">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="update">
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <label class="form-label small fw-semibold">First Name</label>
+                        <input type="text" name="first_name" class="form-control" value="{{ target.first_name }}">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small fw-semibold">Last Name</label>
+                        <input type="text" name="last_name" class="form-control" value="{{ target.last_name }}">
+                    </div>
+                </div>
+                {% if target.role.name != "OWNER_ADMIN" %}
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Branch</label>
+                    <select name="branch" class="form-select" required>
+                        {% for b in branches %}
+                        <option value="{{ b.pk }}" {% if target.branch_id == b.pk %}selected{% endif %}>
+                            {{ b.name }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endif %}
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <label class="form-label small fw-semibold">Employee ID</label>
+                        <input type="text" name="employee_id" class="form-control" value="{{ target.employee_id|default:'' }}">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small fw-semibold">Phone Number</label>
+                        <input type="text" name="phone_number" class="form-control" value="{{ target.phone_number }}">
+                    </div>
+                </div>
+                <div class="form-check mb-4">
+                    <input type="checkbox" name="is_active" id="id_is_active" class="form-check-input" {% if target.is_active %}checked{% endif %}>
+                    <label class="form-check-label small" for="id_is_active">Active</label>
+                </div>
+                <button type="submit" class="btn" style="background: var(--jc-orange); color: #fff;">
+                    Save Changes
+                </button>
+            </form>
+        </div>
+    </div>
+
+    {% if target.role.name == "BRANCH_STAFF" %}
+    <div class="col-lg-6">
+        <div class="jc-card p-4">
+            <h2 class="h6 mb-2">Cashier PIN</h2>
+            <p class="text-muted small mb-3">
+                Generates a brand new random PIN and replaces the current one immediately,
+                also clearing any active lockout. The old PIN stops working right away.
+            </p>
+            <form method="post" onsubmit="return confirm('Reset {{ target.username }}\'s PIN? The current PIN will stop working immediately.');">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="reset_pin">
+                <button type="submit" class="btn btn-outline-secondary">Reset PIN</button>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+{% endblock %}

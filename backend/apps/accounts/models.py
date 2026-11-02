@@ -51,6 +51,22 @@ class Branch(TimestampedModel):
     class Meta:
         verbose_name_plural = "branches"
         ordering = ["name"]
+        constraints = [
+            # Enforces the "exactly one branch should have this True"
+            # invariant documented above at the database level -- without
+            # this, nothing stopped two branches from both being flagged
+            # True (or the flag drifting to zero), and
+            # kahero_integration's `.filter(is_kahero_branch=True).first()`
+            # would silently pick an arbitrary one rather than erroring.
+            # A partial unique index (only rows where the flag is True)
+            # rather than a plain unique=True, since False is allowed on
+            # every other branch.
+            models.UniqueConstraint(
+                fields=["is_kahero_branch"],
+                condition=models.Q(is_kahero_branch=True),
+                name="unique_kahero_branch",
+            ),
+        ]
 
     def __str__(self):
         return self.name
@@ -98,6 +114,16 @@ class User(AbstractUser):
     )
     employee_id = models.CharField(max_length=20, unique=True, null=True, blank=True)
     phone_number = models.CharField(max_length=20, blank=True)
+    # Brute-force lockout for the password-based login doors (Admin,
+    # Commissary) -- mirrors CashierPIN's own failed_attempts/locked_until
+    # fields below, same threshold/duration policy, applied here because
+    # neither of those doors had any attempt limit at all (unlike the
+    # PIN-based Cashier flow, which already tracks this per-CashierPIN).
+    failed_attempts = models.PositiveIntegerField(default=0)
+    locked_until = models.DateTimeField(null=True, blank=True)
+
+    def is_locked(self) -> bool:
+        return bool(self.locked_until and self.locked_until > timezone.now())
 
     def __str__(self):
         return self.get_full_name() or self.username

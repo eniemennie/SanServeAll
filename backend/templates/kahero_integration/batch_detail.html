@@ -1,13 +1,14 @@
-{% extends "base.html" %}
-{% block title %}Batch #{{ batch.pk }} - SanServeAll{% endblock %}
-{% block content %}
-<div class="container py-4">
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h1 class="h4">Batch #{{ batch.pk }}</h1>
-        <a href="{% url 'kahero:dashboard' %}" class="btn btn-outline-secondary btn-sm">Back to Dashboard</a>
-    </div>
+{% extends "admin_base.html" %}
+{% block admin_title %}Batch #{{ batch.pk }}{% endblock %}
+{% block admin_content %}
 
-    <dl class="row">
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h5 mb-0" style="color: var(--jc-text);">Batch #{{ batch.pk }}</h1>
+    <a href="{% url 'kahero:dashboard' %}" class="btn btn-jc-outline btn-sm">Back to Dashboard</a>
+</div>
+
+<div class="jc-card p-3 mb-3">
+    <dl class="row mb-0">
         <dt class="col-sm-3">File</dt>
         <dd class="col-sm-9">{{ batch.original_filename }}</dd>
         <dt class="col-sm-3">Branch</dt>
@@ -17,25 +18,27 @@
         <dt class="col-sm-3">Rows</dt>
         <dd class="col-sm-9">{{ batch.success_count }} succeeded / {{ batch.error_count }} failed / {{ batch.total_rows }} total</dd>
         <dt class="col-sm-3">Quality Rate</dt>
-        <dd class="col-sm-9">{% if batch.quality_rate is not None %}{{ batch.quality_rate }}%{% else %}&mdash;{% endif %}</dd>
+        <dd class="col-sm-9 mb-0">{% if batch.quality_rate is not None %}{{ batch.quality_rate }}%{% else %}&mdash;{% endif %}</dd>
     </dl>
+</div>
 
-    {% if batch.has_warnings %}
-    <div class="alert alert-warning py-2 mt-3">
-        This batch completed, but {{ batch.error_count }} of {{ batch.total_rows }} row(s) were
-        skipped and were not imported. Review the errors below before relying on this data.
-    </div>
-    {% endif %}
+{% if batch.has_warnings %}
+<div class="alert alert-warning py-2 mb-3">
+    This batch completed, but {{ batch.error_count }} of {{ batch.total_rows }} row(s) were
+    skipped and were not imported. Review the errors below before relying on this data.
+</div>
+{% endif %}
 
+<div class="jc-card p-3">
     {% if batch.error_log %}
-    <h2 class="h6 mt-4">Row Errors</h2>
+    <div class="fw-semibold mb-2">Row Errors</div>
     <ul class="list-group">
         {% for err in batch.error_log %}
-        <li class="list-group-item small text-danger">{{ err.message }}</li>
+        <li class="list-group-item small" style="color: var(--jc-critical);">{{ err.message }}</li>
         {% endfor %}
     </ul>
     {% else %}
-    <p class="text-muted">No errors recorded for this batch.</p>
+    <p class="text-muted mb-0">No errors recorded for this batch.</p>
     {% endif %}
 </div>
 {% endblock %}

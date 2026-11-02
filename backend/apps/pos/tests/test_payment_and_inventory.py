@@ -3,6 +3,8 @@ Tests for Week 5: Payment Processing (Fig. 3-16), Transaction Receipt
 (Fig. 3-17), and the real-time inventory deduction hook (Row 5.3).
 """
 
+from unittest.mock import patch
+
 import pytest
 from django.urls import reverse
 
@@ -92,6 +94,39 @@ class TestCompleteSalePayment:
         assert result.change_due == pytest.approx(50.00)
         assert result.completed_at is not None
 
+    @pytest.mark.parametrize("method", ["GCASH", "CARD", "OTHER_DIGITAL_BANKS"])
+    def test_non_cash_methods_always_record_the_exact_total_as_tendered(
+        self, cashier, branch, product, method
+    ):
+        """Backend gap assessment: GCash/Card/Other Digital Banks have no
+        "change" concept -- the cashier charges the exact total, so
+        whatever (if anything) is posted as amount_tendered for these
+        methods is ignored in favor of the total itself."""
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 2)  # total = 250.00
+
+        result = services.complete_sale_payment(draft, method, "1.00")
+
+        assert result.status == SalesTransaction.Status.COMPLETED
+        assert result.payment_method == method
+        assert result.amount_tendered == pytest.approx(250.00)
+        assert result.change_due == pytest.approx(0.00)
+
+    @pytest.mark.parametrize("method", ["GCASH", "CARD", "OTHER_DIGITAL_BANKS"])
+    def test_non_cash_methods_succeed_with_no_amount_tendered_posted(
+        self, cashier, branch, product, method
+    ):
+        """The payment template no longer requires an amount for these
+        modes client-side (see payment.html's applyPaymentModeVisibility),
+        so the service itself must not depend on receiving one either."""
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 1)  # total = 125.00
+
+        result = services.complete_sale_payment(draft, method, "")
+
+        assert result.status == SalesTransaction.Status.COMPLETED
+        assert result.amount_tendered == pytest.approx(125.00)
+
     def test_native_branch_sale_deducts_inventory(self, cashier, branch, product):
         # `product` fixture already provisioned an Inventory row at
         # `branch` (quantity 0) -- set the real starting quantity on it
@@ -158,6 +193,46 @@ class TestCompleteSalePayment:
         assert new_draft.status == SalesTransaction.Status.DRAFT
         assert not new_draft.items.exists()
 
+    def test_locks_the_draft_row_before_finalizing_it(self, cashier, branch, product):
+        """POS Double-submission guard (gap assessment): the
+        SalesTransaction row must be locked with select_for_update()
+        before it's checked/finalized, so two near-simultaneous
+        submissions can't both read status=DRAFT and both pass. In-memory
+        sqlite (this project's test backend) can't reproduce the real
+        concurrent race, so this asserts the locking call itself is
+        actually made rather than silently skipped."""
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 1)
+
+        with patch(
+            "apps.pos.models.SalesTransaction.objects.select_for_update",
+            wraps=SalesTransaction.objects.select_for_update,
+        ) as mock_lock:
+            services.complete_sale_payment(draft, "CASH", "200.00")
+        mock_lock.assert_called_once()
+
+    def test_resubmitting_an_already_completed_draft_is_rejected_cleanly(
+        self, cashier, branch, product
+    ):
+        """Whether or not the two submissions are truly concurrent, a
+        second finalize attempt against an already-COMPLETED transaction
+        must always be rejected, not silently re-run the deduction a
+        second time against the same stock and the same transaction
+        record."""
+        Inventory.objects.filter(branch=branch, product=product).update(quantity_on_hand=10)
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 3)
+
+        services.complete_sale_payment(draft, "CASH", "500.00")
+
+        with pytest.raises(services.PaymentError, match="already been paid for"):
+            services.complete_sale_payment(draft, "CASH", "500.00")
+
+        # Inventory was deducted exactly once, not twice.
+        inventory = Inventory.objects.get(branch=branch, product=product)
+        assert inventory.quantity_on_hand == 7
+        assert InventoryTransaction.objects.filter(branch=branch, product=product).count() == 1
+
 
 class TestPaymentView:
     def test_payment_page_loads_with_current_draft(self, unlocked_client, cashier, branch, product):
@@ -210,6 +285,25 @@ class TestPaymentView:
             draft.refresh_from_db()
             assert draft.status == SalesTransaction.Status.COMPLETED
             assert draft.payment_method == method
+
+    def test_non_cash_payment_succeeds_via_the_view_with_no_amount_posted(
+        self, unlocked_client, cashier, branch, product
+    ):
+        """End-to-end confirmation of the same gap-assessment fix: the
+        view must not require amount_tendered for a non-cash mode either,
+        matching the template's own js-driven relaxation of the field."""
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 1)
+
+        response = unlocked_client.post(
+            reverse("pos:payment"), {"payment_method": "GCASH", "amount_tendered": ""}
+        )
+        assert response.status_code == 302
+
+        draft.refresh_from_db()
+        assert draft.status == SalesTransaction.Status.COMPLETED
+        assert draft.payment_method == "GCASH"
+        assert draft.amount_tendered == draft.grand_total
 
     def test_shows_the_quick_amount_buttons(self, unlocked_client, cashier, branch, product):
         draft = services.get_or_create_draft_transaction(cashier, branch)
@@ -270,6 +364,43 @@ class TestPaymentView:
 
         second_load = unlocked_client.get(reverse("pos:ordering"))
         assert b'id="transactionCompleteModal"' not in second_load.content
+
+    def test_print_css_isolates_the_modal_without_a_fixed_position_bug(
+        self, unlocked_client, cashier, branch, product
+    ):
+        """Regression test for the "3 identical copies" print/PDF bug:
+        the old @media print rule only used `visibility: hidden` on the
+        rest of the page, which doesn't collapse layout height, while
+        the modal itself kept Bootstrap's `position: fixed` -- a
+        fixed-position element is redrawn on every paginated print
+        page, so a tall (invisible) POS page produced that many
+        identical printed copies of the receipt. The fix hides every
+        other direct child of <body> with `display: none` (actually
+        removing them from layout) and drops the modal's fixed
+        positioning during print. This only checks the rule is present
+        in the rendered page -- Django's test client can't execute
+        real browser pagination -- so it guards against someone
+        reverting to the old `visibility`-only approach by accident."""
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 1)
+        unlocked_client.post(
+            reverse("pos:payment"), {"payment_method": "CASH", "amount_tendered": "200.00"}
+        )
+
+        response = unlocked_client.get(reverse("pos:ordering"))
+
+        # The fix: other direct children of <body> are actually removed
+        # from layout (not just hidden), and the modal's fixed
+        # positioning is dropped during print.
+        assert b"body > *:not(#transactionCompleteModal) { display: none !important; }" in (
+            response.content
+        )
+        assert b"position: static !important;" in response.content
+
+        # The old buggy pattern must not come back: visibility alone
+        # doesn't collapse layout height, which is what caused the
+        # multi-page repeat in the first place.
+        assert b"body * { visibility: hidden; }" not in response.content
 
     def test_insufficient_payment_shows_error_and_stays_on_page(
         self, unlocked_client, cashier, branch, product

@@ -307,6 +307,17 @@ def complete_sale_payment(draft, payment_method, amount_tendered):
     Deliberately atomic: the transaction status change and every inventory
     deduction happen together, or none of them do. A sale should never be
     marked paid while only half its stock got deducted.
+
+    Gap-assessment "POS Double-submission guard" (no explicit idempotency
+    control previously existed): a double-click or network retry landing
+    two near-simultaneous requests against the same still-DRAFT
+    transaction could both pass every check above and both reach this
+    atomic block, deducting inventory twice against one transaction
+    record. Locks this SalesTransaction row with select_for_update()
+    inside the atomic block and re-checks its status is still DRAFT
+    before finalizing it -- the second request blocks until the first
+    commits, then sees status=COMPLETED and is rejected cleanly instead
+    of re-running the deduction.
     """
     if not draft.items.exists():
         raise PaymentError("Cannot process payment for an empty order.")
@@ -314,29 +325,45 @@ def complete_sale_payment(draft, payment_method, amount_tendered):
     if payment_method not in SalesTransaction.PaymentMethod.values:
         raise PaymentError("Please select a valid payment method.")
 
-    try:
-        amount_tendered = Decimal(str(amount_tendered))
-    except (InvalidOperation, TypeError):
-        raise PaymentError("Please enter a valid amount.")
-
     total = draft.grand_total
-    if amount_tendered < total:
-        raise PaymentError("Amount tendered is less than the total due.")
+
+    if payment_method == SalesTransaction.PaymentMethod.CASH:
+        try:
+            amount_tendered = Decimal(str(amount_tendered))
+        except (InvalidOperation, TypeError):
+            raise PaymentError("Please enter a valid amount.")
+        if amount_tendered < total:
+            raise PaymentError("Amount tendered is less than the total due.")
+    else:
+        # Backend gap assessment: GCash/Card/Other Digital Banks have no
+        # "change" concept -- the cashier isn't handed a bill to make
+        # change from, they charge the exact total. Previously this
+        # still ran through the same cash-tendered validation, so a
+        # cashier picking a non-cash mode had to type in the total
+        # amount manually just to satisfy the "amount tendered >= total"
+        # check. The amount actually recorded is always exactly the
+        # total for these methods, regardless of whatever (if anything)
+        # was posted for amount_tendered.
+        amount_tendered = total
 
     with transaction.atomic():
-        draft.payment_method = payment_method
-        draft.amount_tendered = amount_tendered
-        draft.status = SalesTransaction.Status.COMPLETED
-        draft.completed_at = timezone.now()
-        draft.save()
+        locked_draft = SalesTransaction.objects.select_for_update().get(pk=draft.pk)
+        if locked_draft.status != SalesTransaction.Status.DRAFT:
+            raise PaymentError("This order has already been paid for.")
+
+        locked_draft.payment_method = payment_method
+        locked_draft.amount_tendered = amount_tendered
+        locked_draft.status = SalesTransaction.Status.COMPLETED
+        locked_draft.completed_at = timezone.now()
+        locked_draft.save()
 
         # KaHero-branch (Alangilan) inventory is reconciled through the
         # batch-import pipeline, not real-time POS sales -- deliberately
         # skipped here, matching the Phase 2/3 architecture decision.
-        if not draft.branch.is_kahero_branch:
-            _deduct_inventory_for_sale(draft)
+        if not locked_draft.branch.is_kahero_branch:
+            _deduct_inventory_for_sale(locked_draft)
 
-    return draft
+    return locked_draft
 
 
 def _deduct_inventory_for_sale(transaction_obj):

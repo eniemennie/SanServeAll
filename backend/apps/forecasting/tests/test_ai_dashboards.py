@@ -138,6 +138,26 @@ class TestCalculateRecommendedReorderQuantity:
         # Already has more than enough stock
         assert services.calculate_recommended_reorder_quantity(1, 1000) == 0
 
+    def test_is_driven_by_trailing_average_not_the_holt_winters_forecast(self, branch, latte):
+        """Backend gap assessment item 22: documents, as an intentional
+        and now-tested fact, that the reorder recommendation is driven by
+        InventoryRiskScore.avg_daily_demand (a 30-day trailing actual-sales
+        average) and NOT by Forecast.predicted_quantity (the separate
+        Holt-Winters model output). A Forecast row predicting a huge spike
+        must have zero effect on the recommended quantity, which should
+        track only the trailing average passed in."""
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=timezone.now().date(),
+            predicted_quantity=99999,
+            model_used="holt_winters",
+        )
+
+        # avg_daily_demand=5, target_days=14 -> need 70, have 10 -> recommend 60,
+        # completely unaffected by the Forecast row's huge predicted_quantity above.
+        assert services.calculate_recommended_reorder_quantity(5, 10, target_days=14) == 60
+
 
 class TestGetCriticalAlerts:
     def test_only_includes_high_risk_items(self, branch, latte):
@@ -419,9 +439,7 @@ class TestResourceManagementDashboardView:
         from apps.inventory.models import Inventory, Product as InventoryProduct
 
         other_branch = Branch.objects.create(name="Alangilan", code="ALANGILAN")
-        cashew = InventoryProduct.objects.create(
-            name="Cashew Nuts", price="650.00", reorder_threshold=10
-        )
+        cashew = InventoryProduct.objects.create(name="Cashew Nuts", price="650.00")
         Inventory.objects.create(branch=branch, product=cashew, quantity_on_hand=0)
         Inventory.objects.create(branch=other_branch, product=cashew, quantity_on_hand=50)
 
@@ -473,9 +491,7 @@ class TestExportResourceReportView:
     def test_finished_goods_section_reflects_the_selected_branch(self, owner_client, branch):
         from apps.inventory.models import Inventory, Product as InventoryProduct
 
-        cashew = InventoryProduct.objects.create(
-            name="Cashew Nuts", price="650.00", reorder_threshold=10
-        )
+        cashew = InventoryProduct.objects.create(name="Cashew Nuts", price="650.00")
         Inventory.objects.create(branch=branch, product=cashew, quantity_on_hand=0)
 
         response = owner_client.get(

@@ -15,12 +15,25 @@ class ProductionRecord(models.Model):
     class Quality(models.TextChoices):
         PASS = "PASS", "Pass"
         FAIL = "FAIL", "Fail"
+        # Client raw-data import (Production_Records.xlsx): 10/356 real
+        # batches are still IN_PROGRESS/PENDING and genuinely have no
+        # quality verdict yet -- storing those as PASS (implies it
+        # passed inspection) or FAIL (implies it failed) would record a
+        # verdict that was never actually given.
+        PENDING = "PENDING", "Pending"
 
     class Status(models.TextChoices):
         PENDING = "PENDING", "Pending"
         IN_PROGRESS = "IN_PROGRESS", "In Progress"
         COMPLETED = "COMPLETED", "Completed"
 
+    # Client raw-data import (Production_Records.xlsx): the client's own
+    # human-readable batch label (e.g. "BATCH-0001"). Nullable/blank for
+    # any batch created the normal way through this app, which has never
+    # needed its own label -- only imported history carries one, so a
+    # future "check batch BATCH-0042" request from the client has
+    # something to look up by.
+    batch_ref = models.CharField(max_length=32, blank=True, null=True, unique=True, default=None)
     commissary_staff = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     product = models.ForeignKey(
         "inventory.Product",
@@ -42,6 +55,91 @@ class ProductionRecord(models.Model):
         return f"Batch #{self.pk}: {self.quantity_produced} x {self.product.name}"
 
 
+class StockTransferOrder(models.Model):
+    """Tracks finished goods moving from the Commissary to a branch
+    (manuscript's "Supply distribution record updates per branch" --
+    Production/Commissary FR group -- and the "Stock order status
+    tracking (processing, in transit, delivered)" bullet under FR-02).
+
+    Deliberately a separate model from ProductionRecord: production is
+    "commissary made X units of product Y", distribution is "commissary
+    sent N of its already-on-hand units to branch Z" -- two different
+    real-world events, and ProductionRecord's own docstring already notes
+    there's no honest way to attribute a production run to a destination
+    branch. Before this model existed, output produced at the commissary
+    had no way to ever reach a branch's own Inventory at all.
+
+    Status is forward-only (see services.advance_stock_transfer_status):
+    PROCESSING -> IN_TRANSIT -> DELIVERED. Stock leaves the commissary's
+    Inventory the moment an order is created (PROCESSING) -- once
+    dispatched, it isn't available there anymore -- and only lands in the
+    destination branch's Inventory once DELIVERED is confirmed. While
+    IN_TRANSIT, the quantity is accounted for by this row alone, not
+    double-counted as available at either branch.
+
+    CANCELLED (backend gap assessment item 24) is the one exception to
+    "forward-only": an order can be cancelled from PROCESSING or
+    IN_TRANSIT (see services.cancel_stock_transfer_order), which returns
+    the quantity to the commissary's Inventory -- reversing the deduction
+    made at creation time. Once DELIVERED, an order is final and cannot
+    be cancelled; a delivered shipment that needs correcting is a new,
+    separate transfer or a manual inventory adjustment, not a reversal of
+    this record.
+    """
+
+    class Status(models.TextChoices):
+        PROCESSING = "PROCESSING", "Processing"
+        IN_TRANSIT = "IN_TRANSIT", "In Transit"
+        DELIVERED = "DELIVERED", "Delivered"
+        CANCELLED = "CANCELLED", "Cancelled"
+
+    # Client raw-data import (Stock_Transfer.xlsx): same reasoning as
+    # ProductionRecord.batch_ref -- preserves the client's own
+    # "TRANSFER-0001"-style label for imported history only.
+    transfer_ref = models.CharField(max_length=32, blank=True, null=True, unique=True, default=None)
+    commissary_staff = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="stock_transfer_orders",
+        help_text="Who recorded/dispatched this order.",
+    )
+    source_branch = models.ForeignKey(
+        "accounts.Branch",
+        on_delete=models.PROTECT,
+        related_name="stock_transfers_sent",
+        help_text="Always the commissary -- kept explicit (not hardcoded) for auditability.",
+    )
+    destination_branch = models.ForeignKey(
+        "accounts.Branch",
+        on_delete=models.PROTECT,
+        related_name="stock_transfers_received",
+    )
+    product = models.ForeignKey(
+        "inventory.Product",
+        on_delete=models.PROTECT,
+        help_text="The finished good being shipped to the destination branch.",
+    )
+    quantity = models.PositiveIntegerField()
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PROCESSING)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    delivered_at = models.DateTimeField(
+        null=True, blank=True, help_text="Set only when status actually reaches DELIVERED."
+    )
+    cancelled_at = models.DateTimeField(
+        null=True, blank=True, help_text="Set only when status actually reaches CANCELLED."
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return (
+            f"Transfer #{self.pk}: {self.quantity} x {self.product.name} "
+            f"{self.source_branch.code} -> {self.destination_branch.code} ({self.status})"
+        )
+
+
 class IngredientUsage(models.Model):
     """One raw material consumed by a ProductionRecord. A single
     production run typically uses several materials (flour, sugar,
@@ -56,7 +154,14 @@ class IngredientUsage(models.Model):
         on_delete=models.PROTECT,
         limit_choices_to={"product_type": "MATERIAL"},
     )
-    quantity_used = models.PositiveIntegerField()
+    # Decimal, 3 places: client raw-data import (Ingredient_Usage.xlsx)
+    # records real consumption down to a third decimal place for some
+    # materials (e.g. Cream of tartar: 0.019kg) -- finer than the 2
+    # places Inventory.quantity_on_hand uses, so this needs its own,
+    # wider precision to store those exactly rather than rounding away
+    # real small-quantity usage.
+    quantity_used = models.DecimalField(max_digits=12, decimal_places=3)
 
     def __str__(self):
-        return f"{self.quantity_used} x {self.material.name}"
+        unit = self.material.get_unit_of_measure_display()
+        return f"{self.quantity_used} {unit} x {self.material.name}"

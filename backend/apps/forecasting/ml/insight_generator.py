@@ -5,17 +5,21 @@ FR-04. Uses the raw HTTP API via `requests` rather than Google's SDK --
 one fewer dependency, and this only needs a single simple
 request/response, not the SDK's full feature surface.
 
-Uses the Gemini API (free tier via Google AI Studio -- no credit card,
-no expiration) rather than a paid provider, since this system's actual
-usage (a handful of one-sentence calls per night, see
-generate_insights_for_all_branches) is nowhere near the free tier's rate
-limits, and a capstone project with no maintenance budget shouldn't
-carry an ongoing paid dependency for this. Only aggregated, non-
-identifying data is ever sent (branch names, product names, computed
-risk levels -- never raw transactions or PII, matching the Responsible
-Use of AI data-minimization commitment already made elsewhere), which
-keeps the free tier's "prompts may be used to improve Google's
-products" caveat low-risk for this specific use case.
+Uses the Gemini API rather than Claude/OpenAI as FR-04 originally
+specified -- a confirmed deviation (discussed and approved with the
+project owner before switching, same as the ARIMA -> Holt-Winters swap
+in apps.forecasting.ml.forecast_model), made for the group's own
+financial reasons: a capstone project with no maintenance budget
+shouldn't carry an ongoing paid API dependency for a handful of one-
+sentence calls per night. Gemini's free tier (via Google AI Studio --
+no credit card, no expiration) comfortably covers this system's actual
+usage (see generate_insights_for_all_branches), nowhere near the free
+tier's rate limits. Only aggregated, non-identifying data is ever sent
+(branch names, product names, computed risk levels -- never raw
+transactions or PII, matching the Responsible Use of AI data-
+minimization commitment already made elsewhere), which keeps the free
+tier's "prompts may be used to improve Google's products" caveat
+low-risk for this specific use case.
 
 Falls back to a plain, clearly-labeled template message when no API key
 is configured or the API call fails -- the Decision Support System must
@@ -37,8 +41,17 @@ logger = logging.getLogger(__name__)
 # deprecations) is the place to check for its replacement. Flash (not
 # Pro) deliberately chosen: free-tier eligible, and this task (one plain
 # sentence from a short structured summary) doesn't need a larger model.
+#
+# Switched from gemini-2.5-flash (Oct 2026): confirmed via a live
+# staging run that it now returns 404 Not Found on generateContent for
+# this project's API key, even though models.list still advertises it.
+# Per Google's own changelog, the 2.5 series is access-restricted (not
+# deprecated) to keys that actively used it before this project's key
+# was created -- new keys get this exact 404. Google's changelog
+# recommends gemini-3.8-flash (GA since September 2026) for new
+# projects, so that's what's used here now.
 GEMINI_API_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
 )
 REQUEST_TIMEOUT_SECONDS = 15
 

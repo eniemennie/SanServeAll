@@ -8,11 +8,12 @@ from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse
 from django.test import RequestFactory
 from django.urls import reverse
+from django.views import View
 from django_otp.oath import totp
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from apps.accounts.models import Branch, Role, User
-from apps.accounts.permissions import role_required
+from apps.accounts.permissions import RoleRequiredMixin, role_required
 from apps.core.middleware import BranchScopingMiddleware
 
 pytestmark = pytest.mark.django_db
@@ -129,6 +130,75 @@ class TestRoleRequiredDecorator:
             dummy_view(request)
 
 
+class _DummyMixinView(RoleRequiredMixin, View):
+    """Minimal class-based view for exercising RoleRequiredMixin directly
+    (backend gap assessment: the mixin was added in anticipation of
+    future class-based views per the Phase 4 pattern, but no current CBV
+    uses it, and unlike its function-based sibling role_required -- see
+    TestRoleRequiredDecorator above -- it had no test of its own at all).
+    """
+
+    allowed_roles = [Role.OWNER_ADMIN]
+
+    def get(self, request, *args, **kwargs):
+        return HttpResponse("ok")
+
+
+class TestRoleRequiredMixin:
+    def test_user_with_allowed_role_passes(self, admin):
+        rf = RequestFactory()
+        request = rf.get("/")
+        request.user = admin
+        # Same reasoning as TestRoleRequiredDecorator's equivalent test:
+        # RequestFactory bypasses OTPMiddleware, so the verified-session
+        # state is simulated directly -- this test is about the mixin's
+        # ROLE check, not re-proving OTP enforcement.
+        request.user.is_verified = lambda: True
+
+        response = _DummyMixinView.as_view()(request)
+        assert response.status_code == 200
+
+    def test_user_without_allowed_role_is_denied(self, cashier):
+        rf = RequestFactory()
+        request = rf.get("/")
+        request.user = cashier
+
+        with pytest.raises(PermissionDenied):
+            _DummyMixinView.as_view()(request)
+
+    def test_owner_admin_without_otp_verification_is_redirected_to_admin_login(self, admin):
+        """Same Row 12.4 guarantee role_required enforces: holding the
+        allowed role alone isn't enough for Owner/Admin -- the current
+        session must have completed 2FA too, or the mixin redirects to
+        complete it rather than letting the view run."""
+        rf = RequestFactory()
+        request = rf.get("/")
+        request.user = admin
+        request.user.is_verified = lambda: False
+
+        response = _DummyMixinView.as_view()(request)
+        assert response.status_code == 302
+        assert response.url == reverse("accounts:admin_login")
+
+    def test_non_owner_admin_role_skips_otp_check_entirely(self, cashier):
+        """A role other than Owner/Admin never goes through 2FA at all
+        (see _user_requires_otp's own docstring) -- granting it access
+        here must not get blocked on an OTP check that doesn't apply."""
+
+        class _BranchStaffView(RoleRequiredMixin, View):
+            allowed_roles = [Role.BRANCH_STAFF]
+
+            def get(self, request, *args, **kwargs):
+                return HttpResponse("ok")
+
+        rf = RequestFactory()
+        request = rf.get("/")
+        request.user = cashier
+
+        response = _BranchStaffView.as_view()(request)
+        assert response.status_code == 200
+
+
 class TestAdminLogin:
     def test_valid_admin_credentials_log_in(self, client, admin):
         response = client.post(
@@ -175,6 +245,46 @@ class TestAdminLogin:
         assert response.status_code == 200
         assert not response.wsgi_request.user.is_authenticated
 
+    def test_locks_out_after_threshold_wrong_passwords_even_the_correct_one(self, client, admin):
+        """Previously unlimited -- any number of wrong passwords could be
+        tried against the admin login with no lockout at all, unlike the
+        Cashier PIN flow which already had one."""
+        from apps.accounts.services import LOGIN_LOCKOUT_THRESHOLD
+
+        for _ in range(LOGIN_LOCKOUT_THRESHOLD):
+            client.post(
+                reverse("accounts:admin_login"),
+                {"email": "owner@example.com", "password": "wrongpassword"},
+            )
+
+        response = client.post(
+            reverse("accounts:admin_login"),
+            {"email": "owner@example.com", "password": "adminpass123"},
+        )
+        assert response.status_code == 200
+        assert not response.wsgi_request.user.is_authenticated
+        assert b"Too many incorrect attempts" in response.content
+
+    def test_a_correct_password_on_the_wrong_role_does_not_count_toward_lockout(
+        self, client, cashier
+    ):
+        """A Branch Staff account's own correct password, tried on the
+        admin-only door, is refused -- but shouldn't move that account
+        toward locking its REAL login path, since the attacker didn't
+        fail to guess that account's password."""
+        cashier.email = "cashier@example.com"
+        cashier.save()
+
+        for _ in range(10):
+            client.post(
+                reverse("accounts:admin_login"),
+                {"email": "cashier@example.com", "password": "testpass123"},
+            )
+
+        cashier.refresh_from_db()
+        assert cashier.failed_attempts == 0
+        assert cashier.locked_until is None
+
 
 class TestTwoFactorSetup:
     def test_setup_page_shows_a_secret(self, client, admin):
@@ -219,7 +329,7 @@ class TestTwoFactorVerify:
             reverse("accounts:admin_2fa_verify"), {"token": _valid_token(device)}
         )
         assert response.status_code == 302
-        assert response.url == reverse("accounts:select_branch")
+        assert response.url == reverse("accounts:admin_dashboard")
 
     def test_incorrect_token_is_rejected(self, client, admin):
         TOTPDevice.objects.create(user=admin, name="default", confirmed=True)
@@ -266,6 +376,11 @@ class TestAdminDashboardEnforcement:
             reverse("accounts:admin_2fa_verify"), {"token": _valid_token(device)}
         )
         assert verify_response.status_code == 302
+        # Owner/Admin goes straight to the dashboard after 2FA -- no
+        # Branch Selection step, since that role isn't scoped to one
+        # branch and the dashboard's own branch filter is a separate,
+        # on-page control, not a login gate.
+        assert verify_response.url == reverse("accounts:admin_dashboard")
 
         dashboard_response = client.get(reverse("accounts:admin_dashboard"))
         assert dashboard_response.status_code == 200

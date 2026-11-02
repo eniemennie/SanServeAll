@@ -94,7 +94,13 @@ def run_risk_classification_for_all_inventory():
             branch=r["inventory"].branch,
             product=r["inventory"].product,
             risk_level=r["risk_level"],
-            quantity_on_hand=r["quantity_on_hand"],
+            # InventoryRiskScore.quantity_on_hand is an Integer snapshot
+            # field (unchanged by the client raw-data import -- it's a
+            # rounded point-in-time read for the classifier/dashboards,
+            # not the authoritative stock figure); Inventory.quantity_on_hand
+            # itself is now a Decimal, so this is cast explicitly rather
+            # than relying on the ORM's implicit int(Decimal) truncation.
+            quantity_on_hand=int(r["quantity_on_hand"]),
             avg_daily_demand=r["avg_daily_demand"],
             days_of_stock_left=r["days_of_stock_left"],
         )
@@ -176,7 +182,19 @@ def calculate_recommended_reorder_quantity(avg_daily_demand, quantity_on_hand, t
     `target_days` of average demand, accounting for what's already on
     hand. Deliberately not a sophisticated reorder-point optimization --
     that's a much bigger topic than this capstone's scope, and an honest
-    simple formula beats a falsely sophisticated-looking one."""
+    simple formula beats a falsely sophisticated-looking one.
+
+    Backend gap assessment item 22: this intentionally runs on
+    InventoryRiskScore.avg_daily_demand (a 30-day trailing actual-sales
+    average -- see ml/risk_classifier.py), NOT on Forecast.predicted_quantity
+    (the Holt-Winters model's own output, shown separately on the
+    Forecasting Dashboard). The two pipelines are deliberately decoupled
+    rather than wired together, since a reorder suggestion should reflect
+    what has actually been selling, not a short-horizon statistical
+    prediction that can be noisy for a slow-moving product. The UI makes
+    this explicit (see templates/forecasting/decision_support.html and
+    resource_management_dashboard.html) so a reviewer doesn't assume the
+    AI forecast drives this number."""
     if avg_daily_demand <= 0:
         return 0
     needed = (avg_daily_demand * target_days) - quantity_on_hand

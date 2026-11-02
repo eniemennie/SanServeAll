@@ -14,7 +14,6 @@ import io
 import json
 
 import qrcode
-from django.contrib.auth import authenticate
 from django.contrib.auth import login as auth_login
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_required
@@ -27,15 +26,21 @@ from django_otp.decorators import otp_required
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from apps.accounts.models import Branch, Role, User
+from apps.inventory.models import Product
 from apps.accounts.permissions import role_required
 from apps.accounts.services import (
+    AccountManagementError,
+    authenticate_with_lockout,
+    create_staff_account,
     generate_backup_codes,
+    get_manageable_accounts,
     get_selectable_branches,
     get_selectable_cashiers,
+    reset_cashier_pin,
+    update_staff_account,
     user_can_select_branch,
     user_requires_cashier_pin,
     verify_and_consume_backup_code,
-    verify_cashier_pin,
     verify_cashier_pin_with_lockout,
 )
 from apps.analytics import services as analytics_services
@@ -126,8 +131,18 @@ class BranchSelectionView(LoginRequiredMixin, View):
 
     Branch-scoped users (Branch Staff, Commissary Staff) have exactly one
     selectable branch and are routed straight through without being shown
-    a picker -- the screen only meaningfully appears for Owner/Admin, who
-    is choosing dashboard context rather than a work assignment.
+    a picker.
+
+    Owner/Admin already has access to every branch and is no longer routed
+    here as part of login (see TwoFactorVerifyView / the 2FA setup
+    confirmation, which go straight to admin_dashboard instead) -- forcing
+    a branch choice before even reaching the dashboard was unnecessary
+    friction for a role that isn't scoped to one branch in the first
+    place. This view and URL stay in place for Owner/Admin regardless:
+    features that need a specific branch context on demand -- e.g.
+    Inventory Monitoring's `_require_selected_branch` check -- still
+    redirect here to ask for one, and that picker still needs to work for
+    Owner/Admin when it does.
     """
 
     template_name = "accounts/branch_selection.html"
@@ -178,13 +193,19 @@ class CashierPinView(LoginRequiredMixin, View):
 
     def post(self, request):
         raw_pin = request.POST.get("pin", "")
-        if verify_cashier_pin(request.user, raw_pin):
+        # Routed through the same lockout-protected check as the
+        # tap-to-select Cashier Lock flow (CashierLockView) -- this screen
+        # guards the exact same POS-unlock boundary with a 4-digit PIN, so
+        # it needs the same brute-force protection, not a second,
+        # unprotected path to the same secret.
+        success, error = verify_cashier_pin_with_lockout(request.user, raw_pin)
+        if success:
             request.session["pos_unlocked"] = True
             return redirect("pos:ordering")
         return render(
             request,
             self.template_name,
-            {"error": "Incorrect PIN. Please try again."},
+            {"error": error},
         )
 
 
@@ -235,17 +256,15 @@ class AdminLoginView(View):
         password = request.POST.get("password", "")
 
         candidate = User.objects.filter(email__iexact=email).first()
-        user = None
-        if candidate is not None:
-            authed = authenticate(request, username=candidate.username, password=password)
-            if authed is not None and authed.role and authed.role.name == Role.OWNER_ADMIN:
-                user = authed
+        user, lockout_error = authenticate_with_lockout(
+            request, candidate, password, Role.OWNER_ADMIN
+        )
 
         if user is None:
             return render(
                 request,
                 self.template_name,
-                {"error": "Invalid email or password."},
+                {"error": lockout_error or "Invalid email or password."},
             )
 
         auth_login(request, user)
@@ -285,16 +304,16 @@ class CommissaryLoginView(View):
         username = request.POST.get("username", "").strip()
         password = request.POST.get("password", "")
 
-        authed = authenticate(request, username=username, password=password)
-        user = None
-        if authed is not None and authed.role and authed.role.name == Role.COMMISSARY_STAFF:
-            user = authed
+        candidate = User.objects.filter(username__iexact=username).first()
+        user, lockout_error = authenticate_with_lockout(
+            request, candidate, password, Role.COMMISSARY_STAFF
+        )
 
         if user is None:
             return render(
                 request,
                 self.template_name,
-                {"error": "Invalid username or password."},
+                {"error": lockout_error or "Invalid username or password."},
             )
 
         auth_login(request, user)
@@ -360,13 +379,13 @@ class TwoFactorVerifyView(LoginRequiredMixin, View):
         for device in TOTPDevice.objects.filter(user=request.user, confirmed=True):
             if device.verify_token(token):
                 otp_login(request, device)
-                return redirect("accounts:select_branch")
+                return redirect("accounts:admin_dashboard")
 
         if verify_and_consume_backup_code(request.user, token):
             device = TOTPDevice.objects.filter(user=request.user, confirmed=True).first()
             if device is not None:
                 otp_login(request, device)
-            return redirect("accounts:select_branch")
+            return redirect("accounts:admin_dashboard")
 
         return render(
             request,
@@ -395,11 +414,13 @@ def regenerate_backup_codes(request):
 @otp_required(login_url="accounts:admin_login")
 def admin_dashboard(request):
     """Dashboard Home (Fig. 3-19/3-28): Branch Performance, KPI cards,
-    Sales Analytics + Top Products, Resource Monitoring, and the
-    AI-Powered Insights feed. Protected by BOTH role (only OWNER_ADMIN)
-    and OTP verification (must have completed 2FA this session) --
-    demonstrates the full enforcement chain built in the Admin Shell
-    batch: Admin Login -> 2FA -> Branch Selection -> here.
+    Sales Analytics + Top Products, Resource Monitoring (raw materials),
+    Low Stock Orders Tracking, and the AI-Powered Insights feed.
+    Protected by BOTH role (only OWNER_ADMIN) and OTP verification (must
+    have completed 2FA this session) -- demonstrates the full enforcement
+    chain built in the Admin Shell batch: Admin Login -> 2FA -> here
+    (Branch Selection is no longer part of this chain -- see
+    TwoFactorVerifyView).
 
     Renamed from admin_dashboard_placeholder now that it renders real
     content rather than a placeholder; the URL name (accounts:admin_
@@ -410,9 +431,27 @@ def admin_dashboard(request):
     default to matching the reference screenshot's own default toggle
     states: Include Additional Sales ON, Exclude Discounts OFF, Exclude
     VAT OFF.
+
+    Branch Performance Overview is only meaningful when comparing
+    branches against each other -- once a specific branch is selected,
+    every other section on this page already shows that branch's own
+    numbers, so the template hides this section rather than repeating a
+    multi-branch comparison the admin didn't ask to see. Still computed
+    unconditionally here (cheap -- a handful of branches) so it's ready
+    the moment "All Branches" is selected again.
+
+    Resource Monitoring and Low Stock Orders Tracking are raw-materials
+    sections, deliberately NOT scoped to the selected branch: raw
+    materials only ever have Inventory rows at the commissary (Week 8's
+    design, same reasoning already applied to Production Output above
+    and to the Resource Management dashboard, Fig. 3-26) -- a branch
+    filter here would silently show empty results for Batangas/Lipa/
+    Alangilan every time, masking real restocking alerts rather than
+    scoping them usefully.
     """
     branch_id = request.GET.get("branch")
     selected_branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
+    commissary_branch = Branch.objects.filter(is_commissary=True, is_active=True).first()
 
     include_additional_sales = request.GET.get("additional", "1") == "1"
     exclude_discounts = request.GET.get("exclude_discounts") == "1"
@@ -425,9 +464,20 @@ def admin_dashboard(request):
         exclude_vat=exclude_vat,
     )
     branch_performance = analytics_services.get_branch_performance()
-    top_products = analytics_services.get_top_products(branch=selected_branch)
+    top_products = list(analytics_services.get_top_products(branch=selected_branch))
+    total_units_sold = analytics_services.get_total_units_sold(branch=selected_branch)
     forecast_label = forecasting_services.get_demand_forecast_label(branch=selected_branch)
     resource_status = inventory_services.get_resource_status_summary(branch=selected_branch)
+    material_resource_status = (
+        inventory_services.get_resource_status_summary(
+            branch=commissary_branch, product_type=Product.ProductType.MATERIAL
+        )
+        if commissary_branch
+        else None
+    )
+    material_low_stock_alerts = forecasting_services.get_resource_management_dashboard_data()[
+        "material_alerts"
+    ]
     production_output = production_services.get_total_output()
     insights = (
         AIInsight.objects.filter(branch=selected_branch)
@@ -453,6 +503,29 @@ def admin_dashboard(request):
     else:
         trend_chart = analytics_services.get_weekly_sales_trend_by_branch()
 
+    # Each shown product's share of total_units_sold, not of the top-N
+    # subset alone -- so an honest "Others" slice can absorb whatever the
+    # ranked list leaves out, and the shown percentages still add up to
+    # (approximately, after rounding) 100% of what was actually sold.
+    top_products_chart_data = []
+    shown_units = 0
+    if total_units_sold > 0:
+        for p in top_products:
+            pct = round((p["units_sold"] / total_units_sold) * 100)
+            shown_units += p["units_sold"]
+            top_products_chart_data.append(
+                {"name": p["product__name"], "units": p["units_sold"], "pct": pct}
+            )
+        others_units = total_units_sold - shown_units
+        if others_units > 0:
+            top_products_chart_data.append(
+                {
+                    "name": "Others",
+                    "units": others_units,
+                    "pct": round((others_units / total_units_sold) * 100),
+                }
+            )
+
     return render(
         request,
         "accounts/admin_dashboard.html",
@@ -465,6 +538,8 @@ def admin_dashboard(request):
             "top_products": top_products,
             "forecast_label": forecast_label,
             "resource_status": resource_status,
+            "material_resource_status": material_resource_status,
+            "material_low_stock_alerts": material_low_stock_alerts,
             "production_output": production_output,
             "insights": insights,
             "critical_alerts": critical_alerts,
@@ -472,11 +547,106 @@ def admin_dashboard(request):
             "peak_hour": peak_hour,
             "anomalies": anomalies,
             "trend_chart_json": json.dumps(trend_chart),
-            "top_products_json": json.dumps(
-                [{"name": p["product__name"], "units": p["units_sold"]} for p in top_products]
-            ),
+            "top_products_json": json.dumps(top_products_chart_data),
             "include_additional_sales": include_additional_sales,
             "exclude_discounts": exclude_discounts,
             "exclude_vat": exclude_vat,
+        },
+    )
+
+
+@role_required(Role.OWNER_ADMIN)
+@otp_required(login_url="accounts:admin_login")
+def account_management(request):
+    """Account Management (backend gap assessment finding: no in-app way
+    to create/edit a staff account, assign branch/role, or reset a PIN --
+    today this is only possible via a one-off management command
+    (create_branch_cashier_placeholders) or the raw Django admin).
+    Protected by both role AND OTP verification, same as admin_dashboard
+    -- creating accounts and generating PINs is at least as sensitive as
+    anything else gated that way.
+
+    Handles listing + creating here; editing an existing account and
+    resetting its PIN are handled by account_edit below, since those
+    need a target user already in hand.
+    """
+    error = None
+    generated_pin = None
+    created_username = None
+
+    if request.method == "POST":
+        try:
+            user, generated_pin = create_staff_account(
+                username=request.POST.get("username", ""),
+                role_name=request.POST.get("role", ""),
+                branch_id=request.POST.get("branch") or None,
+                password=request.POST.get("password", ""),
+                first_name=request.POST.get("first_name", ""),
+                last_name=request.POST.get("last_name", ""),
+                email=request.POST.get("email", ""),
+                employee_id=request.POST.get("employee_id", ""),
+                phone_number=request.POST.get("phone_number", ""),
+            )
+            created_username = user.username
+        except AccountManagementError as exc:
+            error = str(exc)
+
+    return render(
+        request,
+        "accounts/account_management.html",
+        {
+            "active_nav": "accounts",
+            "accounts": get_manageable_accounts(),
+            "branches": Branch.objects.filter(is_active=True).order_by("name"),
+            "role_choices": Role.ROLE_CHOICES,
+            "error": error,
+            "generated_pin": generated_pin,
+            "created_username": created_username,
+        },
+    )
+
+
+@role_required(Role.OWNER_ADMIN)
+@otp_required(login_url="accounts:admin_login")
+def account_edit(request, user_id):
+    """Edit an existing staff account (branch, active status, contact
+    info) and/or reset its PIN, distinguished by the submitted form's
+    `action` field so both actions live on one page without a redirect
+    losing the just-generated PIN. Role is deliberately NOT editable
+    here -- see update_staff_account's docstring for why."""
+    target = get_object_or_404(User, pk=user_id, role__isnull=False)
+    error = None
+    generated_pin = None
+
+    if request.method == "POST":
+        if request.POST.get("action") == "reset_pin":
+            try:
+                generated_pin = reset_cashier_pin(target)
+            except AccountManagementError as exc:
+                error = str(exc)
+        else:
+            try:
+                update_staff_account(
+                    target,
+                    branch_id=request.POST.get("branch") or None,
+                    is_active=request.POST.get("is_active") == "on",
+                    employee_id=request.POST.get("employee_id", ""),
+                    phone_number=request.POST.get("phone_number", ""),
+                    first_name=request.POST.get("first_name", ""),
+                    last_name=request.POST.get("last_name", ""),
+                )
+                return redirect("accounts:account_management")
+            except AccountManagementError as exc:
+                error = str(exc)
+
+    return render(
+        request,
+        "accounts/account_edit.html",
+        {
+            "active_nav": "accounts",
+            "target": target,
+            "branches": Branch.objects.filter(is_active=True).order_by("name"),
+            "error": error,
+            "generated_pin": generated_pin,
         },
     )

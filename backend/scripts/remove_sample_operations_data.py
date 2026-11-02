@@ -9,7 +9,7 @@ real data.
 
 How it stays precise: it reads scripts/sample_data_manifest.json,
 written by the seed script the moment it finishes, which records:
-  - the exact pre-seed value of every Product.reorder_threshold and
+  - the exact pre-seed value of every Inventory.reorder_threshold and
     every Inventory.quantity_on_hand the seed script touched,
   - a primary-key "floor" for every model the seed script only ever
     ADDS rows to (SalesTransaction, ProductionRecord,
@@ -45,7 +45,7 @@ What this restores exactly, and what it deliberately does NOT touch:
     since SalesTransaction.cashier and ProductionRecord.commissary_staff
     are PROTECT foreign keys (Django would refuse the user deletion
     while either still referenced one, rather than silently cascading).
-  - Restores Product.reorder_threshold and Inventory.quantity_on_hand
+  - Restores Inventory.reorder_threshold and Inventory.quantity_on_hand
     on every row the seed script touched back to their recorded
     pre-seed values. An Inventory row that did NOT exist before the
     seed run is left in place (deleting it could break a page that now
@@ -87,7 +87,7 @@ from django.db import transaction  # noqa: E402
 
 from apps.accounts.models import User  # noqa: E402
 from apps.forecasting.models import AIInsight, Forecast, InventoryRiskScore  # noqa: E402
-from apps.inventory.models import Inventory, InventoryTransaction, Product  # noqa: E402
+from apps.inventory.models import Inventory, InventoryTransaction  # noqa: E402
 from apps.pos.models import SalesTransaction  # noqa: E402
 from apps.production.models import ProductionRecord  # noqa: E402
 
@@ -95,13 +95,16 @@ MANIFEST_PATH = Path(__file__).resolve().parent / "sample_data_manifest.json"
 
 
 def _restore_reorder_thresholds(reorder_snapshot):
+    """reorder_threshold lives on Inventory, not Product (client raw-data
+    import: real reorder points differ per branch) -- the snapshot is
+    keyed by Inventory id, same as inventory_snapshot below it."""
     restored = 0
-    for product in Product.objects.filter(pk__in=reorder_snapshot.keys()):
-        original = reorder_snapshot[product.pk]
-        if product.reorder_threshold != original:
-            Product.objects.filter(pk=product.pk).update(reorder_threshold=original)
+    for inv in Inventory.objects.filter(pk__in=reorder_snapshot.keys()):
+        original = reorder_snapshot[inv.pk]
+        if inv.reorder_threshold != original:
+            Inventory.objects.filter(pk=inv.pk).update(reorder_threshold=original)
             restored += 1
-    print(f"  Restored reorder_threshold to its pre-seed value on {restored} products.")
+    print(f"  Restored reorder_threshold to its pre-seed value on {restored} inventory rows.")
 
 
 def _restore_inventory(inventory_snapshot):

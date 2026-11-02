@@ -2,8 +2,7 @@
 {% block title %}Enter PIN - SanServeAll{% endblock %}
 {% block content %}
 <div class="container d-flex align-items-center justify-content-center" style="min-height: 100vh;">
-    <div class="card shadow-sm" style="max-width: 340px; width: 100%;">
-        <div class="card-body p-4 text-center">
+    <div class="jc-card shadow-sm p-4 text-center" style="max-width: 340px; width: 100%;">
             <h1 class="h4 mb-3">Enter Your PIN</h1>
 
             {% if error %}
@@ -15,9 +14,8 @@
                 <input type="password" name="pin" inputmode="numeric" pattern="[0-9]*"
                        maxlength="6" class="form-control form-control-lg text-center mb-3"
                        placeholder="••••" required autofocus>
-                <button type="submit" class="btn btn-primary w-100">Unlock</button>
+                <button type="submit" class="btn btn-jc-primary w-100">Unlock</button>
             </form>
-        </div>
     </div>
 </div>
 {% endblock %}

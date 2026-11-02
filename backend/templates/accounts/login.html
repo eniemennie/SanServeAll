@@ -1,30 +1,40 @@
 {% extends "base.html" %}
 {% block title %}Login - SanServeAll{% endblock %}
 {% block content %}
-<div class="container d-flex align-items-center justify-content-center" style="min-height: 100vh;">
-    <div class="card shadow-sm" style="max-width: 380px; width: 100%;">
-        <div class="card-body p-4">
-            <h1 class="h4 mb-1 text-center">SanServeAll</h1>
-            <p class="text-muted text-center mb-4">Jorge's Casa De Sans Rival</p>
+<div class="jc-auth-bg">
+    <a href="{% url 'core:landing' %}" class="jc-auth-back-link">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M10 12.5L5.5 8L10 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        Back to Home
+    </a>
 
-            {% if form.errors %}
-                <div class="alert alert-danger py-2">Incorrect username or password.</div>
-            {% endif %}
+    <div class="jc-auth-card">
+        {% include "partials/logo.html" %}
+        <p class="jc-auth-subtitle">Jorge's Casa De Sans Rival</p>
 
-            <form method="post">
-                {% csrf_token %}
-                <div class="mb-3">
-                    <label for="id_username" class="form-label">Username</label>
-                    <input type="text" name="username" id="id_username" class="form-control" required autofocus>
-                </div>
-                <div class="mb-3">
-                    <label for="id_password" class="form-label">Password</label>
-                    <input type="password" name="password" id="id_password" class="form-control" required>
-                </div>
-                <input type="hidden" name="next" value="{{ next }}">
-                <button type="submit" class="btn btn-primary w-100">Log In</button>
-            </form>
-        </div>
+        {% if form.errors %}
+            <div class="alert alert-danger py-2 text-start">Incorrect username or password.</div>
+        {% endif %}
+
+        <form method="post" class="text-start">
+            {% csrf_token %}
+            <div class="mb-3">
+                <label for="id_username" class="form-label">Username</label>
+                <input type="text" name="username" id="id_username" class="form-control" required autofocus>
+            </div>
+            <div class="mb-4">
+                <label for="id_password" class="form-label">Password</label>
+                <input type="password" name="password" id="id_password" class="form-control" required>
+            </div>
+            <input type="hidden" name="next" value="{{ next }}">
+            <button type="submit" class="btn btn-jc-primary w-100 py-2">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg" class="me-1">
+                    <path d="M6 2L11 8L6 14M11 8H2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                Log In
+            </button>
+        </form>
     </div>
 </div>
 {% endblock %}

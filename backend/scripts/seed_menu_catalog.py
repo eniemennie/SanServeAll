@@ -165,6 +165,14 @@ def seed_sans_rival_cakes():
 def seed_silvanas():
     _product("Silvanas (Box of 10)", "380.00", Category.CAKES, is_best_seller=True)
     _product("Silvanas (Box of 20)", "760.00", Category.CAKES, is_best_seller=True)
+    # Per-piece Silvana flavors -- added for the client's real
+    # Production_Records.xlsx, which records per-flavor per-piece batches
+    # (e.g. "Silvanas – Pistachio (Per Piece)") that the box-only catalog
+    # above has no product for. Prices are the client's own, from
+    # Bakery_Products.xlsx's "Silvanas – <Flavor> (Per Piece)" rows.
+    _product("Silvanas – Classic Cashew (Per Piece)", "28.00", Category.CAKES)
+    _product("Silvanas – Walnut (Per Piece)", "34.00", Category.CAKES)
+    _product("Silvanas – Pistachio (Per Piece)", "50.00", Category.CAKES)
 
 
 def seed_soft_and_fluffy():
@@ -212,6 +220,28 @@ def seed_bakery_corner():
     _product("Tea Cookies (Small)", "105.00", Category.BAKERY, large_price="180.00")
 
 
+def seed_production_size_variants():
+    """Client raw-data import (Production_Records.xlsx): production
+    batches genuinely track Small/Big (or Tub/Family) as separate,
+    physically distinct runs -- different box sizes, different material
+    consumption per unit -- even though the sales-facing catalog
+    deliberately collapses each pair into one 2-tier (price/large_price)
+    Product for POS's own size-selection UX (see seed_bakery_corner).
+    Adding these as their OWN Products, rather than splitting or
+    replacing the 2-tier ones above, keeps that POS behavior unchanged
+    and lets each batch's real size be tracked on its own Inventory row
+    instead of being conflated with the other tier's count. Prices
+    match the existing 2-tier Products' own price/large_price values.
+    "Creamy Leche Flan (Family Flan)" has no 2-tier counterpart at all
+    in the source menu -- it's purely new, for this production data."""
+    _product("Original Caramel Bites (Small 200g)", "105.00", Category.BAKERY)
+    _product("Original Caramel Bites (Big 400g)", "200.00", Category.BAKERY)
+    _product("Salted Caramel Bites (Small 200g)", "105.00", Category.BAKERY)
+    _product("Salted Caramel Bites (Big 400g)", "200.00", Category.BAKERY)
+    _product("Tea Cookies (Big)", "180.00", Category.BAKERY)
+    _product("Creamy Leche Flan (Family Flan)", "250.00", Category.BAKERY)
+
+
 def run():
     seed_coffee()
     seed_sea_salt_series()
@@ -225,6 +255,7 @@ def run():
     seed_silvanas()
     seed_soft_and_fluffy()
     seed_bakery_corner()
+    seed_production_size_variants()
 
     total_products = Product.objects.count()
     total_addons = AddOn.objects.count()

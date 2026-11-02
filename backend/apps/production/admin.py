@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from apps.production.models import IngredientUsage, ProductionRecord
+from apps.production.models import IngredientUsage, ProductionRecord, StockTransferOrder
 
 
 class IngredientUsageInline(admin.TabularInline):
@@ -21,3 +21,18 @@ class ProductionRecordAdmin(admin.ModelAdmin):
     )
     list_filter = ("status", "quality")
     inlines = [IngredientUsageInline]
+
+
+@admin.register(StockTransferOrder)
+class StockTransferOrderAdmin(admin.ModelAdmin):
+    list_display = (
+        "pk",
+        "product",
+        "quantity",
+        "source_branch",
+        "destination_branch",
+        "status",
+        "created_at",
+        "delivered_at",
+    )
+    list_filter = ("status", "source_branch", "destination_branch")
