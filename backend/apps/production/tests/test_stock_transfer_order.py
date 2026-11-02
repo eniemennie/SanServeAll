@@ -274,9 +274,7 @@ class TestCancelStockTransferOrder:
         )
         assert txn.quantity_change == 10
 
-    def test_can_cancel_an_in_transit_order_too(
-        self, commissary, commissary_staff, batangas, cake
-    ):
+    def test_can_cancel_an_in_transit_order_too(self, commissary, commissary_staff, batangas, cake):
         order = services.create_stock_transfer_order(
             commissary_staff=commissary_staff,
             destination_branch_id=batangas.pk,
@@ -292,9 +290,7 @@ class TestCancelStockTransferOrder:
         commissary_inventory = Inventory.objects.get(branch=commissary, product=cake)
         assert commissary_inventory.quantity_on_hand == 50
 
-    def test_cannot_cancel_a_delivered_order(
-        self, commissary, commissary_staff, batangas, cake
-    ):
+    def test_cannot_cancel_a_delivered_order(self, commissary, commissary_staff, batangas, cake):
         order = services.create_stock_transfer_order(
             commissary_staff=commissary_staff,
             destination_branch_id=batangas.pk,
