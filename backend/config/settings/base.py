@@ -129,6 +129,23 @@ LOGIN_URL = "accounts:login"
 LOGIN_REDIRECT_URL = "accounts:select_branch"
 LOGOUT_REDIRECT_URL = "accounts:login"
 
+# Session idle timeout (backend gap assessment, Auth 1.7): left unset,
+# Django's own default is a 2-week session with no idle timeout at all --
+# too long for a shared, physically-accessible POS terminal or an admin
+# session left open unattended. There's no role-specific session
+# middleware to vary this per role (Owner/Admin, Commissary Staff, and an
+# unlocked Cashier terminal all share the same session machinery), so one
+# conservative value applies everywhere rather than hardening only the
+# login forms while leaving an already-unlocked session open indefinitely.
+#
+# SESSION_SAVE_EVERY_REQUEST makes this a genuine IDLE timeout rather than
+# a fixed "expires N hours after login no matter what" cutoff -- the
+# cookie's expiry is refreshed on every authenticated request, so an
+# actively-used session stays alive, and only real inactivity times out.
+SESSION_COOKIE_AGE = 60 * 60 * 4  # 4 hours of inactivity
+SESSION_SAVE_EVERY_REQUEST = True
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

@@ -62,4 +62,8 @@ urlpatterns = [
         name="admin_2fa_regenerate_backup_codes",
     ),
     path("admin/dashboard/", views.admin_dashboard, name="admin_dashboard"),
+    # Account Management (backend gap assessment): create/edit a staff
+    # account, assign branch, reset a cashier's PIN.
+    path("manage/", views.account_management, name="account_management"),
+    path("manage/<int:user_id>/", views.account_edit, name="account_edit"),
 ]
