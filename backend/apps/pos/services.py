@@ -325,14 +325,26 @@ def complete_sale_payment(draft, payment_method, amount_tendered):
     if payment_method not in SalesTransaction.PaymentMethod.values:
         raise PaymentError("Please select a valid payment method.")
 
-    try:
-        amount_tendered = Decimal(str(amount_tendered))
-    except (InvalidOperation, TypeError):
-        raise PaymentError("Please enter a valid amount.")
-
     total = draft.grand_total
-    if amount_tendered < total:
-        raise PaymentError("Amount tendered is less than the total due.")
+
+    if payment_method == SalesTransaction.PaymentMethod.CASH:
+        try:
+            amount_tendered = Decimal(str(amount_tendered))
+        except (InvalidOperation, TypeError):
+            raise PaymentError("Please enter a valid amount.")
+        if amount_tendered < total:
+            raise PaymentError("Amount tendered is less than the total due.")
+    else:
+        # Backend gap assessment: GCash/Card/Other Digital Banks have no
+        # "change" concept -- the cashier isn't handed a bill to make
+        # change from, they charge the exact total. Previously this
+        # still ran through the same cash-tendered validation, so a
+        # cashier picking a non-cash mode had to type in the total
+        # amount manually just to satisfy the "amount tendered >= total"
+        # check. The amount actually recorded is always exactly the
+        # total for these methods, regardless of whatever (if anything)
+        # was posted for amount_tendered.
+        amount_tendered = total
 
     with transaction.atomic():
         locked_draft = SalesTransaction.objects.select_for_update().get(pk=draft.pk)
