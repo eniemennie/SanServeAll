@@ -324,6 +324,99 @@ class TestAdvanceStockTransferStatus:
             services.advance_stock_transfer_status(order, None)
 
 
+class TestCancelStockTransferOrder:
+    """Backend gap assessment item 24: StockTransferOrder cancellation/
+    reversal path."""
+
+    def test_cancelling_a_processing_order_returns_stock_to_the_commissary(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        services.cancel_stock_transfer_order(order)
+        order.refresh_from_db()
+
+        assert order.status == StockTransferOrder.Status.CANCELLED
+        assert order.cancelled_at is not None
+
+        commissary_inventory = Inventory.objects.get(branch=commissary, product=cake)
+        assert commissary_inventory.quantity_on_hand == 50  # fully restored
+
+    def test_cancelling_logs_a_transfer_cancelled_transaction(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        services.cancel_stock_transfer_order(order)
+
+        txn = InventoryTransaction.objects.get(
+            branch=commissary,
+            product=cake,
+            movement_type=InventoryTransaction.MovementType.TRANSFER_CANCELLED,
+        )
+        assert txn.quantity_change == 10
+
+    def test_can_cancel_an_in_transit_order_too(self, commissary, commissary_staff, batangas, cake):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        services.advance_stock_transfer_status(order, StockTransferOrder.Status.IN_TRANSIT)
+
+        services.cancel_stock_transfer_order(order)
+        order.refresh_from_db()
+        assert order.status == StockTransferOrder.Status.CANCELLED
+
+        commissary_inventory = Inventory.objects.get(branch=commissary, product=cake)
+        assert commissary_inventory.quantity_on_hand == 50
+
+    def test_cannot_cancel_a_delivered_order(self, commissary, commissary_staff, batangas, cake):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        services.advance_stock_transfer_status(order, StockTransferOrder.Status.IN_TRANSIT)
+        services.advance_stock_transfer_status(order, StockTransferOrder.Status.DELIVERED)
+
+        with pytest.raises(services.StockTransferError, match="only a Processing or"):
+            services.cancel_stock_transfer_order(order)
+
+        order.refresh_from_db()
+        assert order.status == StockTransferOrder.Status.DELIVERED
+        # Destination's delivered stock is untouched by the failed cancel attempt.
+        destination_inventory = Inventory.objects.get(branch=batangas, product=cake)
+        assert destination_inventory.quantity_on_hand == 10
+
+    def test_cannot_cancel_an_already_cancelled_order(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        services.cancel_stock_transfer_order(order)
+
+        with pytest.raises(services.StockTransferError, match="only a Processing or"):
+            services.cancel_stock_transfer_order(order)
+
+        commissary_inventory = Inventory.objects.get(branch=commissary, product=cake)
+        assert commissary_inventory.quantity_on_hand == 50  # not double-credited
+
+
 class TestStockTransfersView:
     def test_commissary_staff_can_view_the_page(self, commissary_client):
         response = commissary_client.get(reverse("production:stock_transfers"))
@@ -396,6 +489,60 @@ class TestStockTransfersView:
             {"next_status": "DELIVERED"},
         )
         assert response.status_code == 302
+        order.refresh_from_db()
+        assert order.status == StockTransferOrder.Status.PROCESSING
+
+    def test_cancel_view_cancels_a_processing_order(
+        self, commissary_client, commissary, commissary_staff, batangas, cake
+    ):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        response = commissary_client.post(
+            reverse("production:cancel_stock_transfer", args=[order.pk])
+        )
+        assert response.status_code == 302
+        order.refresh_from_db()
+        assert order.status == StockTransferOrder.Status.CANCELLED
+
+        commissary_inventory = Inventory.objects.get(branch=commissary, product=cake)
+        assert commissary_inventory.quantity_on_hand == 50
+
+    def test_cancel_view_silently_ignores_a_delivered_order(
+        self, commissary_client, commissary, commissary_staff, batangas, cake
+    ):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        services.advance_stock_transfer_status(order, StockTransferOrder.Status.IN_TRANSIT)
+        services.advance_stock_transfer_status(order, StockTransferOrder.Status.DELIVERED)
+
+        response = commissary_client.post(
+            reverse("production:cancel_stock_transfer", args=[order.pk])
+        )
+        assert response.status_code == 302
+        order.refresh_from_db()
+        assert order.status == StockTransferOrder.Status.DELIVERED
+
+    def test_branch_staff_cannot_cancel(self, client, commissary, commissary_staff, batangas, cake):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        role = Role.objects.create(name=Role.BRANCH_STAFF)
+        staff = User.objects.create_user(username="cashier2", password="testpass123", role=role)
+        client.force_login(staff)
+
+        response = client.post(reverse("production:cancel_stock_transfer", args=[order.pk]))
+        assert response.status_code == 403
         order.refresh_from_db()
         assert order.status == StockTransferOrder.Status.PROCESSING
 

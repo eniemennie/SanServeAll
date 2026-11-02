@@ -248,6 +248,49 @@ def create_stock_transfer_order(commissary_staff, destination_branch_id, product
     return order
 
 
+def cancel_stock_transfer_order(order):
+    """Cancels a StockTransferOrder (backend gap assessment item 24),
+    returning its quantity to the commissary's own Inventory -- a
+    reversal of the deduction create_stock_transfer_order made up front.
+
+    Only legal from PROCESSING or IN_TRANSIT: in both states the stock
+    already left the commissary and hasn't yet reached the destination
+    branch, so there's nothing at the destination to undo. Once
+    DELIVERED, the stock is already real, on-hand inventory at the
+    destination branch -- reversing that is a distinct business event
+    (a return/correction), not a cancellation of this transfer, so it's
+    deliberately not allowed here. No separate approval step is required
+    (same scope decision as the rest of this stock-transfer workflow).
+    """
+    if order.status not in (
+        StockTransferOrder.Status.PROCESSING,
+        StockTransferOrder.Status.IN_TRANSIT,
+    ):
+        raise StockTransferError(
+            f"Order is {order.get_status_display()} -- only a Processing or "
+            "In Transit order can be cancelled."
+        )
+
+    with db_transaction.atomic():
+        order.status = StockTransferOrder.Status.CANCELLED
+        order.cancelled_at = timezone.now()
+        order.save()
+
+        source_inventory, _ = Inventory.objects.get_or_create(
+            branch=order.source_branch, product=order.product
+        )
+        source_inventory.quantity_on_hand += order.quantity
+        source_inventory.save()
+        InventoryTransaction.objects.create(
+            branch=order.source_branch,
+            product=order.product,
+            movement_type=InventoryTransaction.MovementType.TRANSFER_CANCELLED,
+            quantity_change=order.quantity,
+        )
+
+    return order
+
+
 def advance_stock_transfer_status(order, new_status):
     """Moves a StockTransferOrder forward one step
     (PROCESSING -> IN_TRANSIT -> DELIVERED only -- no skipping, no going
