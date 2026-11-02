@@ -3,6 +3,8 @@ Inventory Module business logic (Week 6): branch-scoped stock queries,
 low-stock detection, and manual stock adjustment.
 """
 
+from decimal import Decimal, InvalidOperation
+
 from apps.inventory.models import Inventory, InventoryTransaction, Product
 
 
@@ -186,14 +188,25 @@ def adjust_stock(inventory, delta, reason="", user=None):
     actually about.
     """
     try:
-        delta = int(delta)
-    except (TypeError, ValueError):
-        raise InventoryServiceError("Enter a whole number for the adjustment.")
+        # Decimal, not int: raw-material adjustments can be a fractional
+        # kg/liter amount (client raw-data import). str() first so a
+        # float delta (already-imprecise) doesn't carry binary-float
+        # noise into the Decimal; Decimal(int) and Decimal("whole str")
+        # both still work exactly for finished-goods piece counts.
+        delta = Decimal(str(delta))
+    except (TypeError, ValueError, InvalidOperation):
+        raise InventoryServiceError("Enter a number for the adjustment.")
 
     if delta == 0:
         raise InventoryServiceError("Adjustment cannot be zero.")
 
-    new_quantity = inventory.quantity_on_hand + delta
+    # Coerce the current value too: an Inventory instance built with a
+    # string/float quantity_on_hand (e.g. straight from the client import
+    # or a freshly-constructed test fixture) keeps that raw Python value
+    # in memory until it's reloaded from the DB -- Django only converts
+    # it to Decimal on the way in/out of the database, not on assignment.
+    current_quantity = Decimal(str(inventory.quantity_on_hand))
+    new_quantity = current_quantity + delta
     if new_quantity < 0:
         raise InventoryServiceError(
             f"This would take stock below zero (currently {inventory.quantity_on_hand})."

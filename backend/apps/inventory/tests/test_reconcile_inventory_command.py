@@ -48,3 +48,22 @@ class TestReconcileInventoryCommand:
         assert "1 discrepancy" in output
         assert "Widget" in output
         assert branch.name in output
+        # quantity_on_hand is Decimal (client raw-data import), not int --
+        # a regression guard for the ":+d" int-only format spec that used
+        # to crash this command outright on any discrepancy.
+        assert "+989.00" in output
+
+    def test_formats_a_negative_difference_without_crashing(self, branch):
+        """Same Decimal-formatting regression guard as the test above,
+        for the other sign."""
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = services.get_or_create_inventory_row(branch, product)
+        services.adjust_stock(inv, 10)
+        inv.quantity_on_hand = 1
+        inv.save()
+
+        out = io.StringIO()
+        with pytest.raises(SystemExit):
+            call_command("reconcile_inventory", stdout=out)
+
+        assert "-9.00" in out.getvalue()

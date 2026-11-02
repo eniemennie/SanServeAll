@@ -107,6 +107,26 @@ class TestInventoryModelStatus:
         inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=7)
         assert inv.display_quantity == 7
 
+    def test_fractional_quantity_and_threshold_work_like_the_clients_real_data(self, branch):
+        """Client raw-data import: Raw_Materials.xlsx tracks real
+        materials to a fractional kg/liter (e.g. Ice: 0.3kg on hand,
+        0.5kg reorder point) -- status logic must compare correctly on
+        these Decimal values, not just whole numbers."""
+        from decimal import Decimal
+
+        material = Product.objects.create(
+            name="Ice", price="6.00", product_type=Product.ProductType.MATERIAL
+        )
+        inv = Inventory.objects.create(
+            branch=branch,
+            product=material,
+            quantity_on_hand=Decimal("0.3"),
+            reorder_threshold=Decimal("0.5"),
+        )
+        assert inv.is_low_stock is True
+        assert inv.is_out_of_stock is False
+        assert inv.status_label == "Low Stock"
+
 
 class TestGetBranchInventory:
     def test_only_returns_items_for_the_given_branch(self, branch, other_branch):
@@ -243,6 +263,31 @@ class TestAdjustStock:
         movement = InventoryTransaction.objects.get(branch=branch, product=product)
         assert movement.reason == ""
         assert movement.created_by is None
+
+    def test_fractional_adjustment_is_accepted_for_raw_materials(self, branch):
+        """Client raw-data import: quantity_on_hand is Decimal, not
+        Integer -- a fractional kg/liter correction (e.g. a physical
+        recount of a material) must work, not just whole-piece counts."""
+        from decimal import Decimal
+
+        material = Product.objects.create(
+            name="White sugar", price="82.00", product_type=Product.ProductType.MATERIAL
+        )
+        inv = Inventory.objects.create(branch=branch, product=material, quantity_on_hand="10.5")
+
+        services.adjust_stock(inv, "-0.8")
+
+        inv.refresh_from_db()
+        assert inv.quantity_on_hand == Decimal("9.7")
+        movement = InventoryTransaction.objects.get(branch=branch, product=material)
+        assert movement.quantity_change == Decimal("-0.8")
+
+    def test_non_numeric_adjustment_is_rejected(self, branch):
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=10)
+
+        with pytest.raises(services.InventoryServiceError, match="Enter a number"):
+            services.adjust_stock(inv, "not-a-number")
 
 
 class TestGetLowStockAlertsForAllBranches:

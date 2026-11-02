@@ -94,7 +94,13 @@ def run_risk_classification_for_all_inventory():
             branch=r["inventory"].branch,
             product=r["inventory"].product,
             risk_level=r["risk_level"],
-            quantity_on_hand=r["quantity_on_hand"],
+            # InventoryRiskScore.quantity_on_hand is an Integer snapshot
+            # field (unchanged by the client raw-data import -- it's a
+            # rounded point-in-time read for the classifier/dashboards,
+            # not the authoritative stock figure); Inventory.quantity_on_hand
+            # itself is now a Decimal, so this is cast explicitly rather
+            # than relying on the ORM's implicit int(Decimal) truncation.
+            quantity_on_hand=int(r["quantity_on_hand"]),
             avg_daily_demand=r["avg_daily_demand"],
             days_of_stock_left=r["days_of_stock_left"],
         )

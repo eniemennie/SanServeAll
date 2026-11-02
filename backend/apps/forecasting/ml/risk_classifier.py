@@ -81,7 +81,11 @@ def compute_features(inventory):
     misleading, not just imprecise."""
     avg_daily_demand = compute_average_daily_demand(inventory.branch, inventory.product)
     if avg_daily_demand > 0:
-        days_of_stock_left = inventory.quantity_on_hand / avg_daily_demand
+        # quantity_on_hand is a Decimal (client raw-data import: real
+        # stock can be fractional); cast to float since avg_daily_demand
+        # and days_of_stock_left are plain floats -- Python doesn't
+        # support Decimal / float division directly.
+        days_of_stock_left = float(inventory.quantity_on_hand) / avg_daily_demand
     else:
         days_of_stock_left = None
     return inventory.quantity_on_hand, avg_daily_demand, days_of_stock_left

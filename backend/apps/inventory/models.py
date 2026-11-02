@@ -8,6 +8,7 @@ built, so POS's and the deduction hook's existing FK references and
 behavior stay valid unchanged.
 """
 
+from django.core.validators import MinValueValidator
 from django.db import models
 
 
@@ -116,7 +117,15 @@ class Inventory(models.Model):
 
     branch = models.ForeignKey("accounts.Branch", on_delete=models.PROTECT)
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
-    quantity_on_hand = models.IntegerField(default=0)
+    # Decimal, not Integer: the client's real Raw_Materials.xlsx tracks
+    # 175/206 raw-material rows to a fractional kg/liter (e.g. Ice: 0.3kg
+    # on hand) -- rounding to a whole unit would misstate real stock
+    # (0.3kg rounding to 0 is a false stockout; 0.9kg rounding to 1 hides
+    # a near-empty supply), so this holds the client's own numbers
+    # exactly rather than lying about them. Finished-goods counts (whole
+    # pieces) are unaffected -- every whole number is still an exact
+    # Decimal value.
+    quantity_on_hand = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     # Backend gap assessment (client raw-data import): moved here from
     # Product.reorder_threshold -- the client's own Raw_Materials.xlsx /
     # Packaging_Materials.xlsx data showed real materials genuinely
@@ -124,8 +133,12 @@ class Inventory(models.Model):
     # burns through coffee beans faster), which one global per-Product
     # value could never represent. Zero means "don't flag" rather than
     # "always flag" -- a row with no threshold configured yet shouldn't
-    # spam alerts, same convention the old Product field used.
-    reorder_threshold = models.PositiveIntegerField(default=0)
+    # spam alerts, same convention the old Product field used. Decimal
+    # for the same reason as quantity_on_hand above -- 164/206 raw
+    # materials have a fractional reorder point in the client's data.
+    reorder_threshold = models.DecimalField(
+        max_digits=12, decimal_places=2, default=0, validators=[MinValueValidator(0)]
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -208,7 +221,10 @@ class InventoryTransaction(models.Model):
     movement_type = models.CharField(max_length=32, choices=MovementType.choices)
     # Negative for deductions, positive for additions -- signed so a
     # simple sum() over a product's transactions reconstructs its history.
-    quantity_change = models.IntegerField()
+    # Decimal, matching Inventory.quantity_on_hand above, for the same
+    # reason: a raw-material adjustment can be a fractional kg/liter
+    # amount in the client's real data.
+    quantity_change = models.DecimalField(max_digits=12, decimal_places=2)
     # String FK: avoids a hard import-order dependency between inventory
     # and pos, since pos.SalesItem already references inventory.Product.
     related_sales_item = models.ForeignKey(
