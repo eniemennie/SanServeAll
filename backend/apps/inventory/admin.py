@@ -9,7 +9,7 @@ class ProductAdmin(admin.ModelAdmin):
         "name",
         "product_type",
         "price",
-        "reorder_threshold",
+        "supplier",
         "is_active",
         "updated_at",
     )
@@ -19,7 +19,7 @@ class ProductAdmin(admin.ModelAdmin):
 
 @admin.register(Inventory)
 class InventoryAdmin(admin.ModelAdmin):
-    list_display = ("product", "branch", "quantity_on_hand", "updated_at")
+    list_display = ("product", "branch", "quantity_on_hand", "reorder_threshold", "updated_at")
     list_filter = ("branch",)
     search_fields = ("product__name",)
 

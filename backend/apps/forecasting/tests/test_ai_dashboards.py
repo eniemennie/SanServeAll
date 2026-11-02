@@ -439,9 +439,7 @@ class TestResourceManagementDashboardView:
         from apps.inventory.models import Inventory, Product as InventoryProduct
 
         other_branch = Branch.objects.create(name="Alangilan", code="ALANGILAN")
-        cashew = InventoryProduct.objects.create(
-            name="Cashew Nuts", price="650.00", reorder_threshold=10
-        )
+        cashew = InventoryProduct.objects.create(name="Cashew Nuts", price="650.00")
         Inventory.objects.create(branch=branch, product=cashew, quantity_on_hand=0)
         Inventory.objects.create(branch=other_branch, product=cashew, quantity_on_hand=50)
 
@@ -493,9 +491,7 @@ class TestExportResourceReportView:
     def test_finished_goods_section_reflects_the_selected_branch(self, owner_client, branch):
         from apps.inventory.models import Inventory, Product as InventoryProduct
 
-        cashew = InventoryProduct.objects.create(
-            name="Cashew Nuts", price="650.00", reorder_threshold=10
-        )
+        cashew = InventoryProduct.objects.create(name="Cashew Nuts", price="650.00")
         Inventory.objects.create(branch=branch, product=cashew, quantity_on_hand=0)
 
         response = owner_client.get(
