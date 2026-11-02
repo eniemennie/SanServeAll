@@ -121,9 +121,7 @@ def sales_history(request):
     this module, which only ever shows aggregated totals.
     """
     branch_id = request.GET.get("branch")
-    selected_branch = (
-        Branch.objects.filter(pk=branch_id).first() if branch_id else None
-    )
+    selected_branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
 
     cashier_id = request.GET.get("cashier") or None
 

@@ -65,7 +65,9 @@ def _sale(branch, cashier, product, status=SalesTransaction.Status.COMPLETED, wh
         payment_method="CASH",
         completed_at=when or timezone.now(),
     )
-    SalesItem.objects.create(transaction=transaction, product=product, unit_price="125.00", quantity=1)
+    SalesItem.objects.create(
+        transaction=transaction, product=product, unit_price="125.00", quantity=1
+    )
     return transaction
 
 
@@ -94,7 +96,9 @@ class TestGetSalesHistoryService:
 
     def test_filters_by_date_range_inclusive(self, branches, cashiers, latte):
         today = timezone.now()
-        yesterday_sale = _sale(branches["batangas"], cashiers["alex"], latte, when=today - timedelta(days=1))
+        yesterday_sale = _sale(
+            branches["batangas"], cashiers["alex"], latte, when=today - timedelta(days=1)
+        )
         today_sale = _sale(branches["batangas"], cashiers["alex"], latte, when=today)
         _sale(branches["batangas"], cashiers["alex"], latte, when=today - timedelta(days=5))
 
@@ -144,9 +148,7 @@ class TestSalesHistoryView:
 
     def test_invalid_date_shows_error_and_no_results(self, owner_client, branches, cashiers, latte):
         _sale(branches["batangas"], cashiers["alex"], latte)
-        response = owner_client.get(
-            reverse("analytics:sales_history"), {"date_from": "not-a-date"}
-        )
+        response = owner_client.get(reverse("analytics:sales_history"), {"date_from": "not-a-date"})
         assert response.status_code == 200
         assert b"YYYY-MM-DD" in response.content
         assert list(response.context["transactions"]) == []
