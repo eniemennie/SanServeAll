@@ -36,7 +36,6 @@ from apps.accounts.services import (
     user_can_select_branch,
     user_requires_cashier_pin,
     verify_and_consume_backup_code,
-    verify_cashier_pin,
     verify_cashier_pin_with_lockout,
 )
 from apps.analytics import services as analytics_services
@@ -189,13 +188,19 @@ class CashierPinView(LoginRequiredMixin, View):
 
     def post(self, request):
         raw_pin = request.POST.get("pin", "")
-        if verify_cashier_pin(request.user, raw_pin):
+        # Routed through the same lockout-protected check as the
+        # tap-to-select Cashier Lock flow (CashierLockView) -- this screen
+        # guards the exact same POS-unlock boundary with a 4-digit PIN, so
+        # it needs the same brute-force protection, not a second,
+        # unprotected path to the same secret.
+        success, error = verify_cashier_pin_with_lockout(request.user, raw_pin)
+        if success:
             request.session["pos_unlocked"] = True
             return redirect("pos:ordering")
         return render(
             request,
             self.template_name,
-            {"error": "Incorrect PIN. Please try again."},
+            {"error": error},
         )
 
 

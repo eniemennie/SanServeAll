@@ -51,6 +51,22 @@ class Branch(TimestampedModel):
     class Meta:
         verbose_name_plural = "branches"
         ordering = ["name"]
+        constraints = [
+            # Enforces the "exactly one branch should have this True"
+            # invariant documented above at the database level -- without
+            # this, nothing stopped two branches from both being flagged
+            # True (or the flag drifting to zero), and
+            # kahero_integration's `.filter(is_kahero_branch=True).first()`
+            # would silently pick an arbitrary one rather than erroring.
+            # A partial unique index (only rows where the flag is True)
+            # rather than a plain unique=True, since False is allowed on
+            # every other branch.
+            models.UniqueConstraint(
+                fields=["is_kahero_branch"],
+                condition=models.Q(is_kahero_branch=True),
+                name="unique_kahero_branch",
+            ),
+        ]
 
     def __str__(self):
         return self.name
