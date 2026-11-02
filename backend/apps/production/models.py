@@ -127,4 +127,5 @@ class IngredientUsage(models.Model):
     quantity_used = models.PositiveIntegerField()
 
     def __str__(self):
-        return f"{self.quantity_used} {self.material.get_unit_of_measure_display()} x {self.material.name}"
+        unit = self.material.get_unit_of_measure_display()
+        return f"{self.quantity_used} {unit} x {self.material.name}"

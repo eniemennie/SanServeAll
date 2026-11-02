@@ -216,9 +216,7 @@ def create_product(
     if unit_of_measure:
         valid_units = {choice.value for choice in Product.UnitOfMeasure}
         if unit_of_measure not in valid_units:
-            raise InventoryServiceError(
-                f"'{unit_of_measure}' is not a recognized unit of measure."
-            )
+            raise InventoryServiceError(f"'{unit_of_measure}' is not a recognized unit of measure.")
 
     product = Product.objects.create(
         name=name,
