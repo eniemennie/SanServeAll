@@ -15,6 +15,58 @@ from django.utils import timezone
 
 from apps.accounts.models import Branch, CashierPIN, Role, TwoFactorBackupCode
 
+# Placeholder credentials created by create_branch_cashier_placeholders
+# and create_commissary_staff_placeholder when no real staff member
+# exists yet to receive one privately -- deliberately documented, not
+# secret. Canonical here (both commands import these rather than each
+# defining its own copy) so the deploy-gate audit below checks against
+# the exact same values those commands actually set.
+PLACEHOLDER_CASHIER_PIN = "0000"
+PLACEHOLDER_COMMISSARY_PASSWORD = "CommissaryPending2026!"
+
+
+def find_accounts_with_placeholder_credentials():
+    """Backend gap assessment item 7 (Phase 1, critical): the 0000 PIN
+    and commissary seed password are a known, intentional gap while no
+    real staff member exists yet to receive a real one -- but until now
+    nothing checked whether one was still in place by the time a real
+    deployment actually happened. The creating commands already print a
+    one-time warning, but that's easy to miss weeks later when a
+    genuine person should have replaced it long since.
+
+    Returns a list of {"user", "credential_type", "message"} dicts for
+    every ACTIVE account still using its documented placeholder value --
+    empty when nothing needs rotating.
+    """
+    findings = []
+
+    for pin_record in CashierPIN.objects.filter(is_active=True).select_related("user"):
+        if pin_record.user.is_active and pin_record.check_pin(PLACEHOLDER_CASHIER_PIN):
+            findings.append(
+                {
+                    "user": pin_record.user,
+                    "credential_type": "Cashier PIN",
+                    "message": (
+                        f"{pin_record.user.username}: still using the placeholder PIN "
+                        f"'{PLACEHOLDER_CASHIER_PIN}'."
+                    ),
+                }
+            )
+
+    for user in get_user_model().objects.filter(role__name=Role.COMMISSARY_STAFF, is_active=True):
+        if user.check_password(PLACEHOLDER_COMMISSARY_PASSWORD):
+            findings.append(
+                {
+                    "user": user,
+                    "credential_type": "Commissary password",
+                    "message": (
+                        f"{user.username}: still using the placeholder commissary password."
+                    ),
+                }
+            )
+
+    return findings
+
 
 def get_selectable_branches(user):
     """Return the branches a given user is allowed to operate in.

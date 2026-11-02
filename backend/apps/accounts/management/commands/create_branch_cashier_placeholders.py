@@ -63,11 +63,13 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from apps.accounts.models import Branch, CashierPIN, Role
+from apps.accounts.services import PLACEHOLDER_CASHIER_PIN as PLACEHOLDER_PIN
 
 # Deliberately documented, not secret: there is no real cashier yet to
 # privately receive a PIN. Change this via the app's own PIN-change flow
-# once a real person is assigned to the account.
-PLACEHOLDER_PIN = "0000"
+# once a real person is assigned to the account. (Canonical value lives
+# in apps.accounts.services, shared with the find_accounts_with_
+# placeholder_credentials() deploy-gate check -- Phase 1 item 7.)
 
 
 class Command(BaseCommand):
