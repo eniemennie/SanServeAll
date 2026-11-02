@@ -4,14 +4,17 @@
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h5 mb-0">Reports</h1>
-    <form method="get" style="max-width: 200px;">
-        <input type="hidden" name="branch" value="{{ selected_branch.pk|default:'' }}">
-        <select name="days" class="form-select form-select-sm" onchange="this.form.submit()">
-            <option value="7" {% if days == 7 %}selected{% endif %}>Last 7 Days</option>
-            <option value="30" {% if days == 30 %}selected{% endif %}>Last 30 Days</option>
-            <option value="90" {% if days == 90 %}selected{% endif %}>Last 90 Days</option>
-        </select>
-    </form>
+    <div class="d-flex align-items-center gap-2">
+        <a href="{% url 'analytics:sales_history' %}" class="btn btn-jc-outline btn-sm">Sales History</a>
+        <form method="get" style="max-width: 200px;">
+            <input type="hidden" name="branch" value="{{ selected_branch.pk|default:'' }}">
+            <select name="days" class="form-select form-select-sm" onchange="this.form.submit()">
+                <option value="7" {% if days == 7 %}selected{% endif %}>Last 7 Days</option>
+                <option value="30" {% if days == 30 %}selected{% endif %}>Last 30 Days</option>
+                <option value="90" {% if days == 90 %}selected{% endif %}>Last 90 Days</option>
+            </select>
+        </form>
+    </div>
 </div>
 
 <div class="row g-3 mb-3">

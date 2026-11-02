@@ -45,11 +45,14 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 
 from apps.accounts.models import Branch, Role
+from apps.accounts.services import PLACEHOLDER_COMMISSARY_PASSWORD as PLACEHOLDER_PASSWORD
 
 # Deliberately documented, not secret: there is no real commissary staff
 # member yet to privately receive this. Change it via the admin or the
 # account's own password-change flow once a real person is assigned.
-PLACEHOLDER_PASSWORD = "CommissaryPending2026!"
+# (Canonical value lives in apps.accounts.services, shared with the
+# find_accounts_with_placeholder_credentials() deploy-gate check --
+# Phase 1 item 7.)
 
 
 class Command(BaseCommand):

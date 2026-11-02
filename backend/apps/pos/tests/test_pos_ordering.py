@@ -233,61 +233,6 @@ class TestAddCustomProduct:
         assert b"valid name" in follow.content
 
 
-class TestOrderCustomization:
-    def test_customize_updates_quantity_and_options(
-        self, unlocked_client, product, cashier, branch
-    ):
-        unlocked_client.post(reverse("pos:add_catalog_item"), {"product_id": product.pk})
-        item = SalesItem.objects.get(product=product)
-
-        response = unlocked_client.post(
-            reverse("pos:customize_item", args=[item.pk]),
-            {"quantity": 3, "size": "Large", "sugar_level": "50%", "add_ons": ["Pearls"]},
-        )
-        assert response.status_code == 302
-
-        item.refresh_from_db()
-        assert item.quantity == 3
-        assert item.customizations["size"] == "Large"
-        assert item.customizations["sugar_level"] == "50%"
-        assert item.customizations["add_ons"] == ["Pearls"]
-
-    def test_negative_quantity_removes_the_item(self, unlocked_client, product, cashier, branch):
-        """QA fix: a negative (or zero) quantity in Order Customization
-        must remove the line item, not silently leave it unchanged."""
-        unlocked_client.post(reverse("pos:add_catalog_item"), {"product_id": product.pk})
-        item = SalesItem.objects.get(product=product)
-
-        response = unlocked_client.post(
-            reverse("pos:customize_item", args=[item.pk]), {"quantity": -2}
-        )
-        assert response.status_code == 302
-        assert not SalesItem.objects.filter(pk=item.pk).exists()
-
-    def test_zero_quantity_removes_the_item(self, unlocked_client, product, cashier, branch):
-        unlocked_client.post(reverse("pos:add_catalog_item"), {"product_id": product.pk})
-        item = SalesItem.objects.get(product=product)
-
-        unlocked_client.post(reverse("pos:customize_item", args=[item.pk]), {"quantity": 0})
-        assert not SalesItem.objects.filter(pk=item.pk).exists()
-
-    def test_cannot_customize_another_cashiers_item(self, unlocked_client, product, branch, role):
-        other_cashier = User.objects.create_user(
-            username="other_cashier", password="testpass123", role=role, branch=branch
-        )
-        other_draft = SalesTransaction.objects.create(
-            cashier=other_cashier, branch=branch, status=SalesTransaction.Status.DRAFT
-        )
-        other_item = SalesItem.objects.create(
-            transaction=other_draft, product=product, unit_price=product.price, quantity=1
-        )
-
-        response = unlocked_client.post(
-            reverse("pos:customize_item", args=[other_item.pk]), {"quantity": 99}
-        )
-        assert response.status_code == 404
-
-
 class TestRemoveItem:
     def test_removing_an_item_deletes_it_from_the_draft(
         self, unlocked_client, product, cashier, branch

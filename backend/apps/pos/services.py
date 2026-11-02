@@ -307,6 +307,17 @@ def complete_sale_payment(draft, payment_method, amount_tendered):
     Deliberately atomic: the transaction status change and every inventory
     deduction happen together, or none of them do. A sale should never be
     marked paid while only half its stock got deducted.
+
+    Gap-assessment "POS Double-submission guard" (no explicit idempotency
+    control previously existed): a double-click or network retry landing
+    two near-simultaneous requests against the same still-DRAFT
+    transaction could both pass every check above and both reach this
+    atomic block, deducting inventory twice against one transaction
+    record. Locks this SalesTransaction row with select_for_update()
+    inside the atomic block and re-checks its status is still DRAFT
+    before finalizing it -- the second request blocks until the first
+    commits, then sees status=COMPLETED and is rejected cleanly instead
+    of re-running the deduction.
     """
     if not draft.items.exists():
         raise PaymentError("Cannot process payment for an empty order.")
@@ -324,19 +335,23 @@ def complete_sale_payment(draft, payment_method, amount_tendered):
         raise PaymentError("Amount tendered is less than the total due.")
 
     with transaction.atomic():
-        draft.payment_method = payment_method
-        draft.amount_tendered = amount_tendered
-        draft.status = SalesTransaction.Status.COMPLETED
-        draft.completed_at = timezone.now()
-        draft.save()
+        locked_draft = SalesTransaction.objects.select_for_update().get(pk=draft.pk)
+        if locked_draft.status != SalesTransaction.Status.DRAFT:
+            raise PaymentError("This order has already been paid for.")
+
+        locked_draft.payment_method = payment_method
+        locked_draft.amount_tendered = amount_tendered
+        locked_draft.status = SalesTransaction.Status.COMPLETED
+        locked_draft.completed_at = timezone.now()
+        locked_draft.save()
 
         # KaHero-branch (Alangilan) inventory is reconciled through the
         # batch-import pipeline, not real-time POS sales -- deliberately
         # skipped here, matching the Phase 2/3 architecture decision.
-        if not draft.branch.is_kahero_branch:
-            _deduct_inventory_for_sale(draft)
+        if not locked_draft.branch.is_kahero_branch:
+            _deduct_inventory_for_sale(locked_draft)
 
-    return draft
+    return locked_draft
 
 
 def _deduct_inventory_for_sale(transaction_obj):
