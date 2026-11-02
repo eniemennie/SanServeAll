@@ -55,6 +55,7 @@ def start_scheduler():
         run_insight_generation_job,
         run_risk_classification_job,
     )
+    from apps.inventory.jobs import run_low_stock_alert_job
 
     _scheduler.add_job(
         run_forecast_job,
@@ -80,6 +81,15 @@ def start_scheduler():
         hour=3,
         minute=0,  # after risk classification, so insights summarize fresh risk scores
         id="nightly_insight_generation",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+    _scheduler.add_job(
+        run_low_stock_alert_job,
+        trigger="cron",
+        hour=6,
+        minute=0,  # before opening hours, so a shortage can still be acted on same-day
+        id="daily_low_stock_alert",
         replace_existing=True,
         misfire_grace_time=3600,
     )
