@@ -41,11 +41,16 @@ class Command(BaseCommand):
         )
         for entry in discrepancies:
             inventory = entry["inventory"]
+            # quantity_on_hand/quantity_change are Decimal (client
+            # raw-data import), not int -- ":+d" is an integer-only
+            # format spec, so the sign is prepended by hand instead.
+            difference = entry["difference"]
+            signed_difference = f"+{difference}" if difference >= 0 else str(difference)
             self.stdout.write(
                 self.style.ERROR(
                     f"  - {inventory.product.name} @ {inventory.branch.name}: "
                     f"recorded balance is {entry['recorded_balance']}, ledger sums to "
-                    f"{entry['ledger_total']} (difference: {entry['difference']:+d})"
+                    f"{entry['ledger_total']} (difference: {signed_difference})"
                 )
             )
 
