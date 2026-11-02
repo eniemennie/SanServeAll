@@ -143,6 +143,21 @@ class TestGetBranchInventory:
         result = services.get_branch_inventory(branch, low_stock_only=True)
         assert len(result) == 1
 
+    def test_discontinued_product_is_excluded(self, branch):
+        """Backend gap assessment: a discontinued product (is_active=
+        False) with leftover stock was still showing up here as if it
+        were a normal, orderable item."""
+        discontinued = Product.objects.create(
+            name="Discontinued Item", price="10.00", is_active=False
+        )
+        active = Product.objects.create(name="Active Item", price="10.00")
+        Inventory.objects.create(branch=branch, product=discontinued, quantity_on_hand=25)
+        Inventory.objects.create(branch=branch, product=active, quantity_on_hand=10)
+
+        result = services.get_branch_inventory(branch)
+        assert len(result) == 1
+        assert result[0].product == active
+
 
 class TestAdjustStock:
     def test_positive_adjustment_increases_stock(self, branch):
@@ -189,6 +204,31 @@ class TestAdjustStock:
         movement = InventoryTransaction.objects.get(branch=branch, product=product)
         assert movement.movement_type == InventoryTransaction.MovementType.MANUAL_ADJUSTMENT
         assert movement.quantity_change == 5
+
+    def test_adjustment_records_reason_and_acting_user(self, branch, owner):
+        """Backend gap assessment: manual adjustments previously left no
+        record of who made them or why."""
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=10)
+
+        services.adjust_stock(inv, 5, reason="Corrected after physical count", user=owner)
+
+        movement = InventoryTransaction.objects.get(branch=branch, product=product)
+        assert movement.reason == "Corrected after physical count"
+        assert movement.created_by == owner
+
+    def test_adjustment_without_reason_or_user_still_works(self, branch):
+        """Backward compatible: existing callers (seed scripts, Quick
+        Sale's preset reason with no explicit user) that don't pass
+        these keep working, just with a blank/null audit trail."""
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=10)
+
+        services.adjust_stock(inv, 5)
+
+        movement = InventoryTransaction.objects.get(branch=branch, product=product)
+        assert movement.reason == ""
+        assert movement.created_by is None
 
 
 class TestGetLowStockAlertsForAllBranches:
@@ -383,27 +423,47 @@ class TestAdjustStockView:
         response = staff_client.get(reverse("inventory:adjust_stock", args=[inv.pk]))
         assert response.status_code == 403
 
-    def test_owner_can_adjust_stock(self, owner_client, branch):
+    def test_owner_can_adjust_stock(self, owner_client, owner, branch):
         product = Product.objects.create(name="Widget", price="10.00")
         inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=10)
 
         response = owner_client.post(
-            reverse("inventory:adjust_stock", args=[inv.pk]), {"delta": "5"}
+            reverse("inventory:adjust_stock", args=[inv.pk]),
+            {"delta": "5", "reason": "Physical count correction"},
         )
         assert response.status_code == 302
 
         inv.refresh_from_db()
         assert inv.quantity_on_hand == 15
 
+        movement = InventoryTransaction.objects.get(branch=branch, product=product)
+        assert movement.reason == "Physical count correction"
+        assert movement.created_by == owner
+
     def test_invalid_adjustment_shows_error_on_page(self, owner_client, branch):
         product = Product.objects.create(name="Widget", price="10.00")
         inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=2)
 
         response = owner_client.post(
-            reverse("inventory:adjust_stock", args=[inv.pk]), {"delta": "-10"}
+            reverse("inventory:adjust_stock", args=[inv.pk]),
+            {"delta": "-10", "reason": "Testing"},
         )
         assert response.status_code == 200
         assert b"below zero" in response.content
+
+    def test_blank_reason_is_rejected_and_does_not_adjust_stock(self, owner_client, branch):
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=10)
+
+        response = owner_client.post(
+            reverse("inventory:adjust_stock", args=[inv.pk]), {"delta": "5", "reason": "   "}
+        )
+        assert response.status_code == 200
+        assert b"reason is required" in response.content
+
+        inv.refresh_from_db()
+        assert inv.quantity_on_hand == 10
+        assert not InventoryTransaction.objects.filter(branch=branch, product=product).exists()
 
 
 class TestResourceStatusSummary:
@@ -447,6 +507,21 @@ class TestResourceStatusSummary:
         assert summary["total_items"] == 0
         assert summary["sufficiency_pct"] == 100
 
+    def test_discontinued_product_does_not_count_toward_sufficiency(self, branch):
+        """A discontinued item shouldn't count toward or against the
+        sufficiency percentage shown on the Dashboard KPI card."""
+        discontinued = Product.objects.create(
+            name="Discontinued Item", price="10.00", reorder_threshold=10, is_active=False
+        )
+        Inventory.objects.create(branch=branch, product=discontinued, quantity_on_hand=0)
+        adequate = Product.objects.create(name="Flour", price="45.00", reorder_threshold=10)
+        Inventory.objects.create(branch=branch, product=adequate, quantity_on_hand=50)
+
+        summary = services.get_resource_status_summary(branch=branch)
+        assert summary["total_items"] == 1
+        assert summary["critical_count"] == 0
+        assert summary["sufficiency_pct"] == 100
+
 
 class TestProductAvailabilityEnhancements:
     """Product Availability batch: real cross-branch stock, stats,
@@ -471,6 +546,17 @@ class TestProductAvailabilityEnhancements:
         assert stats["critical_count"] == 1
         assert stats["available_count"] == 1
         assert stats["total_stock"] == 50
+
+    def test_discontinued_product_is_excluded_from_the_list_and_stats(self, owner_client, branch):
+        discontinued = Product.objects.create(
+            name="Discontinued Item", price="10.00", is_active=False
+        )
+        Inventory.objects.create(branch=branch, product=discontinued, quantity_on_hand=25)
+
+        response = owner_client.get(reverse("inventory:product_management"))
+        assert response.context["stats"]["total_products"] == 0
+        assert len(response.context["items"]) == 0
+        assert b"Discontinued Item" not in response.content
 
     def test_total_stock_stat_does_not_go_negative_from_an_oversold_item(
         self, owner_client, branch, other_branch
