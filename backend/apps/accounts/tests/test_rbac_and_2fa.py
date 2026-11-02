@@ -175,9 +175,7 @@ class TestAdminLogin:
         assert response.status_code == 200
         assert not response.wsgi_request.user.is_authenticated
 
-    def test_locks_out_after_threshold_wrong_passwords_even_the_correct_one(
-        self, client, admin
-    ):
+    def test_locks_out_after_threshold_wrong_passwords_even_the_correct_one(self, client, admin):
         """Previously unlimited -- any number of wrong passwords could be
         tried against the admin login with no lockout at all, unlike the
         Cashier PIN flow which already had one."""
