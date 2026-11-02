@@ -98,6 +98,18 @@ def process_kahero_upload(branch, uploaded_by, uploaded_file):
     return batch
 
 
+def _build_import_key(product, transaction_date, quantity, unit_price):
+    """Backend gap assessment item 4 (Phase 1, critical): KaHero exports
+    carry no real external/natural ID, so a re-uploaded (or
+    re-processed) file would otherwise re-ingest every row as brand-new
+    sales. Builds a composite key from the fields that together
+    identify a real-world sale row, stable enough to catch an exact
+    re-upload without being so loose it flags two genuinely distinct
+    sales (e.g. two different customers buying the same drink on the
+    same day) as duplicates."""
+    return f"{product.pk}|{transaction_date.isoformat()}|{quantity}|{unit_price}"
+
+
 def _ingest_rows(batch, rows):
     """Creates a COMPLETED SalesTransaction+SalesItem per valid row.
     Each row is its own atomic unit -- one bad row (e.g. an unmatched
@@ -124,6 +136,24 @@ def _ingest_rows(batch, rows):
             errors.append({"row": None, "message": f"Invalid price for '{row['product_name']}'."})
             continue
 
+        transaction_date = _parse_transaction_date(row["transaction_date"])
+        import_key = _build_import_key(product, transaction_date, row["quantity"], unit_price)
+
+        if SalesTransaction.objects.filter(
+            branch=batch.branch, kahero_import_key=import_key
+        ).exists():
+            errors.append(
+                {
+                    "row": None,
+                    "message": (
+                        f"Duplicate of an already-imported sale for "
+                        f"'{row['product_name']}' on {transaction_date.date()} -- "
+                        "row skipped."
+                    ),
+                }
+            )
+            continue
+
         with db_transaction.atomic():
             sales_transaction = SalesTransaction.objects.create(
                 branch=batch.branch,
@@ -131,7 +161,8 @@ def _ingest_rows(batch, rows):
                 status=SalesTransaction.Status.COMPLETED,
                 payment_method=SalesTransaction.PaymentMethod.CASH,
                 amount_tendered=unit_price * row["quantity"],
-                completed_at=_parse_transaction_date(row["transaction_date"]),
+                completed_at=transaction_date,
+                kahero_import_key=import_key,
             )
             SalesItem.objects.create(
                 transaction=sales_transaction,

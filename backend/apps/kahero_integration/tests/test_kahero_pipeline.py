@@ -188,6 +188,47 @@ class TestIngestion:
         assert batch.status == KaheroImportBatch.Status.FAILED
         assert batch.error_log[0]["message"]  # some message recorded
 
+    def test_reuploading_the_same_file_skips_every_row_as_duplicate(
+        self, kahero_branch, owner, product
+    ):
+        """Backend gap assessment item 4 (Phase 1, critical): KaHero
+        exports carry no external ID, so a staff member re-uploading the
+        same file (accidentally, or because KaHero re-sent it) must not
+        silently double every sale."""
+        services.process_kahero_upload(kahero_branch, owner, _make_csv(VALID_CSV))
+        assert SalesTransaction.objects.filter(branch=kahero_branch).count() == 2
+
+        second_batch = services.process_kahero_upload(kahero_branch, owner, _make_csv(VALID_CSV))
+
+        # No new sales created the second time around.
+        assert SalesTransaction.objects.filter(branch=kahero_branch).count() == 2
+        assert second_batch.success_count == 0
+        assert second_batch.error_count == 2
+        assert all("Duplicate" in e["message"] for e in second_batch.error_log)
+
+    def test_duplicate_detection_is_scoped_per_branch(self, owner, product):
+        """The same sale figures showing up at a different branch's own
+        export is not a duplicate of this branch's import -- each branch
+        reconciles its own KaHero data independently."""
+        branch_a = Branch.objects.create(name="Alangilan", code="ALANGILAN", is_kahero_branch=True)
+        branch_b = Branch.objects.create(name="Batangas", code="BATANGAS", is_kahero_branch=True)
+
+        services.process_kahero_upload(branch_a, owner, _make_csv(VALID_CSV))
+        second_batch = services.process_kahero_upload(branch_b, owner, _make_csv(VALID_CSV))
+
+        assert second_batch.success_count == 2
+        assert SalesTransaction.objects.filter(branch=branch_b).count() == 2
+
+    def test_two_distinct_rows_with_the_same_product_and_date_are_not_flagged(
+        self, kahero_branch, owner, product
+    ):
+        """VALID_CSV's two rows share a product and date but differ in
+        quantity -- real, distinct sales, not a duplicate re-import."""
+        batch = services.process_kahero_upload(kahero_branch, owner, _make_csv(VALID_CSV))
+
+        assert batch.success_count == 2
+        assert batch.error_count == 0
+
     def test_quality_rate_reflects_success_ratio(self, kahero_branch, owner, product):
         csv_text = (
             "transaction_date,product_name,quantity,unit_price\n"
