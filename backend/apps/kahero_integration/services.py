@@ -103,7 +103,9 @@ def process_kahero_upload(branch, uploaded_by, uploaded_file):
     except ParseError as exc:
         return _fail_batch(batch, str(exc))
     except Exception:
-        logger.exception("KaHero import batch #%s: unexpected error while parsing the file", batch.pk)
+        logger.exception(
+            "KaHero import batch #%s: unexpected error while parsing the file", batch.pk
+        )
         return _fail_batch(
             batch, "An unexpected error occurred while reading this file. Check the server logs."
         )
@@ -186,11 +188,12 @@ def _ingest_rows(batch, rows):
                 )
             ingested_count += 1
         except Exception:
-            logger.exception(
-                "KaHero import batch #%s: unexpected error ingesting a row", batch.pk
-            )
+            logger.exception("KaHero import batch #%s: unexpected error ingesting a row", batch.pk)
             errors.append(
-                {"row": None, "message": "An unexpected error occurred importing this row -- row skipped."}
+                {
+                    "row": None,
+                    "message": "An unexpected error occurred importing this row -- row skipped.",
+                }
             )
 
     return ingested_count, errors

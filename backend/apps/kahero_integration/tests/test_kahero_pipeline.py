@@ -210,9 +210,7 @@ class TestCatchAllExceptionHandling:
     it must always resolve to a terminal FAILED status with the error
     logged, same as any other, anticipated failure."""
 
-    def test_unexpected_error_during_parsing_fails_the_batch_cleanly(
-        self, kahero_branch, owner
-    ):
+    def test_unexpected_error_during_parsing_fails_the_batch_cleanly(self, kahero_branch, owner):
         with patch(
             "apps.kahero_integration.services.parse_kahero_file",
             side_effect=RuntimeError("boom"),
