@@ -7,6 +7,7 @@ one-off manual check.
 """
 
 import pytest
+from django.db import IntegrityError, transaction
 from django.test import override_settings
 
 from apps.accounts.models import Branch, CashierPIN, Role, User
@@ -30,6 +31,31 @@ class TestBranch:
     def test_branch_str_returns_name(self):
         branch = Branch.objects.create(name="Lipa City", code="LIPA")
         assert str(branch) == "Lipa City"
+
+    def test_a_second_kahero_branch_is_rejected_at_the_database_level(self):
+        """The test above only checked that nobody had *tried* to create a
+        second KaHero branch -- nothing previously stopped it from
+        happening. This confirms the invariant is now actually enforced
+        by the schema (a partial unique constraint), not just by
+        convention: creating a second is_kahero_branch=True row must
+        raise, not silently succeed."""
+        Branch.objects.create(name="Alangilan", code="ALANGILAN", is_kahero_branch=True)
+
+        with pytest.raises(IntegrityError):
+            with transaction.atomic():
+                Branch.objects.create(name="Batangas City", code="BATANGAS", is_kahero_branch=True)
+
+        # Confirms the failed insert didn't partially land -- still
+        # exactly one KaHero branch, and it's still the original one.
+        assert Branch.objects.filter(is_kahero_branch=True).count() == 1
+        assert Branch.objects.filter(code="BATANGAS").exists() is False
+
+    def test_multiple_non_kahero_branches_are_unaffected_by_the_constraint(self):
+        """Confirms the partial index only restricts True rows -- as many
+        branches as needed can still have is_kahero_branch=False."""
+        Branch.objects.create(name="Batangas City", code="BATANGAS", is_kahero_branch=False)
+        Branch.objects.create(name="Lipa City", code="LIPA", is_kahero_branch=False)
+        assert Branch.objects.filter(is_kahero_branch=False).count() == 2
 
 
 class TestRole:
