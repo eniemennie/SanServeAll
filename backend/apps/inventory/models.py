@@ -125,7 +125,11 @@ class Inventory(models.Model):
     # exactly rather than lying about them. Finished-goods counts (whole
     # pieces) are unaffected -- every whole number is still an exact
     # Decimal value.
-    quantity_on_hand = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    # 3 places, not 2: widened for Ingredient_Usage.xlsx, which records
+    # some material consumption to a third decimal place (e.g. Cream of
+    # tartar: 0.019kg) -- a production run's deduction from this field
+    # must never be rounded at the boundary.
+    quantity_on_hand = models.DecimalField(max_digits=12, decimal_places=3, default=0)
     # Backend gap assessment (client raw-data import): moved here from
     # Product.reorder_threshold -- the client's own Raw_Materials.xlsx /
     # Packaging_Materials.xlsx data showed real materials genuinely
@@ -137,7 +141,7 @@ class Inventory(models.Model):
     # for the same reason as quantity_on_hand above -- 164/206 raw
     # materials have a fractional reorder point in the client's data.
     reorder_threshold = models.DecimalField(
-        max_digits=12, decimal_places=2, default=0, validators=[MinValueValidator(0)]
+        max_digits=12, decimal_places=3, default=0, validators=[MinValueValidator(0)]
     )
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -224,7 +228,7 @@ class InventoryTransaction(models.Model):
     # Decimal, matching Inventory.quantity_on_hand above, for the same
     # reason: a raw-material adjustment can be a fractional kg/liter
     # amount in the client's real data.
-    quantity_change = models.DecimalField(max_digits=12, decimal_places=2)
+    quantity_change = models.DecimalField(max_digits=12, decimal_places=3)
     # String FK: avoids a hard import-order dependency between inventory
     # and pos, since pos.SalesItem already references inventory.Product.
     related_sales_item = models.ForeignKey(
