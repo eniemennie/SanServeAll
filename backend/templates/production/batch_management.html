@@ -85,7 +85,7 @@
                 <td>{{ record.quantity_produced }}</td>
                 <td>
                     {% for usage in record.ingredient_usages.all %}
-                    <span class="jc-badge jc-badge-info">{{ usage.material.name }}: {{ usage.quantity_used }}</span>
+                    <span class="jc-badge jc-badge-info">{{ usage.material.name }}: {{ usage.quantity_used }} {{ usage.material.get_unit_of_measure_display }}</span>
                     {% endfor %}
                 </td>
                 <td>{{ record.supplier|default:"&mdash;" }}</td>

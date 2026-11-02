@@ -53,6 +53,11 @@
 
 <div class="jc-card p-3">
     <div class="fw-semibold mb-2">Latest Forecast Detail</div>
+    <p class="text-muted small mb-2">
+        This is the Holt-Winters model's own demand prediction. Restocking recommendations on the
+        <a href="{% url 'forecasting:decision_support' %}">AI Insights &amp; Decision Support</a> page
+        use a separate trailing 30-day actual-sales average instead.
+    </p>
     <div class="table-responsive">
     <table class="table table-sm mb-0">
         <thead><tr><th>Product</th><th>Branch</th><th>Date</th><th>Predicted Qty</th><th>Model</th><th>MAE</th></tr></thead>

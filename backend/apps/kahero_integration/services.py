@@ -12,6 +12,7 @@ pipeline creates already-completed historical sales; there is nothing to
 deduct in real time for data that describes the past.
 """
 
+import logging
 from decimal import Decimal, InvalidOperation
 from datetime import datetime
 
@@ -23,6 +24,8 @@ from apps.inventory.models import Product
 from apps.kahero_integration.models import KaheroImportBatch
 from apps.kahero_integration.parsers import ParseError, parse_kahero_file
 from apps.pos.models import SalesItem, SalesTransaction
+
+logger = logging.getLogger(__name__)
 
 
 def _resolve_product(product_name):
@@ -56,10 +59,34 @@ def _parse_transaction_date(raw_value):
     return timezone.make_aware(naive)
 
 
+def _fail_batch(batch, message):
+    """Backend gap assessment item 27: the one, final line of defense.
+    Forces the batch to a terminal FAILED status with the error logged,
+    rather than letting an unanticipated exception propagate into an
+    uncaught 500 -- which would also leave the batch stuck at
+    PROCESSING forever, since the normal completion code below would
+    never run to move it anywhere else."""
+    batch.status = KaheroImportBatch.Status.FAILED
+    batch.error_log = [{"row": None, "message": message}]
+    batch.completed_at = timezone.now()
+    batch.save()
+    return batch
+
+
 def process_kahero_upload(branch, uploaded_by, uploaded_file):
     """Entry point for Row 7.1's upload view. Creates the audit batch
     record first (so even a file that fails to parse at all still leaves
-    a record of the attempt), then parses and ingests."""
+    a record of the attempt), then parses and ingests.
+
+    Backend gap assessment item 27: file-level parse errors and
+    per-row ingestion errors were already handled gracefully, but
+    nothing caught an unanticipated exception mid-parse or mid-batch
+    (e.g. a DB issue) -- that would crash the whole request with an
+    uncaught 500 and leave the batch stuck at PROCESSING forever
+    instead of a terminal state. This function now never raises: any
+    unexpected exception is logged and converted into a FAILED batch,
+    same as a normal, anticipated failure.
+    """
     batch = KaheroImportBatch.objects.create(
         branch=branch,
         uploaded_by=uploaded_by,
@@ -74,13 +101,22 @@ def process_kahero_upload(branch, uploaded_by, uploaded_file):
         # before pandas can read it too.
         valid_rows, parse_errors = parse_kahero_file(uploaded_file)
     except ParseError as exc:
-        batch.status = KaheroImportBatch.Status.FAILED
-        batch.error_log = [{"row": None, "message": str(exc)}]
-        batch.completed_at = timezone.now()
-        batch.save()
-        return batch
+        return _fail_batch(batch, str(exc))
+    except Exception:
+        logger.exception(
+            "KaHero import batch #%s: unexpected error while parsing the file", batch.pk
+        )
+        return _fail_batch(
+            batch, "An unexpected error occurred while reading this file. Check the server logs."
+        )
 
-    ingested_count, ingestion_errors = _ingest_rows(batch, valid_rows)
+    try:
+        ingested_count, ingestion_errors = _ingest_rows(batch, valid_rows)
+    except Exception:
+        logger.exception("KaHero import batch #%s: unexpected error during ingestion", batch.pk)
+        return _fail_batch(
+            batch, "An unexpected error occurred while importing this file. Check the server logs."
+        )
 
     all_errors = [{"row": None, "message": msg} for msg in parse_errors] + ingestion_errors
     batch.total_rows = len(valid_rows) + len(parse_errors)
@@ -113,63 +149,82 @@ def _build_import_key(product, transaction_date, quantity, unit_price):
 def _ingest_rows(batch, rows):
     """Creates a COMPLETED SalesTransaction+SalesItem per valid row.
     Each row is its own atomic unit -- one bad row (e.g. an unmatched
-    product) doesn't roll back the rows around it."""
+    product) doesn't roll back the rows around it.
+
+    Backend gap assessment item 27: the whole per-row body is wrapped in
+    a broad except Exception, so an unanticipated error (a DB issue, a
+    malformed row missing an expected key, etc.) is logged and recorded
+    as a normal row-level error instead of propagating up and aborting
+    every row still left in the batch.
+    """
     ingested_count = 0
     errors = []
 
     for row in rows:
-        product = _resolve_product(row["product_name"])
-        if product is None:
-            errors.append(
-                {
-                    "row": None,
-                    "message": (
-                        f"Product '{row['product_name']}' not found in catalog -- " "row skipped."
-                    ),
-                }
-            )
-            continue
-
         try:
-            unit_price = Decimal(str(row["unit_price"]))
-        except InvalidOperation:
-            errors.append({"row": None, "message": f"Invalid price for '{row['product_name']}'."})
-            continue
+            product = _resolve_product(row["product_name"])
+            if product is None:
+                errors.append(
+                    {
+                        "row": None,
+                        "message": (
+                            f"Product '{row['product_name']}' not found in catalog -- "
+                            "row skipped."
+                        ),
+                    }
+                )
+                continue
 
-        transaction_date = _parse_transaction_date(row["transaction_date"])
-        import_key = _build_import_key(product, transaction_date, row["quantity"], unit_price)
+            try:
+                unit_price = Decimal(str(row["unit_price"]))
+            except InvalidOperation:
+                errors.append(
+                    {"row": None, "message": f"Invalid price for '{row['product_name']}'."}
+                )
+                continue
 
-        if SalesTransaction.objects.filter(
-            branch=batch.branch, kahero_import_key=import_key
-        ).exists():
+            transaction_date = _parse_transaction_date(row["transaction_date"])
+            import_key = _build_import_key(product, transaction_date, row["quantity"], unit_price)
+
+            if SalesTransaction.objects.filter(
+                branch=batch.branch, kahero_import_key=import_key
+            ).exists():
+                errors.append(
+                    {
+                        "row": None,
+                        "message": (
+                            f"Duplicate of an already-imported sale for "
+                            f"'{row['product_name']}' on {transaction_date.date()} -- "
+                            "row skipped."
+                        ),
+                    }
+                )
+                continue
+
+            with db_transaction.atomic():
+                sales_transaction = SalesTransaction.objects.create(
+                    branch=batch.branch,
+                    cashier=batch.uploaded_by,
+                    status=SalesTransaction.Status.COMPLETED,
+                    payment_method=SalesTransaction.PaymentMethod.CASH,
+                    amount_tendered=unit_price * row["quantity"],
+                    completed_at=transaction_date,
+                    kahero_import_key=import_key,
+                )
+                SalesItem.objects.create(
+                    transaction=sales_transaction,
+                    product=product,
+                    unit_price=unit_price,
+                    quantity=row["quantity"],
+                )
+            ingested_count += 1
+        except Exception:
+            logger.exception("KaHero import batch #%s: unexpected error ingesting a row", batch.pk)
             errors.append(
                 {
                     "row": None,
-                    "message": (
-                        f"Duplicate of an already-imported sale for "
-                        f"'{row['product_name']}' on {transaction_date.date()} -- "
-                        "row skipped."
-                    ),
+                    "message": "An unexpected error occurred importing this row -- row skipped.",
                 }
             )
-            continue
-
-        with db_transaction.atomic():
-            sales_transaction = SalesTransaction.objects.create(
-                branch=batch.branch,
-                cashier=batch.uploaded_by,
-                status=SalesTransaction.Status.COMPLETED,
-                payment_method=SalesTransaction.PaymentMethod.CASH,
-                amount_tendered=unit_price * row["quantity"],
-                completed_at=transaction_date,
-                kahero_import_key=import_key,
-            )
-            SalesItem.objects.create(
-                transaction=sales_transaction,
-                product=product,
-                unit_price=unit_price,
-                quantity=row["quantity"],
-            )
-        ingested_count += 1
 
     return ingested_count, errors

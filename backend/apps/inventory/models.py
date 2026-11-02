@@ -16,6 +16,24 @@ class Product(models.Model):
         FINISHED_GOOD = "FINISHED_GOOD", "Finished Good"
         MATERIAL = "MATERIAL", "Raw Material"
 
+    class UnitOfMeasure(models.TextChoices):
+        """Backend gap assessment item 28: quantities everywhere else in
+        this project (quantity_on_hand, quantity_used, etc.) are plain
+        integers with no unit attached -- 10 could mean 10 pieces, kg, or
+        liters depending on the item. Purely descriptive for now (no
+        conversion math exists or is needed yet); it exists so a person
+        reading a quantity knows what it actually counts, and so any
+        future recipe/BOM math has a real unit to validate against
+        instead of silently assuming everything is in the same unit."""
+
+        PIECE = "PIECE", "pc"
+        KILOGRAM = "KILOGRAM", "kg"
+        GRAM = "GRAM", "g"
+        LITER = "LITER", "L"
+        MILLILITER = "MILLILITER", "mL"
+        PACK = "PACK", "pack"
+        BOX = "BOX", "box"
+
     class Category(models.TextChoices):
         COFFEE = "COFFEE", "Coffee"
         COFFEE_FRAPPE = "COFFEE_FRAPPE", "Coffee Frappe"
@@ -50,6 +68,9 @@ class Product(models.Model):
     # (Row 6.4). Zero means "don't flag" rather than "always flag" -- a
     # product with no threshold configured yet shouldn't spam alerts.
     reorder_threshold = models.PositiveIntegerField(default=0)
+    unit_of_measure = models.CharField(
+        max_length=16, choices=UnitOfMeasure.choices, default=UnitOfMeasure.PIECE
+    )
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -158,6 +179,12 @@ class InventoryTransaction(models.Model):
         # confirmed.
         TRANSFER_OUT = "TRANSFER_OUT", "Transfer Out"
         TRANSFER_IN = "TRANSFER_IN", "Transfer In"
+        # Backend gap assessment item 24: a cancelled StockTransferOrder
+        # (PROCESSING or IN_TRANSIT only -- DELIVERED is final) returns
+        # the quantity to the commissary's own Inventory. Logged
+        # separately from TRANSFER_OUT/IN so the audit trail shows a
+        # cancellation happened, not an ordinary second transfer.
+        TRANSFER_CANCELLED = "TRANSFER_CANCELLED", "Transfer Cancelled"
 
     branch = models.ForeignKey("accounts.Branch", on_delete=models.PROTECT)
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
@@ -170,6 +197,21 @@ class InventoryTransaction(models.Model):
     related_sales_item = models.ForeignKey(
         "pos.SalesItem", on_delete=models.SET_NULL, null=True, blank=True
     )
+    # Audit trail for MANUAL_ADJUSTMENT rows (backend gap assessment:
+    # "who/why" fields were missing, so a stock correction left no record
+    # of who made it or why). Left null/blank for every other movement
+    # type, whose "why" is already implied by movement_type itself (a
+    # sale, a production run, a transfer) -- only a manual override needs
+    # a human-entered reason. SET_NULL rather than PROTECT: the audit row
+    # itself must survive a staff account later being deleted.
+    created_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="inventory_adjustments",
+    )
+    reason = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

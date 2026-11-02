@@ -5,6 +5,8 @@ per branch" / "Stock order status tracking: processing, in transit,
 delivered").
 """
 
+from unittest.mock import patch
+
 import pytest
 from django.urls import reverse
 
@@ -142,6 +144,57 @@ class TestCreateStockTransferOrder:
                 quantity=0,
             )
 
+    def test_locks_the_source_inventory_row_before_checking_stock(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        """Backend gap assessment item 26 (same class of risk as the POS
+        double-submission race): the commissary's Inventory row must be
+        locked with select_for_update() before the stock check, so two
+        near-simultaneous submissions can't both read the same
+        quantity_on_hand and both pass validation. In-memory sqlite can't
+        reproduce the real concurrent race in a test (no true
+        multi-connection row locking), so this asserts the locking call
+        itself is actually made rather than skipped."""
+        with patch(
+            "apps.inventory.models.Inventory.objects.select_for_update",
+            wraps=Inventory.objects.select_for_update,
+        ) as mock_lock:
+            services.create_stock_transfer_order(
+                commissary_staff=commissary_staff,
+                destination_branch_id=batangas.pk,
+                product_id=cake.pk,
+                quantity=10,
+            )
+        mock_lock.assert_called_once()
+
+    def test_a_second_submission_correctly_sees_the_reduced_stock(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        """Functional half of the double-submission fix: whether or not
+        the two submissions are truly concurrent, the second one must
+        always re-read the actual current stock (not a stale value from
+        before the first submission's deduction) -- so resubmitting
+        past what's really left on hand is rejected, not silently
+        allowed to go negative."""
+        services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=40,
+        )
+        # Only 10 of the original 50 remain -- a second, identical
+        # resubmission for 40 more must now be rejected.
+        with pytest.raises(services.StockTransferError, match="Not enough"):
+            services.create_stock_transfer_order(
+                commissary_staff=commissary_staff,
+                destination_branch_id=batangas.pk,
+                product_id=cake.pk,
+                quantity=40,
+            )
+        commissary_inventory = Inventory.objects.get(branch=commissary, product=cake)
+        assert commissary_inventory.quantity_on_hand == 10
+        assert StockTransferOrder.objects.count() == 1
+
     def test_no_commissary_configured_raises_clear_error(self, batangas):
         role = Role.objects.create(name=Role.COMMISSARY_STAFF)
         staff = User.objects.create_user(
@@ -233,6 +286,136 @@ class TestAdvanceStockTransferStatus:
         with pytest.raises(services.StockTransferError, match="no further status change"):
             services.advance_stock_transfer_status(order, StockTransferOrder.Status.DELIVERED)
 
+    def test_an_unrecognized_status_value_raises_stock_transfer_error_not_valueerror(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        """Backend gap assessment item 25: a garbage next_status value
+        (e.g. a tampered form field) used to blow up with a bare,
+        uncaught ValueError from StockTransferOrder.Status(new_status)
+        inside the error-message formatting itself, before the service
+        ever got a chance to report a clean, catchable error."""
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        with pytest.raises(
+            services.StockTransferError, match="not a recognized stock transfer status"
+        ):
+            services.advance_stock_transfer_status(order, "BOGUS")
+        order.refresh_from_db()
+        assert order.status == StockTransferOrder.Status.PROCESSING
+
+    def test_a_missing_status_value_also_raises_stock_transfer_error(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        """Same bug, the other common trigger: request.POST.get(...)
+        returns None when the field is simply missing from the form."""
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        with pytest.raises(
+            services.StockTransferError, match="not a recognized stock transfer status"
+        ):
+            services.advance_stock_transfer_status(order, None)
+
+
+class TestCancelStockTransferOrder:
+    """Backend gap assessment item 24: StockTransferOrder cancellation/
+    reversal path."""
+
+    def test_cancelling_a_processing_order_returns_stock_to_the_commissary(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        services.cancel_stock_transfer_order(order)
+        order.refresh_from_db()
+
+        assert order.status == StockTransferOrder.Status.CANCELLED
+        assert order.cancelled_at is not None
+
+        commissary_inventory = Inventory.objects.get(branch=commissary, product=cake)
+        assert commissary_inventory.quantity_on_hand == 50  # fully restored
+
+    def test_cancelling_logs_a_transfer_cancelled_transaction(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        services.cancel_stock_transfer_order(order)
+
+        txn = InventoryTransaction.objects.get(
+            branch=commissary,
+            product=cake,
+            movement_type=InventoryTransaction.MovementType.TRANSFER_CANCELLED,
+        )
+        assert txn.quantity_change == 10
+
+    def test_can_cancel_an_in_transit_order_too(self, commissary, commissary_staff, batangas, cake):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        services.advance_stock_transfer_status(order, StockTransferOrder.Status.IN_TRANSIT)
+
+        services.cancel_stock_transfer_order(order)
+        order.refresh_from_db()
+        assert order.status == StockTransferOrder.Status.CANCELLED
+
+        commissary_inventory = Inventory.objects.get(branch=commissary, product=cake)
+        assert commissary_inventory.quantity_on_hand == 50
+
+    def test_cannot_cancel_a_delivered_order(self, commissary, commissary_staff, batangas, cake):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        services.advance_stock_transfer_status(order, StockTransferOrder.Status.IN_TRANSIT)
+        services.advance_stock_transfer_status(order, StockTransferOrder.Status.DELIVERED)
+
+        with pytest.raises(services.StockTransferError, match="only a Processing or"):
+            services.cancel_stock_transfer_order(order)
+
+        order.refresh_from_db()
+        assert order.status == StockTransferOrder.Status.DELIVERED
+        # Destination's delivered stock is untouched by the failed cancel attempt.
+        destination_inventory = Inventory.objects.get(branch=batangas, product=cake)
+        assert destination_inventory.quantity_on_hand == 10
+
+    def test_cannot_cancel_an_already_cancelled_order(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        services.cancel_stock_transfer_order(order)
+
+        with pytest.raises(services.StockTransferError, match="only a Processing or"):
+            services.cancel_stock_transfer_order(order)
+
+        commissary_inventory = Inventory.objects.get(branch=commissary, product=cake)
+        assert commissary_inventory.quantity_on_hand == 50  # not double-credited
+
 
 class TestStockTransfersView:
     def test_commissary_staff_can_view_the_page(self, commissary_client):
@@ -304,6 +487,81 @@ class TestStockTransfersView:
         response = commissary_client.post(
             reverse("production:advance_stock_transfer", args=[order.pk]),
             {"next_status": "DELIVERED"},
+        )
+        assert response.status_code == 302
+        order.refresh_from_db()
+        assert order.status == StockTransferOrder.Status.PROCESSING
+
+    def test_cancel_view_cancels_a_processing_order(
+        self, commissary_client, commissary, commissary_staff, batangas, cake
+    ):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        response = commissary_client.post(
+            reverse("production:cancel_stock_transfer", args=[order.pk])
+        )
+        assert response.status_code == 302
+        order.refresh_from_db()
+        assert order.status == StockTransferOrder.Status.CANCELLED
+
+        commissary_inventory = Inventory.objects.get(branch=commissary, product=cake)
+        assert commissary_inventory.quantity_on_hand == 50
+
+    def test_cancel_view_silently_ignores_a_delivered_order(
+        self, commissary_client, commissary, commissary_staff, batangas, cake
+    ):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        services.advance_stock_transfer_status(order, StockTransferOrder.Status.IN_TRANSIT)
+        services.advance_stock_transfer_status(order, StockTransferOrder.Status.DELIVERED)
+
+        response = commissary_client.post(
+            reverse("production:cancel_stock_transfer", args=[order.pk])
+        )
+        assert response.status_code == 302
+        order.refresh_from_db()
+        assert order.status == StockTransferOrder.Status.DELIVERED
+
+    def test_branch_staff_cannot_cancel(self, client, commissary, commissary_staff, batangas, cake):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        role = Role.objects.create(name=Role.BRANCH_STAFF)
+        staff = User.objects.create_user(username="cashier2", password="testpass123", role=role)
+        client.force_login(staff)
+
+        response = client.post(reverse("production:cancel_stock_transfer", args=[order.pk]))
+        assert response.status_code == 403
+        order.refresh_from_db()
+        assert order.status == StockTransferOrder.Status.PROCESSING
+
+    def test_advance_view_does_not_500_on_a_bogus_status_value(
+        self, commissary_client, commissary, commissary_staff, batangas, cake
+    ):
+        """Backend gap assessment item 25: a tampered/garbage next_status
+        form value used to raise an uncaught ValueError past the view's
+        own except services.StockTransferError. Now it's just another
+        clean, no-op StockTransferError like any other illegal move."""
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        response = commissary_client.post(
+            reverse("production:advance_stock_transfer", args=[order.pk]),
+            {"next_status": "BOGUS"},
         )
         assert response.status_code == 302
         order.refresh_from_db()
