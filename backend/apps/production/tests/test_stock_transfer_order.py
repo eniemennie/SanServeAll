@@ -5,6 +5,8 @@ per branch" / "Stock order status tracking: processing, in transit,
 delivered").
 """
 
+from unittest.mock import patch
+
 import pytest
 from django.urls import reverse
 
@@ -142,6 +144,57 @@ class TestCreateStockTransferOrder:
                 quantity=0,
             )
 
+    def test_locks_the_source_inventory_row_before_checking_stock(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        """Backend gap assessment item 26 (same class of risk as the POS
+        double-submission race): the commissary's Inventory row must be
+        locked with select_for_update() before the stock check, so two
+        near-simultaneous submissions can't both read the same
+        quantity_on_hand and both pass validation. In-memory sqlite can't
+        reproduce the real concurrent race in a test (no true
+        multi-connection row locking), so this asserts the locking call
+        itself is actually made rather than skipped."""
+        with patch(
+            "apps.inventory.models.Inventory.objects.select_for_update",
+            wraps=Inventory.objects.select_for_update,
+        ) as mock_lock:
+            services.create_stock_transfer_order(
+                commissary_staff=commissary_staff,
+                destination_branch_id=batangas.pk,
+                product_id=cake.pk,
+                quantity=10,
+            )
+        mock_lock.assert_called_once()
+
+    def test_a_second_submission_correctly_sees_the_reduced_stock(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        """Functional half of the double-submission fix: whether or not
+        the two submissions are truly concurrent, the second one must
+        always re-read the actual current stock (not a stale value from
+        before the first submission's deduction) -- so resubmitting
+        past what's really left on hand is rejected, not silently
+        allowed to go negative."""
+        services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=40,
+        )
+        # Only 10 of the original 50 remain -- a second, identical
+        # resubmission for 40 more must now be rejected.
+        with pytest.raises(services.StockTransferError, match="Not enough"):
+            services.create_stock_transfer_order(
+                commissary_staff=commissary_staff,
+                destination_branch_id=batangas.pk,
+                product_id=cake.pk,
+                quantity=40,
+            )
+        commissary_inventory = Inventory.objects.get(branch=commissary, product=cake)
+        assert commissary_inventory.quantity_on_hand == 10
+        assert StockTransferOrder.objects.count() == 1
+
     def test_no_commissary_configured_raises_clear_error(self, batangas):
         role = Role.objects.create(name=Role.COMMISSARY_STAFF)
         staff = User.objects.create_user(
@@ -233,6 +286,43 @@ class TestAdvanceStockTransferStatus:
         with pytest.raises(services.StockTransferError, match="no further status change"):
             services.advance_stock_transfer_status(order, StockTransferOrder.Status.DELIVERED)
 
+    def test_an_unrecognized_status_value_raises_stock_transfer_error_not_valueerror(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        """Backend gap assessment item 25: a garbage next_status value
+        (e.g. a tampered form field) used to blow up with a bare,
+        uncaught ValueError from StockTransferOrder.Status(new_status)
+        inside the error-message formatting itself, before the service
+        ever got a chance to report a clean, catchable error."""
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        with pytest.raises(
+            services.StockTransferError, match="not a recognized stock transfer status"
+        ):
+            services.advance_stock_transfer_status(order, "BOGUS")
+        order.refresh_from_db()
+        assert order.status == StockTransferOrder.Status.PROCESSING
+
+    def test_a_missing_status_value_also_raises_stock_transfer_error(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        """Same bug, the other common trigger: request.POST.get(...)
+        returns None when the field is simply missing from the form."""
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        with pytest.raises(
+            services.StockTransferError, match="not a recognized stock transfer status"
+        ):
+            services.advance_stock_transfer_status(order, None)
+
 
 class TestStockTransfersView:
     def test_commissary_staff_can_view_the_page(self, commissary_client):
@@ -304,6 +394,27 @@ class TestStockTransfersView:
         response = commissary_client.post(
             reverse("production:advance_stock_transfer", args=[order.pk]),
             {"next_status": "DELIVERED"},
+        )
+        assert response.status_code == 302
+        order.refresh_from_db()
+        assert order.status == StockTransferOrder.Status.PROCESSING
+
+    def test_advance_view_does_not_500_on_a_bogus_status_value(
+        self, commissary_client, commissary, commissary_staff, batangas, cake
+    ):
+        """Backend gap assessment item 25: a tampered/garbage next_status
+        form value used to raise an uncaught ValueError past the view's
+        own except services.StockTransferError. Now it's just another
+        clean, no-op StockTransferError like any other illegal move."""
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        response = commissary_client.post(
+            reverse("production:advance_stock_transfer", args=[order.pk]),
+            {"next_status": "BOGUS"},
         )
         assert response.status_code == 302
         order.refresh_from_db()

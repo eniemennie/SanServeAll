@@ -124,7 +124,7 @@ def quick_sale(request, inventory_id):
     if request.method == "POST":
         try:
             delta = -abs(int(request.POST.get("amount", 1)))
-            services.adjust_stock(inventory, delta, reason="Quick Sale")
+            services.adjust_stock(inventory, delta, reason="Quick Sale", user=request.user)
         except (services.InventoryServiceError, ValueError, TypeError):
             pass  # Same behavior as running out mid-quick-sale: no-op, stay on the page.
 
@@ -139,15 +139,25 @@ def quick_sale(request, inventory_id):
 
 @role_required(Role.OWNER_ADMIN)
 def adjust_stock(request, inventory_id):
-    """Manual Stock Adjustment action (Fig. 3-34)."""
+    """Manual Stock Adjustment action (Fig. 3-34). Requires a non-blank
+    reason -- backend gap assessment: this was the one flow with no
+    audit trail of who made a correction or why, since a miscount
+    "fix" looks identical to any other adjustment in the ledger without
+    one."""
     inventory = get_object_or_404(Inventory, pk=inventory_id)
     error = None
 
     if request.method == "POST":
-        try:
-            services.adjust_stock(inventory, request.POST.get("delta"))
-            return redirect("inventory:monitoring")
-        except services.InventoryServiceError as exc:
-            error = str(exc)
+        reason = (request.POST.get("reason") or "").strip()
+        if not reason:
+            error = "A reason is required for a manual stock adjustment."
+        else:
+            try:
+                services.adjust_stock(
+                    inventory, request.POST.get("delta"), reason=reason, user=request.user
+                )
+                return redirect("inventory:monitoring")
+            except services.InventoryServiceError as exc:
+                error = str(exc)
 
     return render(request, "inventory/adjust_stock.html", {"inventory": inventory, "error": error})
