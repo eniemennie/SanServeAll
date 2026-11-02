@@ -94,6 +94,39 @@ class TestCompleteSalePayment:
         assert result.change_due == pytest.approx(50.00)
         assert result.completed_at is not None
 
+    @pytest.mark.parametrize("method", ["GCASH", "CARD", "OTHER_DIGITAL_BANKS"])
+    def test_non_cash_methods_always_record_the_exact_total_as_tendered(
+        self, cashier, branch, product, method
+    ):
+        """Backend gap assessment: GCash/Card/Other Digital Banks have no
+        "change" concept -- the cashier charges the exact total, so
+        whatever (if anything) is posted as amount_tendered for these
+        methods is ignored in favor of the total itself."""
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 2)  # total = 250.00
+
+        result = services.complete_sale_payment(draft, method, "1.00")
+
+        assert result.status == SalesTransaction.Status.COMPLETED
+        assert result.payment_method == method
+        assert result.amount_tendered == pytest.approx(250.00)
+        assert result.change_due == pytest.approx(0.00)
+
+    @pytest.mark.parametrize("method", ["GCASH", "CARD", "OTHER_DIGITAL_BANKS"])
+    def test_non_cash_methods_succeed_with_no_amount_tendered_posted(
+        self, cashier, branch, product, method
+    ):
+        """The payment template no longer requires an amount for these
+        modes client-side (see payment.html's applyPaymentModeVisibility),
+        so the service itself must not depend on receiving one either."""
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 1)  # total = 125.00
+
+        result = services.complete_sale_payment(draft, method, "")
+
+        assert result.status == SalesTransaction.Status.COMPLETED
+        assert result.amount_tendered == pytest.approx(125.00)
+
     def test_native_branch_sale_deducts_inventory(self, cashier, branch, product):
         # `product` fixture already provisioned an Inventory row at
         # `branch` (quantity 0) -- set the real starting quantity on it
@@ -252,6 +285,25 @@ class TestPaymentView:
             draft.refresh_from_db()
             assert draft.status == SalesTransaction.Status.COMPLETED
             assert draft.payment_method == method
+
+    def test_non_cash_payment_succeeds_via_the_view_with_no_amount_posted(
+        self, unlocked_client, cashier, branch, product
+    ):
+        """End-to-end confirmation of the same gap-assessment fix: the
+        view must not require amount_tendered for a non-cash mode either,
+        matching the template's own js-driven relaxation of the field."""
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 1)
+
+        response = unlocked_client.post(
+            reverse("pos:payment"), {"payment_method": "GCASH", "amount_tendered": ""}
+        )
+        assert response.status_code == 302
+
+        draft.refresh_from_db()
+        assert draft.status == SalesTransaction.Status.COMPLETED
+        assert draft.payment_method == "GCASH"
+        assert draft.amount_tendered == draft.grand_total
 
     def test_shows_the_quick_amount_buttons(self, unlocked_client, cashier, branch, product):
         draft = services.get_or_create_draft_transaction(cashier, branch)
