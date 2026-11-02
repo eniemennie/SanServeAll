@@ -78,6 +78,7 @@ def product_management(request):
                 product_type=request.POST.get("product_type", Product.ProductType.FINISHED_GOOD),
                 reorder_threshold=request.POST.get("reorder_threshold") or 0,
                 branch_ids=branch_ids,
+                unit_of_measure=request.POST.get("unit_of_measure"),
             )
             return redirect("inventory:product_management")
         except (services.InventoryServiceError, ValueError, TypeError) as exc:
@@ -106,6 +107,7 @@ def product_management(request):
             "quick_sale_amounts": [1, 2, 5],
             "error": error,
             "product_types": Product.ProductType.choices,
+            "unit_choices": Product.UnitOfMeasure.choices,
         },
     )
 

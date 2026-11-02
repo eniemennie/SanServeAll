@@ -306,6 +306,30 @@ class TestCreateProduct:
         inv = Inventory.objects.get(branch=branch, product=product)
         assert inv.quantity_on_hand == 0
 
+    def test_defaults_to_piece_when_unit_of_measure_omitted(self):
+        """Backend gap assessment item 28: existing callers that don't
+        pass unit_of_measure at all must be unaffected."""
+        product = services.create_product("New Item", "10.00", Product.ProductType.FINISHED_GOOD)
+        assert product.unit_of_measure == Product.UnitOfMeasure.PIECE
+
+    def test_accepts_a_valid_unit_of_measure(self):
+        product = services.create_product(
+            "Flour",
+            "45.00",
+            Product.ProductType.MATERIAL,
+            unit_of_measure=Product.UnitOfMeasure.KILOGRAM,
+        )
+        assert product.unit_of_measure == Product.UnitOfMeasure.KILOGRAM
+
+    def test_rejects_an_unrecognized_unit_of_measure(self):
+        with pytest.raises(services.InventoryServiceError, match="not a recognized unit"):
+            services.create_product(
+                "Flour",
+                "45.00",
+                Product.ProductType.MATERIAL,
+                unit_of_measure="BOGUS",
+            )
+
 
 class TestInventoryMonitoringView:
     def test_branch_staff_can_view_monitoring_for_their_own_branch(self, staff_client, branch):
@@ -374,6 +398,22 @@ class TestProductManagementView:
         )
         assert response.status_code == 302
         assert Product.objects.filter(name="New Latte").exists()
+
+    def test_owner_can_set_the_unit_of_measure_when_adding_a_product(self, owner_client, branch):
+        response = owner_client.post(
+            reverse("inventory:product_management"),
+            {
+                "name": "Sugar",
+                "price": "60.00",
+                "product_type": Product.ProductType.MATERIAL,
+                "reorder_threshold": "5",
+                "unit_of_measure": Product.UnitOfMeasure.KILOGRAM,
+                "branches": [branch.pk],
+            },
+        )
+        assert response.status_code == 302
+        product = Product.objects.get(name="Sugar")
+        assert product.unit_of_measure == Product.UnitOfMeasure.KILOGRAM
 
     def test_adding_a_product_provisions_it_only_at_the_selected_branch(
         self, owner_client, branch, other_branch

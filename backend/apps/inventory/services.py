@@ -204,7 +204,9 @@ def adjust_stock(inventory, delta, reason="", user=None):
     return inventory
 
 
-def create_product(name, price, product_type, reorder_threshold=0, branch_ids=None):
+def create_product(
+    name, price, product_type, reorder_threshold=0, branch_ids=None, unit_of_measure=None
+):
     """Product Inventory Management (Row 6.2): adds a new item to the
     catalog. Kept separate from POS's own catalog-reading logic -- this is
     the write side, restricted to Owner/Admin at the view layer.
@@ -218,18 +220,33 @@ def create_product(name, price, product_type, reorder_threshold=0, branch_ids=No
     pre-fix behavior of not auto-provisioning anywhere (QA-reported bug:
     a new product silently became orderable at every branch with no
     branch selection at all; this makes that selection explicit instead
-    of removing it)."""
+    of removing it).
+
+    `unit_of_measure` (backend gap assessment item 28): optional, falls
+    back to the model field's own default (PIECE) when omitted/blank --
+    existing callers are unaffected. Validated against the real set of
+    choices rather than silently accepted as-is, same reasoning as the
+    status validation fix in production.services.advance_stock_transfer_status
+    (item 25): an unrecognized value should be a clear, catchable error at
+    creation time, not stored silently and discovered later.
+    """
     from apps.accounts.models import Branch
 
     name = (name or "").strip()
     if not name:
         raise InventoryServiceError("Product name is required.")
 
+    if unit_of_measure:
+        valid_units = {choice.value for choice in Product.UnitOfMeasure}
+        if unit_of_measure not in valid_units:
+            raise InventoryServiceError(f"'{unit_of_measure}' is not a recognized unit of measure.")
+
     product = Product.objects.create(
         name=name,
         price=price,
         product_type=product_type,
         reorder_threshold=reorder_threshold or 0,
+        **({"unit_of_measure": unit_of_measure} if unit_of_measure else {}),
     )
 
     if branch_ids:
