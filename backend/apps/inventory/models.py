@@ -170,6 +170,21 @@ class InventoryTransaction(models.Model):
     related_sales_item = models.ForeignKey(
         "pos.SalesItem", on_delete=models.SET_NULL, null=True, blank=True
     )
+    # Audit trail for MANUAL_ADJUSTMENT rows (backend gap assessment:
+    # "who/why" fields were missing, so a stock correction left no record
+    # of who made it or why). Left null/blank for every other movement
+    # type, whose "why" is already implied by movement_type itself (a
+    # sale, a production run, a transfer) -- only a manual override needs
+    # a human-entered reason. SET_NULL rather than PROTECT: the audit row
+    # itself must survive a staff account later being deleted.
+    created_by = models.ForeignKey(
+        "accounts.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="inventory_adjustments",
+    )
+    reason = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
