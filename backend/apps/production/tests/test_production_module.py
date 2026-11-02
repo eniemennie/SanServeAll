@@ -180,6 +180,63 @@ class TestRecordProduction:
                 ingredient_rows=[],
             )
 
+    def test_pending_run_does_not_touch_inventory_at_all(
+        self, commissary, commissary_staff, cake, flour
+    ):
+        """Backend gap assessment item 3 (Phase 1, critical): a run still
+        PENDING/IN_PROGRESS hasn't actually happened yet, so neither the
+        material deduction nor the finished-good credit should fire."""
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 5}],
+            status=ProductionRecord.Status.PENDING,
+        )
+
+        flour_inventory = Inventory.objects.get(branch=commissary, product=flour)
+        assert flour_inventory.quantity_on_hand == 50  # untouched
+
+        assert not Inventory.objects.filter(branch=commissary, product=cake).exists()
+        assert not InventoryTransaction.objects.exists()
+
+    def test_in_progress_run_does_not_touch_inventory_either(
+        self, commissary, commissary_staff, cake, flour
+    ):
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 5}],
+            status=ProductionRecord.Status.IN_PROGRESS,
+        )
+
+        flour_inventory = Inventory.objects.get(branch=commissary, product=flour)
+        assert flour_inventory.quantity_on_hand == 50  # untouched
+
+    def test_completed_but_failed_run_deducts_materials_but_not_finished_good(
+        self, commissary, commissary_staff, cake, flour
+    ):
+        """Backend gap assessment item 3: a FAIL run still consumed its
+        real ingredients, but the resulting output isn't fit to sell, so
+        it must never land in finished-good inventory."""
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 5}],
+            status=ProductionRecord.Status.COMPLETED,
+            quality=ProductionRecord.Quality.FAIL,
+        )
+
+        flour_inventory = Inventory.objects.get(branch=commissary, product=flour)
+        assert flour_inventory.quantity_on_hand == 45  # materials still consumed
+
+        assert not Inventory.objects.filter(branch=commissary, product=cake).exists()
+        assert not InventoryTransaction.objects.filter(
+            movement_type=InventoryTransaction.MovementType.PRODUCTION_OUTPUT
+        ).exists()
+
     def test_no_commissary_configured_raises_clear_error(self):
         """Tested in isolation -- no commissary, no materials, no
         Inventory rows at all -- since Inventory.branch uses PROTECT and

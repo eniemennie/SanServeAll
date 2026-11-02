@@ -241,3 +241,20 @@ def advance_stock_transfer(request, order_id):
             pass  # Stay on the page; the list view shows the order's real, unchanged status.
 
     return redirect("production:stock_transfers")
+
+
+@role_required(Role.COMMISSARY_STAFF, Role.OWNER_ADMIN)
+def cancel_stock_transfer(request, order_id):
+    """Cancels a Processing or In Transit StockTransferOrder (backend gap
+    assessment item 24), returning its quantity to the commissary's own
+    Inventory. Same thin POST-and-redirect-back pattern as
+    advance_stock_transfer -- the list view shows the order's real,
+    unchanged status if cancellation isn't actually allowed."""
+    order = get_object_or_404(StockTransferOrder, pk=order_id)
+    if request.method == "POST":
+        try:
+            services.cancel_stock_transfer_order(order)
+        except services.StockTransferError:
+            pass
+
+    return redirect("production:stock_transfers")

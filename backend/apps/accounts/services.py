@@ -10,10 +10,62 @@ import secrets
 import string
 from datetime import timedelta
 
-from django.contrib.auth import get_user_model
+from django.contrib.auth import authenticate, get_user_model
 from django.utils import timezone
 
 from apps.accounts.models import Branch, CashierPIN, Role, TwoFactorBackupCode
+
+# Placeholder credentials created by create_branch_cashier_placeholders
+# and create_commissary_staff_placeholder when no real staff member
+# exists yet to receive one privately -- deliberately documented, not
+# secret. Canonical here (both commands import these rather than each
+# defining its own copy) so the deploy-gate audit below checks against
+# the exact same values those commands actually set.
+PLACEHOLDER_CASHIER_PIN = "0000"
+PLACEHOLDER_COMMISSARY_PASSWORD = "CommissaryPending2026!"
+
+
+def find_accounts_with_placeholder_credentials():
+    """Backend gap assessment item 7 (Phase 1, critical): the 0000 PIN
+    and commissary seed password are a known, intentional gap while no
+    real staff member exists yet to receive a real one -- but until now
+    nothing checked whether one was still in place by the time a real
+    deployment actually happened. The creating commands already print a
+    one-time warning, but that's easy to miss weeks later when a
+    genuine person should have replaced it long since.
+
+    Returns a list of {"user", "credential_type", "message"} dicts for
+    every ACTIVE account still using its documented placeholder value --
+    empty when nothing needs rotating.
+    """
+    findings = []
+
+    for pin_record in CashierPIN.objects.filter(is_active=True).select_related("user"):
+        if pin_record.user.is_active and pin_record.check_pin(PLACEHOLDER_CASHIER_PIN):
+            findings.append(
+                {
+                    "user": pin_record.user,
+                    "credential_type": "Cashier PIN",
+                    "message": (
+                        f"{pin_record.user.username}: still using the placeholder PIN "
+                        f"'{PLACEHOLDER_CASHIER_PIN}'."
+                    ),
+                }
+            )
+
+    for user in get_user_model().objects.filter(role__name=Role.COMMISSARY_STAFF, is_active=True):
+        if user.check_password(PLACEHOLDER_COMMISSARY_PASSWORD):
+            findings.append(
+                {
+                    "user": user,
+                    "credential_type": "Commissary password",
+                    "message": (
+                        f"{user.username}: still using the placeholder commissary password."
+                    ),
+                }
+            )
+
+    return findings
 
 
 def get_selectable_branches(user):
@@ -131,6 +183,72 @@ def verify_cashier_pin_with_lockout(user, raw_pin):
 
     pin_record.save()
     return False, "Incorrect PIN. Please try again."
+
+
+LOGIN_LOCKOUT_THRESHOLD = 5
+LOGIN_LOCKOUT_DURATION_MINUTES = 5
+
+
+def authenticate_with_lockout(request, candidate, password, required_role):
+    """Password-based login with the same brute-force lockout policy as
+    verify_cashier_pin_with_lockout above -- for the two custom
+    password-door views (AdminLoginView, CommissaryLoginView) that
+    previously had no attempt limit at all, unlike the PIN-based Cashier
+    flow.
+
+    `candidate` is the User row matched by email/username before this is
+    called (or None if no such account exists) -- this function doesn't
+    look it up itself, so the caller's own "don't leak which accounts
+    exist" wording stays exactly as each view already has it for every
+    outcome except a genuine lockout.
+
+    A correct password for the wrong role (e.g. a Branch Staff account's
+    real password entered on the Admin door) is refused but deliberately
+    NOT counted as a failed attempt -- the attacker didn't fail to guess
+    that account's password, so it shouldn't move that account toward a
+    lockout of its real login path.
+
+    Returns (user_or_None, error_message_or_None). A non-None error
+    message means "show this specific message" (currently only the
+    lockout case); None means the caller should show its own generic
+    invalid-credentials copy.
+    """
+    if candidate is not None and candidate.is_locked():
+        minutes_left = max(
+            1, int((candidate.locked_until - timezone.now()).total_seconds() // 60) + 1
+        )
+        return None, f"Too many incorrect attempts. Try again in {minutes_left} minute(s)."
+
+    # Always run a real authenticate() call, even with no matching
+    # account, so a nonexistent email/username takes the same code path
+    # as a wrong password for a real one rather than short-circuiting.
+    username = candidate.username if candidate is not None else "__no_such_account__"
+    authed = authenticate(request, username=username, password=password)
+
+    if authed is None:
+        if candidate is not None:
+            candidate.failed_attempts += 1
+            if candidate.failed_attempts >= LOGIN_LOCKOUT_THRESHOLD:
+                candidate.locked_until = timezone.now() + timedelta(
+                    minutes=LOGIN_LOCKOUT_DURATION_MINUTES
+                )
+                candidate.failed_attempts = 0
+                candidate.save(update_fields=["failed_attempts", "locked_until"])
+                return None, (
+                    f"Too many incorrect attempts. Try again in "
+                    f"{LOGIN_LOCKOUT_DURATION_MINUTES} minutes."
+                )
+            candidate.save(update_fields=["failed_attempts"])
+        return None, None
+
+    if not (authed.role and authed.role.name == required_role):
+        return None, None
+
+    if candidate.failed_attempts or candidate.locked_until:
+        candidate.failed_attempts = 0
+        candidate.locked_until = None
+        candidate.save(update_fields=["failed_attempts", "locked_until"])
+    return authed, None
 
 
 BACKUP_CODE_COUNT = 10

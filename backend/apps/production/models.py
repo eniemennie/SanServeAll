@@ -63,12 +63,22 @@ class StockTransferOrder(models.Model):
     destination branch's Inventory once DELIVERED is confirmed. While
     IN_TRANSIT, the quantity is accounted for by this row alone, not
     double-counted as available at either branch.
+
+    CANCELLED (backend gap assessment item 24) is the one exception to
+    "forward-only": an order can be cancelled from PROCESSING or
+    IN_TRANSIT (see services.cancel_stock_transfer_order), which returns
+    the quantity to the commissary's Inventory -- reversing the deduction
+    made at creation time. Once DELIVERED, an order is final and cannot
+    be cancelled; a delivered shipment that needs correcting is a new,
+    separate transfer or a manual inventory adjustment, not a reversal of
+    this record.
     """
 
     class Status(models.TextChoices):
         PROCESSING = "PROCESSING", "Processing"
         IN_TRANSIT = "IN_TRANSIT", "In Transit"
         DELIVERED = "DELIVERED", "Delivered"
+        CANCELLED = "CANCELLED", "Cancelled"
 
     commissary_staff = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -98,6 +108,9 @@ class StockTransferOrder(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     delivered_at = models.DateTimeField(
         null=True, blank=True, help_text="Set only when status actually reaches DELIVERED."
+    )
+    cancelled_at = models.DateTimeField(
+        null=True, blank=True, help_text="Set only when status actually reaches CANCELLED."
     )
 
     class Meta:

@@ -15,4 +15,9 @@ urlpatterns = [
         views.advance_stock_transfer,
         name="advance_stock_transfer",
     ),
+    path(
+        "transfers/<int:order_id>/cancel/",
+        views.cancel_stock_transfer,
+        name="cancel_stock_transfer",
+    ),
 ]

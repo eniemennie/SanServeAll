@@ -69,13 +69,13 @@
                 <td>{{ order.source_branch.name }}</td>
                 <td>{{ order.destination_branch.name }}</td>
                 <td>
-                    <span class="jc-badge {% if order.status == 'DELIVERED' %}jc-badge-adequate{% elif order.status == 'IN_TRANSIT' %}jc-badge-info{% else %}jc-badge-low{% endif %}">
+                    <span class="jc-badge {% if order.status == 'DELIVERED' %}jc-badge-adequate{% elif order.status == 'IN_TRANSIT' %}jc-badge-info{% elif order.status == 'CANCELLED' %}jc-badge-critical{% else %}jc-badge-low{% endif %}">
                         {{ order.get_status_display }}
                     </span>
                 </td>
                 <td>{{ order.created_at|date:"M d, Y H:i" }}</td>
                 <td>{{ order.delivered_at|date:"M d, Y H:i"|default:"&mdash;" }}</td>
-                <td>
+                <td class="d-flex gap-1">
                     {% if order.status == "PROCESSING" %}
                     <form method="post" action="{% url 'production:advance_stock_transfer' order.pk %}">
                         {% csrf_token %}
@@ -87,6 +87,13 @@
                         {% csrf_token %}
                         <input type="hidden" name="next_status" value="DELIVERED">
                         <button type="submit" class="btn btn-outline-secondary btn-sm">Mark Delivered</button>
+                    </form>
+                    {% endif %}
+                    {% if order.status == "PROCESSING" or order.status == "IN_TRANSIT" %}
+                    <form method="post" action="{% url 'production:cancel_stock_transfer' order.pk %}"
+                          onsubmit="return confirm('Cancel this transfer and return the stock to the commissary?');">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-outline-danger btn-sm">Cancel</button>
                     </form>
                     {% endif %}
                 </td>
