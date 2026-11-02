@@ -14,7 +14,6 @@ import io
 import json
 
 import qrcode
-from django.contrib.auth import authenticate
 from django.contrib.auth import login as auth_login
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_required
@@ -30,13 +29,18 @@ from apps.accounts.models import Branch, Role, User
 from apps.inventory.models import Product
 from apps.accounts.permissions import role_required
 from apps.accounts.services import (
+    AccountManagementError,
+    authenticate_with_lockout,
+    create_staff_account,
     generate_backup_codes,
+    get_manageable_accounts,
     get_selectable_branches,
     get_selectable_cashiers,
+    reset_cashier_pin,
+    update_staff_account,
     user_can_select_branch,
     user_requires_cashier_pin,
     verify_and_consume_backup_code,
-    verify_cashier_pin,
     verify_cashier_pin_with_lockout,
 )
 from apps.analytics import services as analytics_services
@@ -189,13 +193,19 @@ class CashierPinView(LoginRequiredMixin, View):
 
     def post(self, request):
         raw_pin = request.POST.get("pin", "")
-        if verify_cashier_pin(request.user, raw_pin):
+        # Routed through the same lockout-protected check as the
+        # tap-to-select Cashier Lock flow (CashierLockView) -- this screen
+        # guards the exact same POS-unlock boundary with a 4-digit PIN, so
+        # it needs the same brute-force protection, not a second,
+        # unprotected path to the same secret.
+        success, error = verify_cashier_pin_with_lockout(request.user, raw_pin)
+        if success:
             request.session["pos_unlocked"] = True
             return redirect("pos:ordering")
         return render(
             request,
             self.template_name,
-            {"error": "Incorrect PIN. Please try again."},
+            {"error": error},
         )
 
 
@@ -246,17 +256,15 @@ class AdminLoginView(View):
         password = request.POST.get("password", "")
 
         candidate = User.objects.filter(email__iexact=email).first()
-        user = None
-        if candidate is not None:
-            authed = authenticate(request, username=candidate.username, password=password)
-            if authed is not None and authed.role and authed.role.name == Role.OWNER_ADMIN:
-                user = authed
+        user, lockout_error = authenticate_with_lockout(
+            request, candidate, password, Role.OWNER_ADMIN
+        )
 
         if user is None:
             return render(
                 request,
                 self.template_name,
-                {"error": "Invalid email or password."},
+                {"error": lockout_error or "Invalid email or password."},
             )
 
         auth_login(request, user)
@@ -296,16 +304,16 @@ class CommissaryLoginView(View):
         username = request.POST.get("username", "").strip()
         password = request.POST.get("password", "")
 
-        authed = authenticate(request, username=username, password=password)
-        user = None
-        if authed is not None and authed.role and authed.role.name == Role.COMMISSARY_STAFF:
-            user = authed
+        candidate = User.objects.filter(username__iexact=username).first()
+        user, lockout_error = authenticate_with_lockout(
+            request, candidate, password, Role.COMMISSARY_STAFF
+        )
 
         if user is None:
             return render(
                 request,
                 self.template_name,
-                {"error": "Invalid username or password."},
+                {"error": lockout_error or "Invalid username or password."},
             )
 
         auth_login(request, user)
@@ -543,5 +551,102 @@ def admin_dashboard(request):
             "include_additional_sales": include_additional_sales,
             "exclude_discounts": exclude_discounts,
             "exclude_vat": exclude_vat,
+        },
+    )
+
+
+@role_required(Role.OWNER_ADMIN)
+@otp_required(login_url="accounts:admin_login")
+def account_management(request):
+    """Account Management (backend gap assessment finding: no in-app way
+    to create/edit a staff account, assign branch/role, or reset a PIN --
+    today this is only possible via a one-off management command
+    (create_branch_cashier_placeholders) or the raw Django admin).
+    Protected by both role AND OTP verification, same as admin_dashboard
+    -- creating accounts and generating PINs is at least as sensitive as
+    anything else gated that way.
+
+    Handles listing + creating here; editing an existing account and
+    resetting its PIN are handled by account_edit below, since those
+    need a target user already in hand.
+    """
+    error = None
+    generated_pin = None
+    created_username = None
+
+    if request.method == "POST":
+        try:
+            user, generated_pin = create_staff_account(
+                username=request.POST.get("username", ""),
+                role_name=request.POST.get("role", ""),
+                branch_id=request.POST.get("branch") or None,
+                password=request.POST.get("password", ""),
+                first_name=request.POST.get("first_name", ""),
+                last_name=request.POST.get("last_name", ""),
+                email=request.POST.get("email", ""),
+                employee_id=request.POST.get("employee_id", ""),
+                phone_number=request.POST.get("phone_number", ""),
+            )
+            created_username = user.username
+        except AccountManagementError as exc:
+            error = str(exc)
+
+    return render(
+        request,
+        "accounts/account_management.html",
+        {
+            "active_nav": "accounts",
+            "accounts": get_manageable_accounts(),
+            "branches": Branch.objects.filter(is_active=True).order_by("name"),
+            "role_choices": Role.ROLE_CHOICES,
+            "error": error,
+            "generated_pin": generated_pin,
+            "created_username": created_username,
+        },
+    )
+
+
+@role_required(Role.OWNER_ADMIN)
+@otp_required(login_url="accounts:admin_login")
+def account_edit(request, user_id):
+    """Edit an existing staff account (branch, active status, contact
+    info) and/or reset its PIN, distinguished by the submitted form's
+    `action` field so both actions live on one page without a redirect
+    losing the just-generated PIN. Role is deliberately NOT editable
+    here -- see update_staff_account's docstring for why."""
+    target = get_object_or_404(User, pk=user_id, role__isnull=False)
+    error = None
+    generated_pin = None
+
+    if request.method == "POST":
+        if request.POST.get("action") == "reset_pin":
+            try:
+                generated_pin = reset_cashier_pin(target)
+            except AccountManagementError as exc:
+                error = str(exc)
+        else:
+            try:
+                update_staff_account(
+                    target,
+                    branch_id=request.POST.get("branch") or None,
+                    is_active=request.POST.get("is_active") == "on",
+                    employee_id=request.POST.get("employee_id", ""),
+                    phone_number=request.POST.get("phone_number", ""),
+                    first_name=request.POST.get("first_name", ""),
+                    last_name=request.POST.get("last_name", ""),
+                )
+                return redirect("accounts:account_management")
+            except AccountManagementError as exc:
+                error = str(exc)
+
+    return render(
+        request,
+        "accounts/account_edit.html",
+        {
+            "active_nav": "accounts",
+            "target": target,
+            "branches": Branch.objects.filter(is_active=True).order_by("name"),
+            "error": error,
+            "generated_pin": generated_pin,
         },
     )

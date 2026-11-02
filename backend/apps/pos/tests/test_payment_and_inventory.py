@@ -3,6 +3,8 @@ Tests for Week 5: Payment Processing (Fig. 3-16), Transaction Receipt
 (Fig. 3-17), and the real-time inventory deduction hook (Row 5.3).
 """
 
+from unittest.mock import patch
+
 import pytest
 from django.urls import reverse
 
@@ -157,6 +159,46 @@ class TestCompleteSalePayment:
         assert new_draft.pk != draft.pk
         assert new_draft.status == SalesTransaction.Status.DRAFT
         assert not new_draft.items.exists()
+
+    def test_locks_the_draft_row_before_finalizing_it(self, cashier, branch, product):
+        """POS Double-submission guard (gap assessment): the
+        SalesTransaction row must be locked with select_for_update()
+        before it's checked/finalized, so two near-simultaneous
+        submissions can't both read status=DRAFT and both pass. In-memory
+        sqlite (this project's test backend) can't reproduce the real
+        concurrent race, so this asserts the locking call itself is
+        actually made rather than silently skipped."""
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 1)
+
+        with patch(
+            "apps.pos.models.SalesTransaction.objects.select_for_update",
+            wraps=SalesTransaction.objects.select_for_update,
+        ) as mock_lock:
+            services.complete_sale_payment(draft, "CASH", "200.00")
+        mock_lock.assert_called_once()
+
+    def test_resubmitting_an_already_completed_draft_is_rejected_cleanly(
+        self, cashier, branch, product
+    ):
+        """Whether or not the two submissions are truly concurrent, a
+        second finalize attempt against an already-COMPLETED transaction
+        must always be rejected, not silently re-run the deduction a
+        second time against the same stock and the same transaction
+        record."""
+        Inventory.objects.filter(branch=branch, product=product).update(quantity_on_hand=10)
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 3)
+
+        services.complete_sale_payment(draft, "CASH", "500.00")
+
+        with pytest.raises(services.PaymentError, match="already been paid for"):
+            services.complete_sale_payment(draft, "CASH", "500.00")
+
+        # Inventory was deducted exactly once, not twice.
+        inventory = Inventory.objects.get(branch=branch, product=product)
+        assert inventory.quantity_on_hand == 7
+        assert InventoryTransaction.objects.filter(branch=branch, product=product).count() == 1
 
 
 class TestPaymentView:
