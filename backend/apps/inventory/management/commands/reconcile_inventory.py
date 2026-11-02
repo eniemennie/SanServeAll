@@ -29,7 +29,9 @@ class Command(BaseCommand):
         discrepancies = find_ledger_discrepancies()
 
         if not discrepancies:
-            self.stdout.write(self.style.SUCCESS("Inventory reconciliation: no discrepancies found."))
+            self.stdout.write(
+                self.style.SUCCESS("Inventory reconciliation: no discrepancies found.")
+            )
             return
 
         self.stdout.write(
