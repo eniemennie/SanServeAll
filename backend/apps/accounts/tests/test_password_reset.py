@@ -11,7 +11,6 @@ token logic.
 import re
 
 import pytest
-from django.core import mail
 from django.urls import reverse
 
 from apps.accounts.models import Branch, CashierPIN, Role, User
@@ -51,9 +50,7 @@ def commissary_worker(roles):
 @pytest.fixture
 def cashier(roles):
     branch = Branch.objects.create(name="Batangas City", code="BATANGAS")
-    user = User.objects.create_user(
-        username="cashier1", role=roles["branch_staff"], branch=branch
-    )
+    user = User.objects.create_user(username="cashier1", role=roles["branch_staff"], branch=branch)
     user.set_unusable_password()
     user.save()
     pin = CashierPIN.objects.create(user=user)
@@ -103,9 +100,7 @@ class TestPasswordResetRequest:
     def test_unknown_email_still_redirects_to_done_no_leak(self, client, mailoutbox):
         """Same response whether or not the email exists -- otherwise the
         response itself would reveal which emails are registered."""
-        response = client.post(
-            reverse("accounts:password_reset"), {"email": "nobody@example.com"}
-        )
+        response = client.post(reverse("accounts:password_reset"), {"email": "nobody@example.com"})
         assert response.status_code == 302
         assert response.url == reverse("accounts:password_reset_done")
         assert len(mailoutbox) == 0

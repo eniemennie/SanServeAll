@@ -119,9 +119,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 # flow without signing up for a provider first. Override EMAIL_BACKEND
 # (and DEFAULT_FROM_EMAIL) via env vars once a real SMTP/API provider is
 # chosen; nothing else in the password-reset code needs to change.
-EMAIL_BACKEND = os.environ.get(
-    "EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend"
-)
+EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "no-reply@sanserveall.local")
 
 # Auth flow (Week 3): unauthenticated requests to a login-required view
