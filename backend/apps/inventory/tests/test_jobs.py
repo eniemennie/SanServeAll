@@ -24,8 +24,10 @@ def branch():
 
 class TestRunLowStockAlertJob:
     def test_sends_no_email_when_every_branch_is_adequately_stocked(self, branch, mailoutbox):
-        healthy = Product.objects.create(name="Flour", price="45.00", reorder_threshold=10)
-        Inventory.objects.create(branch=branch, product=healthy, quantity_on_hand=50)
+        healthy = Product.objects.create(name="Flour", price="45.00")
+        Inventory.objects.create(
+            branch=branch, product=healthy, quantity_on_hand=50, reorder_threshold=10
+        )
 
         alerts = run_low_stock_alert_job()
         assert alerts == []
@@ -38,8 +40,10 @@ class TestRunLowStockAlertJob:
         config.admin_alert_email = "owner@example.com"
         config.save()
 
-        critical = Product.objects.create(name="Cashews", price="650.00", reorder_threshold=10)
-        Inventory.objects.create(branch=branch, product=critical, quantity_on_hand=0)
+        critical = Product.objects.create(name="Cashews", price="650.00")
+        Inventory.objects.create(
+            branch=branch, product=critical, quantity_on_hand=0, reorder_threshold=10
+        )
 
         alerts = run_low_stock_alert_job()
         assert len(alerts) == 1
@@ -55,8 +59,10 @@ class TestRunLowStockAlertJob:
         config.admin_alert_email = ""
         config.save()
 
-        critical = Product.objects.create(name="Cashews", price="650.00", reorder_threshold=10)
-        Inventory.objects.create(branch=branch, product=critical, quantity_on_hand=0)
+        critical = Product.objects.create(name="Cashews", price="650.00")
+        Inventory.objects.create(
+            branch=branch, product=critical, quantity_on_hand=0, reorder_threshold=10
+        )
 
         run_low_stock_alert_job()
         assert len(mailoutbox) == 1

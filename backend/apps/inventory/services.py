@@ -148,11 +148,20 @@ def get_resource_status_summary(branch=None, product_type=None):
     }
 
 
-def get_or_create_inventory_row(branch, product):
+def get_or_create_inventory_row(branch, product, reorder_threshold=None):
     """Ensures a branch has an Inventory row for a product even if no sale
     or adjustment has touched it yet, so it still shows up (at 0) on the
-    monitoring screen rather than being invisible until first touched."""
-    inventory, _ = Inventory.objects.get_or_create(branch=branch, product=product)
+    monitoring screen rather than being invisible until first touched.
+
+    `reorder_threshold`, if given, only applies on first creation (via
+    `defaults=`) -- a repeat call for a row that already exists must not
+    silently overwrite whatever threshold is already configured there."""
+    defaults = {}
+    if reorder_threshold is not None:
+        defaults["reorder_threshold"] = reorder_threshold
+    inventory, _ = Inventory.objects.get_or_create(
+        branch=branch, product=product, defaults=defaults
+    )
     return inventory
 
 
@@ -222,6 +231,12 @@ def create_product(
     branch selection at all; this makes that selection explicit instead
     of removing it).
 
+    `reorder_threshold` lives on Inventory, not Product (client raw-data
+    import: real reorder points genuinely differ per branch for the same
+    material), so it's applied to each Inventory row created here rather
+    than to the Product itself -- with nothing to apply it to when
+    branch_ids is empty, it's simply unused in that case, same as before.
+
     `unit_of_measure` (backend gap assessment item 28): optional, falls
     back to the model field's own default (PIECE) when omitted/blank --
     existing callers are unaffected. Validated against the real set of
@@ -245,13 +260,12 @@ def create_product(
         name=name,
         price=price,
         product_type=product_type,
-        reorder_threshold=reorder_threshold or 0,
         **({"unit_of_measure": unit_of_measure} if unit_of_measure else {}),
     )
 
     if branch_ids:
         for branch in Branch.objects.filter(pk__in=branch_ids):
-            get_or_create_inventory_row(branch, product)
+            get_or_create_inventory_row(branch, product, reorder_threshold=reorder_threshold or 0)
 
     return product
 

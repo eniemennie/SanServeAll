@@ -106,7 +106,7 @@
                 <div>
                     <div class="fw-semibold">{{ item.product.name }}</div>
                     <div class="text-muted small">
-                        {{ item.display_quantity }} on hand &middot; reorder at {{ item.product.reorder_threshold }}
+                        {{ item.display_quantity }} on hand &middot; reorder at {{ item.reorder_threshold }}
                     </div>
                 </div>
                 {% if item.is_out_of_stock %}

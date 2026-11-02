@@ -21,6 +21,13 @@ class ProductionRecord(models.Model):
         IN_PROGRESS = "IN_PROGRESS", "In Progress"
         COMPLETED = "COMPLETED", "Completed"
 
+    # Client raw-data import (Production_Records.xlsx): the client's own
+    # human-readable batch label (e.g. "BATCH-0001"). Nullable/blank for
+    # any batch created the normal way through this app, which has never
+    # needed its own label -- only imported history carries one, so a
+    # future "check batch BATCH-0042" request from the client has
+    # something to look up by.
+    batch_ref = models.CharField(max_length=32, blank=True, null=True, unique=True, default=None)
     commissary_staff = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     product = models.ForeignKey(
         "inventory.Product",
@@ -80,6 +87,10 @@ class StockTransferOrder(models.Model):
         DELIVERED = "DELIVERED", "Delivered"
         CANCELLED = "CANCELLED", "Cancelled"
 
+    # Client raw-data import (Stock_Transfer.xlsx): same reasoning as
+    # ProductionRecord.batch_ref -- preserves the client's own
+    # "TRANSFER-0001"-style label for imported history only.
+    transfer_ref = models.CharField(max_length=32, blank=True, null=True, unique=True, default=None)
     commissary_staff = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
