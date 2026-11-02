@@ -301,7 +301,14 @@ def create_staff_account(
 
 
 def update_staff_account(
-    user, *, branch_id=None, is_active=True, employee_id="", phone_number="", first_name="", last_name=""
+    user,
+    *,
+    branch_id=None,
+    is_active=True,
+    employee_id="",
+    phone_number="",
+    first_name="",
+    last_name="",
 ):
     """Edits an existing staff account. Role is deliberately NOT editable
     here -- changing role would orphan the account's PIN/password setup
