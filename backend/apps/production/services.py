@@ -96,21 +96,36 @@ def record_production(commissary_staff, product_id, quantity_produced, ingredien
             )
         resolved_rows.append((material, quantity_used, inventory))
 
+    status = extra.get("status", ProductionRecord.Status.COMPLETED)
+    quality = extra.get("quality", ProductionRecord.Quality.PASS)
+
     with db_transaction.atomic():
         record = ProductionRecord.objects.create(
             commissary_staff=commissary_staff,
             product=product,
             quantity_produced=quantity_produced,
             supplier=extra.get("supplier", ""),
-            quality=extra.get("quality", ProductionRecord.Quality.PASS),
-            status=extra.get("status", ProductionRecord.Status.COMPLETED),
+            quality=quality,
+            status=status,
             notes=extra.get("notes", ""),
         )
+
+        # Backend gap assessment item 3 (Phase 1, critical): inventory
+        # should only move once a run has actually finished. A run still
+        # PENDING/IN_PROGRESS hasn't happened yet -- recording one lets
+        # staff log the plan without pretending materials were already
+        # consumed, so neither side of the ledger moves until COMPLETED.
+        if status != ProductionRecord.Status.COMPLETED:
+            return record
 
         for material, quantity_used, inventory in resolved_rows:
             IngredientUsage.objects.create(
                 production_record=record, material=material, quantity_used=quantity_used
             )
+            # Materials are consumed by the attempt itself, regardless of
+            # whether the output later passes QC -- a failed batch still
+            # used up real flour and sugar, so this deduction happens
+            # either way.
             inventory.quantity_on_hand -= quantity_used
             inventory.save()
             InventoryTransaction.objects.create(
@@ -119,6 +134,14 @@ def record_production(commissary_staff, product_id, quantity_produced, ingredien
                 movement_type=InventoryTransaction.MovementType.PRODUCTION_CONSUMPTION,
                 quantity_change=-quantity_used,
             )
+
+        # Only QUALITY.PASS output is fit to sell -- crediting a failed
+        # batch to the finished-good shelf would let a branch's POS sell
+        # it. A FAIL run still shows up in the batch log and still
+        # consumed its materials above; it just never becomes sellable
+        # stock.
+        if quality != ProductionRecord.Quality.PASS:
+            return record
 
         finished_good_inventory, _ = Inventory.objects.get_or_create(
             branch=commissary, product=product
