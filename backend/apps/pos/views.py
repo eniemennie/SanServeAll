@@ -14,7 +14,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from apps.accounts.permissions import pos_unlock_required
 from apps.inventory.models import Product
 from apps.pos import printing, services
-from apps.pos.models import AddOn, DiscountCategory, DiscountType, SalesItem, SalesTransaction
+from apps.pos.models import AddOn, DiscountCategory, DiscountType, SalesTransaction
 
 
 def _get_draft(request):
@@ -136,28 +136,6 @@ def add_custom_product(request):
             return redirect("pos:ordering")
         messages.error(request, "Enter a valid name and a non-negative price.")
     return redirect("pos:ordering")
-
-
-@pos_unlock_required
-def customize_item(request, item_id):
-    """Order Customization Interface (Fig. 3-14) -- size, sugar level,
-    add-ons, quantity for a specific line item already in the draft order."""
-    draft = _get_draft(request)
-    item = get_object_or_404(SalesItem, pk=item_id, transaction=draft)
-
-    if request.method == "POST":
-        customizations = {
-            "size": request.POST.get("size", "").strip(),
-            "sugar_level": request.POST.get("sugar_level", "").strip(),
-            "add_ons": [a.strip() for a in request.POST.getlist("add_ons") if a.strip()],
-            "notes": request.POST.get("notes", "").strip(),
-        }
-        services.update_item_customization(
-            item, quantity=request.POST.get("quantity"), customizations=customizations
-        )
-        return redirect("pos:ordering")
-
-    return render(request, "pos/order_customization.html", {"item": item})
 
 
 @pos_unlock_required
