@@ -94,6 +94,24 @@ class TestSeedMenuCatalog:
         assert Product.objects.get(name="Silvanas – Walnut (Per Piece)").price == 34
         assert Product.objects.get(name="Silvanas – Pistachio (Per Piece)").price == 50
 
+    def test_production_size_variant_products_match_their_2tier_counterparts(self):
+        """Client raw-data import (Production_Records.xlsx): these
+        batches track Small/Big (or Tub/Family) as separate, physically
+        distinct runs -- added as their own Products rather than
+        replacing the sales-facing 2-tier ones, so POS's existing
+        size-selection UX for Caramel Bites/Tea Cookies/Leche Flan is
+        unaffected."""
+        _run_seed()
+        assert Product.objects.get(name="Original Caramel Bites (Small 200g)").price == 105
+        assert Product.objects.get(name="Original Caramel Bites (Big 400g)").price == 200
+        assert Product.objects.get(name="Salted Caramel Bites (Small 200g)").price == 105
+        assert Product.objects.get(name="Salted Caramel Bites (Big 400g)").price == 200
+        assert Product.objects.get(name="Tea Cookies (Big)").price == 180
+        assert Product.objects.get(name="Creamy Leche Flan (Family Flan)").price == 250
+        # The original 2-tier Products are untouched, not replaced.
+        assert Product.objects.get(name="Original Caramel Bites").large_price == 200
+        assert Product.objects.get(name="Tea Cookies (Small)").large_price == 180
+
     def test_expected_total_product_count(self):
         """Pinned to a real number so an accidental duplicate or a
         silently-dropped item changes this test, not just a vague
@@ -102,8 +120,9 @@ class TestSeedMenuCatalog:
         # 7 Hot + 7 Iced (coffee) + 4 Sea Salt + 5 Coffee Frappe +
         # 6 Non-Coffee Frappe + 7 Specialty + 4 Pasta + 5 Desserts +
         # 24 Cakes (6 flavors x 4 sizes) + 2 Silvanas (box) +
-        # 3 Silvanas (per piece) + 5 Soft & Fluffy + 9 Bakery Corner = 88
-        assert Product.objects.count() == 88
+        # 3 Silvanas (per piece) + 5 Soft & Fluffy + 9 Bakery Corner +
+        # 6 production size variants = 94
+        assert Product.objects.count() == 94
         assert (
             AddOn.objects.filter(
                 name__in=[

@@ -15,6 +15,12 @@ class ProductionRecord(models.Model):
     class Quality(models.TextChoices):
         PASS = "PASS", "Pass"
         FAIL = "FAIL", "Fail"
+        # Client raw-data import (Production_Records.xlsx): 10/356 real
+        # batches are still IN_PROGRESS/PENDING and genuinely have no
+        # quality verdict yet -- storing those as PASS (implies it
+        # passed inspection) or FAIL (implies it failed) would record a
+        # verdict that was never actually given.
+        PENDING = "PENDING", "Pending"
 
     class Status(models.TextChoices):
         PENDING = "PENDING", "Pending"
@@ -148,7 +154,13 @@ class IngredientUsage(models.Model):
         on_delete=models.PROTECT,
         limit_choices_to={"product_type": "MATERIAL"},
     )
-    quantity_used = models.PositiveIntegerField()
+    # Decimal, 3 places: client raw-data import (Ingredient_Usage.xlsx)
+    # records real consumption down to a third decimal place for some
+    # materials (e.g. Cream of tartar: 0.019kg) -- finer than the 2
+    # places Inventory.quantity_on_hand uses, so this needs its own,
+    # wider precision to store those exactly rather than rounding away
+    # real small-quantity usage.
+    quantity_used = models.DecimalField(max_digits=12, decimal_places=3)
 
     def __str__(self):
         unit = self.material.get_unit_of_measure_display()
