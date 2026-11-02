@@ -94,6 +94,14 @@ class SalesTransaction(models.Model):
     transaction_discount_amount = models.DecimalField(
         max_digits=10, decimal_places=2, null=True, blank=True
     )
+    # Backend gap assessment item 4 (Phase 1, critical): the KaHero batch
+    # import (apps/kahero_integration) has no real external/natural key
+    # in its source export to detect a re-uploaded file by -- only
+    # transaction_date/product_name/quantity/unit_price. Populated ONLY
+    # by that pipeline with a composite of those fields (blank for every
+    # ordinary POS-created sale), so re-ingesting the same export twice
+    # can be detected and skipped rather than silently duplicating sales.
+    kahero_import_key = models.CharField(max_length=300, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     completed_at = models.DateTimeField(null=True, blank=True)
