@@ -28,9 +28,10 @@ historical SalesTransaction backfill.
 
 Product name mapping: the client's "Product Name (reference)" column
 uses a few cosmetic variants of the real catalog names (e.g. "8' Round"
-for the cakes' "8in Round", "200 g" for the catalog's "200g") -- PRODUCT_
-NAME_MAP below translates every one of the file's 43 distinct names
-to its real Product. Two categories of real (non-cosmetic) gaps this
+for the cakes' "8in Round", "200 g" for the catalog's "200g") --
+apps.production.client_import_mapping (shared with import_stock_transfer,
+which draws from this exact same 43-name universe) translates every one
+of them to its real Product. Two categories of real (non-cosmetic) gaps this
 uncovered, both resolved with the project owner before building this:
 
   - Size variants the sales-facing catalog collapses into one 2-tier
@@ -70,47 +71,17 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.inventory.models import Product
+from apps.production.client_import_mapping import (
+    COMBINED_PRODUCTS,
+    resolve_product_name,
+    split_evenly,
+)
 from apps.production.models import IngredientUsage, ProductionRecord
 
 # No time-of-day is recorded in the source file -- a fixed, arbitrary
 # time (commissary's nominal start of day) is used purely so imported
 # batches sort in a sensible order; has no bearing on correctness.
 PRODUCTION_TIME_OF_DAY = datetime.time(8, 0)
-
-# The one batch that produces two separate finished goods from a single
-# recorded quantity (see module docstring). Maps the client's combined
-# name to the two real catalog Products it actually represents.
-COMBINED_BATCH_PRODUCTS = {
-    "Butter Toast and Broas (Jar)": [
-        ("BT", "Butter Toast (Jar)"),
-        ("BR", "Broas (Jar)"),
-    ]
-}
-
-# Every other name in the file maps 1:1, mostly cosmetic differences
-# from the real catalog name (apostrophe-size vs. "in", spacing) or a
-# size-variant Product added specifically for this import (see module
-# docstring). Identity (name maps to itself) is assumed for any name not
-# listed here -- see _resolve_product_name.
-PRODUCT_NAME_MAP = {
-    "Almond (8' Round)": "Almond (8in Round)",
-    "Pistachio (8' Round)": "Pistachio (8in Round)",
-    "Choco Hazelnut (8' Round)": "Choco Hazelnut (8in Round)",
-    "Matcha Pistachio (8' Round)": "Matcha Pistachio (8in Round)",
-    "Classic Cashew (8' Round)": "Classic Cashew (8in Round)",
-    "Mocha Walnut (8' Round)": "Mocha Walnut (8in Round)",
-    "Choco Hazelnut (7' Square)": "Choco Hazelnut (7in Square)",
-    "Matcha Pistachio (7' Square)": "Matcha Pistachio (7in Square)",
-    "Almond (7' Square)": "Almond (7in Square)",
-    "Pistachio (7' Square)": "Pistachio (7in Square)",
-    "Classic Cashew (7' Square)": "Classic Cashew (7in Square)",
-    "Mocha Walnut (7' Square)": "Mocha Walnut (7in Square)",
-    "Mixed Nuts (200 g)": "Mixed Nuts (200g)",
-    "Original Caramel Bites (Big 400 g)": "Original Caramel Bites (Big 400g)",
-    "Salted Caramel Bites (Big 400 g)": "Salted Caramel Bites (Big 400g)",
-    "Salted Caramel Bites (Small 200 g)": "Salted Caramel Bites (Small 200g)",
-    "Original Caramel Bites (Small 200 g)": "Original Caramel Bites (Small 200g)",
-}
 
 
 class Command(BaseCommand):
@@ -291,12 +262,13 @@ class Command(BaseCommand):
     # -- name/user/product resolution -------------------------------------
 
     def _resolve_product(self, name):
-        real_name = PRODUCT_NAME_MAP.get(name, name)
+        real_name = resolve_product_name(name)
         product = Product.objects.filter(name=real_name).first()
         if product is None:
             raise CommandError(
                 f"'{name}' (mapped to '{real_name}') has no matching catalog Product. "
-                "Add it to PRODUCT_NAME_MAP or the catalog before importing."
+                "Add it to apps.production.client_import_mapping or the catalog before "
+                "importing."
             )
         return product
 
@@ -316,7 +288,20 @@ class Command(BaseCommand):
         """Returns the list of ProductionRecord rows created for this
         source row (more than one only for a combined batch), or None if
         this batch_ref was already imported."""
-        if ProductionRecord.objects.filter(batch_ref=row["batch_ref"]).exists():
+        combo = COMBINED_PRODUCTS.get(row["product_name"])
+        plan = (
+            [(f"{row['batch_ref']}-{suffix}", name) for suffix, name in combo]
+            if combo
+            else [(row["batch_ref"], row["product_name"])]
+        )
+        # Idempotency check must use the actual ref(s) that get created --
+        # for a combined batch that's the suffixed child refs
+        # ("BATCH-0181-BT"/"-BR"), never the bare source batch_ref itself
+        # (no row is ever created under that exact ref). Checking the
+        # first child's ref is enough: all of a batch's children are
+        # created together, in the same call, so they exist or don't as
+        # a unit.
+        if ProductionRecord.objects.filter(batch_ref=plan[0][0]).exists():
             return None
 
         staff = self._resolve_staff(row["staff_username"])
@@ -325,21 +310,14 @@ class Command(BaseCommand):
         quality = self._map_quality(row["quality"], row["batch_ref"])
         status = self._map_status(row["status"], row["batch_ref"])
 
-        combo = COMBINED_BATCH_PRODUCTS.get(row["product_name"])
-        plan = (
-            [(f"{row['batch_ref']}-{suffix}", name) for suffix, name in combo]
-            if combo
-            else [(row["batch_ref"], row["product_name"])]
-        )
-        # Split evenly across every child -- there's no finer real
-        # breakdown of a combined batch's output per product (see
-        # module docstring). Every real occurrence happens to divide
-        # evenly; a future odd total would silently drop a unit via //,
-        # which is acceptable here but flagged for visibility.
-        quantity_each = row["quantity_produced"] // len(plan)
+        # Split evenly (exactly -- any remainder goes to the earliest
+        # child, see split_evenly) across every child -- there's no
+        # finer real breakdown of a combined batch's output per product
+        # (see module docstring).
+        quantities = split_evenly(row["quantity_produced"], len(plan))
 
         created = []
-        for batch_ref, product_name in plan:
+        for (batch_ref, product_name), quantity_each in zip(plan, quantities):
             product = self._resolve_product(product_name)
             record = ProductionRecord.objects.create(
                 batch_ref=batch_ref,
