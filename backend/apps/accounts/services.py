@@ -53,9 +53,7 @@ def find_accounts_with_placeholder_credentials():
                 }
             )
 
-    for user in get_user_model().objects.filter(
-        role__name=Role.COMMISSARY_STAFF, is_active=True
-    ):
+    for user in get_user_model().objects.filter(role__name=Role.COMMISSARY_STAFF, is_active=True):
         if user.check_password(PLACEHOLDER_COMMISSARY_PASSWORD):
             findings.append(
                 {
