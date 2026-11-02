@@ -38,6 +38,7 @@ from apps.accounts.services import (
     verify_and_consume_backup_code,
     verify_cashier_pin,
     verify_cashier_pin_with_lockout,
+    verify_commissary_login_with_lockout,
 )
 from apps.analytics import services as analytics_services
 from apps.forecasting import services as forecasting_services
@@ -296,16 +297,17 @@ class CommissaryLoginView(View):
         username = request.POST.get("username", "").strip()
         password = request.POST.get("password", "")
 
-        authed = authenticate(request, username=username, password=password)
-        user = None
-        if authed is not None and authed.role and authed.role.name == Role.COMMISSARY_STAFF:
-            user = authed
+        # Backend gap assessment item 5 (Phase 1, critical): this login
+        # had no brute-force lockout of any kind -- verify_commissary_
+        # login_with_lockout applies the same protection the cashier PIN
+        # flow already has.
+        user, error = verify_commissary_login_with_lockout(request, username, password)
 
         if user is None:
             return render(
                 request,
                 self.template_name,
-                {"error": "Invalid username or password."},
+                {"error": error},
             )
 
         auth_login(request, user)

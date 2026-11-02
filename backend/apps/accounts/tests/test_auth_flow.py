@@ -261,3 +261,70 @@ class TestCommissaryLogin:
         assert response.status_code == 200
         assert not response.wsgi_request.user.is_authenticated
         assert "selected_branch_id" not in client.session
+
+    def test_locks_out_after_threshold_failed_attempts(self, client, commissary_worker):
+        """Backend gap assessment item 5 (Phase 1, critical): this login
+        had no brute-force lockout of any kind."""
+        from apps.accounts.services import LOGIN_LOCKOUT_THRESHOLD
+
+        for _ in range(LOGIN_LOCKOUT_THRESHOLD):
+            client.post(
+                reverse("accounts:commissary_login"),
+                {"username": "commissary1", "password": "wrongpassword"},
+            )
+
+        # Even the CORRECT password is now rejected -- it's locked, not
+        # just still counting a wrong guess.
+        response = client.post(
+            reverse("accounts:commissary_login"),
+            {"username": "commissary1", "password": "testpass123"},
+        )
+        assert response.status_code == 200
+        assert not response.wsgi_request.user.is_authenticated
+        assert b"Too many incorrect attempts" in response.content
+
+    def test_correct_password_resets_the_failed_attempt_counter(self, client, commissary_worker):
+        client.post(
+            reverse("accounts:commissary_login"),
+            {"username": "commissary1", "password": "wrongpassword"},
+        )
+        client.post(
+            reverse("accounts:commissary_login"),
+            {"username": "commissary1", "password": "testpass123"},  # correct
+        )
+        commissary_worker.refresh_from_db()
+        assert commissary_worker.failed_login_attempts == 0
+
+    def test_lockout_expires_after_the_duration(self, client, commissary_worker):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from apps.accounts.services import LOGIN_LOCKOUT_THRESHOLD
+
+        for _ in range(LOGIN_LOCKOUT_THRESHOLD):
+            client.post(
+                reverse("accounts:commissary_login"),
+                {"username": "commissary1", "password": "wrongpassword"},
+            )
+
+        # Simulate the lockout window having already passed.
+        commissary_worker.refresh_from_db()
+        commissary_worker.login_locked_until = timezone.now() - timedelta(seconds=1)
+        commissary_worker.save(update_fields=["login_locked_until"])
+
+        response = client.post(
+            reverse("accounts:commissary_login"),
+            {"username": "commissary1", "password": "testpass123"},
+        )
+        assert response.status_code == 302
+        assert response.wsgi_request.user.is_authenticated
+
+    def test_unknown_username_gives_the_same_generic_error_as_a_wrong_password(self, client):
+        """Never reveals whether an account exists."""
+        response = client.post(
+            reverse("accounts:commissary_login"),
+            {"username": "no_such_user", "password": "whatever"},
+        )
+        assert response.status_code == 200
+        assert b"Invalid username or password" in response.content

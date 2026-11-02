@@ -98,6 +98,16 @@ class User(AbstractUser):
     )
     employee_id = models.CharField(max_length=20, unique=True, null=True, blank=True)
     phone_number = models.CharField(max_length=20, blank=True)
+    # Backend gap assessment item 5 (Phase 1, critical): brute-force
+    # lockout for username/password logins, mirroring CashierPIN's own
+    # failed_attempts/locked_until above -- currently only applied to
+    # CommissaryLoginView (see accounts/services.py
+    # verify_commissary_login_with_lockout), which had no lockout of any
+    # kind. Kept on User rather than a separate per-flow model since,
+    # unlike the PIN, this is an ordinary Django password login and the
+    # account itself is the natural place to track it.
+    failed_login_attempts = models.PositiveIntegerField(default=0)
+    login_locked_until = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
         return self.get_full_name() or self.username

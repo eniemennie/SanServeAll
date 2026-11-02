@@ -10,7 +10,7 @@ import secrets
 import string
 from datetime import timedelta
 
-from django.contrib.auth import get_user_model
+from django.contrib.auth import authenticate, get_user_model
 from django.utils import timezone
 
 from apps.accounts.models import Branch, CashierPIN, Role, TwoFactorBackupCode
@@ -131,6 +131,63 @@ def verify_cashier_pin_with_lockout(user, raw_pin):
 
     pin_record.save()
     return False, "Incorrect PIN. Please try again."
+
+
+LOGIN_LOCKOUT_THRESHOLD = 5
+LOGIN_LOCKOUT_DURATION_MINUTES = 5
+
+
+def verify_commissary_login_with_lockout(request, username, raw_password):
+    """Username/password verification for CommissaryLoginView (Phase 1
+    gap assessment item 5, critical), with the same brute-force lockout
+    protection as the cashier PIN flow above -- this role authenticated
+    with no lockout of any kind.
+
+    Returns (user_or_None, error_message). A nonexistent username or one
+    that doesn't resolve to a COMMISSARY_STAFF account is deliberately
+    indistinguishable from a wrong password for a real one (both get the
+    same generic message) -- this never reveals whether an account
+    exists, only (once a genuine COMMISSARY_STAFF account is matched) how
+    many guesses are left on it.
+    """
+    User = get_user_model()
+    candidate = User.objects.filter(username=username).first()
+    generic_error = "Invalid username or password."
+
+    if candidate is None or not candidate.role or candidate.role.name != Role.COMMISSARY_STAFF:
+        # Still runs authenticate() (and its PBKDF2 hashing cost) so a
+        # nonexistent account doesn't respond measurably faster than a
+        # real one -- there's just no account row to track attempts
+        # against here.
+        authenticate(request, username=username, password=raw_password)
+        return None, generic_error
+
+    if candidate.login_locked_until and candidate.login_locked_until > timezone.now():
+        minutes_left = max(
+            1, int((candidate.login_locked_until - timezone.now()).total_seconds() // 60) + 1
+        )
+        return None, f"Too many incorrect attempts. Try again in {minutes_left} minute(s)."
+
+    authed = authenticate(request, username=username, password=raw_password)
+    if authed is not None and authed.role and authed.role.name == Role.COMMISSARY_STAFF:
+        candidate.failed_login_attempts = 0
+        candidate.login_locked_until = None
+        candidate.save(update_fields=["failed_login_attempts", "login_locked_until"])
+        return authed, None
+
+    candidate.failed_login_attempts += 1
+    if candidate.failed_login_attempts >= LOGIN_LOCKOUT_THRESHOLD:
+        candidate.login_locked_until = timezone.now() + timedelta(
+            minutes=LOGIN_LOCKOUT_DURATION_MINUTES
+        )
+        candidate.failed_login_attempts = 0
+        candidate.save(update_fields=["failed_login_attempts", "login_locked_until"])
+        return None, (
+            f"Too many incorrect attempts. Try again in {LOGIN_LOCKOUT_DURATION_MINUTES} minutes."
+        )
+
+    candidate.save(update_fields=["failed_login_attempts"])
+    return None, generic_error
 
 
 BACKUP_CODE_COUNT = 10
