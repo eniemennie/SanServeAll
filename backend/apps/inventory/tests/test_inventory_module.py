@@ -221,7 +221,10 @@ class TestGetLowStockAlertsForAllBranches:
         as finished-good shortages at a native branch."""
         commissary = Branch.objects.create(name="Central Kitchen", code="CK", is_commissary=True)
         material = Product.objects.create(
-            name="Milk", price="80.00", reorder_threshold=20, product_type=Product.ProductType.MATERIAL
+            name="Milk",
+            price="80.00",
+            reorder_threshold=20,
+            product_type=Product.ProductType.MATERIAL,
         )
         Inventory.objects.create(branch=commissary, product=material, quantity_on_hand=5)
 
