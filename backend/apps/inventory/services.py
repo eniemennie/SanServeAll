@@ -16,10 +16,14 @@ def get_product_availability(branch=None, product_type=None, search=""):
     Deliberately reuses Inventory (not just Product) so stock numbers
     are real, not fabricated -- a Product with no Inventory row anywhere
     genuinely has no stock to report, and isn't included here.
+
+    Excludes discontinued products (Product.is_active=False) -- backend
+    gap assessment: a discontinued product with leftover stock was
+    still showing up here as if it were a normal, orderable item.
     """
     from apps.accounts.models import Branch
 
-    queryset = Inventory.objects.select_related("product", "branch")
+    queryset = Inventory.objects.select_related("product", "branch").filter(product__is_active=True)
     if branch is not None:
         queryset = queryset.filter(branch=branch)
     else:
@@ -63,8 +67,11 @@ def get_branch_inventory(branch, product_type=None, low_stock_only=False):
     """Returns Inventory rows for a branch, optionally filtered by product
     type (Fig. 3-32 Finished Goods vs. Fig. 3-33 Materials share one
     underlying screen, distinguished by this filter) and/or low-stock
-    status only (Row 6.4)."""
-    queryset = Inventory.objects.select_related("product").filter(branch=branch)
+    status only (Row 6.4). Excludes discontinued products (Product.
+    is_active=False), same exclusion as get_product_availability."""
+    queryset = Inventory.objects.select_related("product").filter(
+        branch=branch, product__is_active=True
+    )
 
     if product_type:
         queryset = queryset.filter(product__product_type=product_type)
@@ -101,10 +108,14 @@ def get_resource_status_summary(branch=None, product_type=None):
     to scope this to raw materials only (Dashboard Home's Resource
     Monitoring list, Row N), typically combined with branch=<the
     commissary> since materials only ever have Inventory rows there.
+
+    Excludes discontinued products (Product.is_active=False), same
+    exclusion as get_product_availability -- a discontinued item
+    shouldn't count toward or against the sufficiency percentage.
     """
     from apps.accounts.models import Branch
 
-    queryset = Inventory.objects.select_related("product", "branch")
+    queryset = Inventory.objects.select_related("product", "branch").filter(product__is_active=True)
     if branch is not None:
         queryset = queryset.filter(branch=branch)
     else:
