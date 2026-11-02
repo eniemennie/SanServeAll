@@ -1,0 +1,155 @@
+{% extends "admin_base.html" %}
+{% block admin_title %}Account Management{% endblock %}
+{% block admin_content %}
+
+<div class="mb-3">
+    <h1 class="h5 mb-1">Account Management</h1>
+    <p class="text-muted small mb-0">
+        Create staff accounts and assign them a branch and role. To edit an
+        existing account or reset a cashier's PIN, select it from the list below.
+    </p>
+</div>
+
+{% if error %}
+<div class="alert alert-danger py-2">{{ error }}</div>
+{% endif %}
+
+{% if generated_pin %}
+<div class="alert alert-success py-2">
+    Account <strong>{{ created_username }}</strong> created. Their PIN is
+    <strong>{{ generated_pin }}</strong> &mdash; write it down now, it won't be shown again.
+</div>
+{% elif created_username %}
+<div class="alert alert-success py-2">Account <strong>{{ created_username }}</strong> created.</div>
+{% endif %}
+
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="jc-card p-4">
+            <h2 class="h6 mb-3">New Account</h2>
+            <form method="post">
+                {% csrf_token %}
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Username</label>
+                    <input type="text" name="username" class="form-control" required autofocus>
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <label class="form-label small fw-semibold">First Name</label>
+                        <input type="text" name="first_name" class="form-control">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small fw-semibold">Last Name</label>
+                        <input type="text" name="last_name" class="form-control">
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Role</label>
+                    <select name="role" id="id_role" class="form-select" required>
+                        <option value="" selected disabled>Select a role&hellip;</option>
+                        {% for value, label in role_choices %}
+                        <option value="{{ value }}">{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-3" id="id_branch_wrap">
+                    <label class="form-label small fw-semibold">Branch</label>
+                    <select name="branch" class="form-select">
+                        <option value="">&mdash;</option>
+                        {% for b in branches %}
+                        <option value="{{ b.pk }}">{{ b.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <div class="form-text">Required for Branch Staff and Commissary Staff.</div>
+                </div>
+                <div class="mb-3" id="id_password_wrap">
+                    <label class="form-label small fw-semibold">Password</label>
+                    <input type="password" name="password" class="form-control">
+                    <div class="form-text">
+                        Required for Owner/Admin and Commissary Staff (password login). Branch
+                        Staff accounts don't use a password &mdash; one is generated instead.
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Email</label>
+                    <input type="email" name="email" class="form-control">
+                </div>
+                <div class="row g-2 mb-4">
+                    <div class="col-6">
+                        <label class="form-label small fw-semibold">Employee ID</label>
+                        <input type="text" name="employee_id" class="form-control">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small fw-semibold">Phone Number</label>
+                        <input type="text" name="phone_number" class="form-control">
+                    </div>
+                </div>
+                <button type="submit" class="btn" style="background: var(--jc-orange); color: #fff;">
+                    Create Account
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="jc-card p-0">
+            <table class="table mb-0">
+                <thead>
+                    <tr>
+                        <th>Username</th>
+                        <th>Name</th>
+                        <th>Role</th>
+                        <th>Branch</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for account in accounts %}
+                    <tr>
+                        <td>{{ account.username }}</td>
+                        <td>{{ account.get_full_name|default:"&mdash;" }}</td>
+                        <td>{{ account.role.get_name_display }}</td>
+                        <td>{{ account.branch.name|default:"&mdash;" }}</td>
+                        <td>
+                            {% if account.is_active %}
+                            <span class="jc-badge jc-badge-adequate">Active</span>
+                            {% else %}
+                            <span class="jc-badge jc-badge-critical">Inactive</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end">
+                            <a href="{% url 'accounts:account_edit' account.pk %}" class="btn btn-sm btn-outline-secondary">
+                                Edit
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="6" class="text-muted text-center py-4">No accounts yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        var roleSelect = document.getElementById('id_role');
+        var branchWrap = document.getElementById('id_branch_wrap');
+        var passwordWrap = document.getElementById('id_password_wrap');
+        if (!roleSelect) return;
+
+        function sync() {
+            var role = roleSelect.value;
+            branchWrap.style.display = (role === 'OWNER_ADMIN') ? 'none' : '';
+            passwordWrap.style.display = (role === 'BRANCH_STAFF') ? 'none' : '';
+        }
+        roleSelect.addEventListener('change', sync);
+        sync();
+    })();
+</script>
+
+{% endblock %}

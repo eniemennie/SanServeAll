@@ -161,11 +161,21 @@ class InventoryServiceError(Exception):
     product creation) can't be applied."""
 
 
-def adjust_stock(inventory, delta, reason=""):
+def adjust_stock(inventory, delta, reason="", user=None):
     """Manual Stock Adjustment (Fig. 3-34's action). `delta` is signed --
     positive to add stock (e.g. correcting a miscount), negative to
     remove it. Always logs a traceable InventoryTransaction, same as the
-    Week 5 sale-deduction hook, so manual changes are equally auditable."""
+    Week 5 sale-deduction hook, so manual changes are equally auditable.
+
+    `reason` and `user` are recorded on the transaction row (backend gap
+    assessment: manual adjustments previously left no "who/why" trail).
+    Both stay optional defaults here -- callers like the seed script and
+    `quick_sale` (a one-click preset, not an operator-typed reason) don't
+    always have a real reason or an acting user to pass -- but the
+    Manual Stock Adjustment view itself requires a non-blank reason
+    before ever calling this, since that is the one flow this finding is
+    actually about.
+    """
     try:
         delta = int(delta)
     except (TypeError, ValueError):
@@ -188,6 +198,8 @@ def adjust_stock(inventory, delta, reason=""):
         product=inventory.product,
         movement_type=InventoryTransaction.MovementType.MANUAL_ADJUSTMENT,
         quantity_change=delta,
+        reason=reason,
+        created_by=user,
     )
     return inventory
 
