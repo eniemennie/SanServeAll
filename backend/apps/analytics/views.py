@@ -10,7 +10,9 @@ staff-facing version of these screens in this batch.
 """
 
 import json
+from datetime import datetime
 
+from django.core.paginator import Paginator
 from django.shortcuts import render
 
 from apps.accounts.models import Branch, Role
@@ -108,6 +110,67 @@ def product_performance(request):
         request,
         "analytics/product_performance.html",
         {"performance": performance, "days": days},
+    )
+
+
+@role_required(Role.OWNER_ADMIN)
+def sales_history(request):
+    """Sales History (backend gap assessment: "add a filterable
+    sales-history view (branch/cashier/date)"). A transaction-level list
+    for looking up a specific sale, distinct from every other view in
+    this module, which only ever shows aggregated totals.
+    """
+    branch_id = request.GET.get("branch")
+    selected_branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
+
+    cashier_id = request.GET.get("cashier") or None
+
+    date_from_raw = request.GET.get("date_from") or ""
+    date_to_raw = request.GET.get("date_to") or ""
+    date_error = None
+    date_from = date_to = None
+    try:
+        if date_from_raw:
+            date_from = datetime.strptime(date_from_raw, "%Y-%m-%d").date()
+        if date_to_raw:
+            date_to = datetime.strptime(date_to_raw, "%Y-%m-%d").date()
+    except ValueError:
+        date_error = "Enter dates as YYYY-MM-DD."
+
+    if date_from and date_to and date_from > date_to:
+        date_error = "'From' date must be on or before 'To' date."
+
+    transactions = []
+    page_obj = None
+    if not date_error:
+        results = services.get_sales_history(
+            branch=selected_branch,
+            cashier_id=cashier_id,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        page_obj = Paginator(results, 25).get_page(request.GET.get("page"))
+        transactions = page_obj.object_list
+
+    pagination_qs = request.GET.copy()
+    pagination_qs.pop("page", None)
+
+    return render(
+        request,
+        "analytics/sales_history.html",
+        {
+            "active_nav": "reports",
+            "branches": Branch.objects.filter(is_active=True, is_commissary=False),
+            "selected_branch": selected_branch,
+            "cashiers": services.get_cashiers_with_sales_history(),
+            "selected_cashier_id": int(cashier_id) if cashier_id else None,
+            "date_from": date_from_raw,
+            "date_to": date_to_raw,
+            "date_error": date_error,
+            "transactions": transactions,
+            "page_obj": page_obj,
+            "pagination_qs": pagination_qs.urlencode(),
+        },
     )
 
 
