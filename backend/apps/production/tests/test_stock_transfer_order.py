@@ -5,6 +5,8 @@ per branch" / "Stock order status tracking: processing, in transit,
 delivered").
 """
 
+from unittest.mock import patch
+
 import pytest
 from django.urls import reverse
 
@@ -141,6 +143,57 @@ class TestCreateStockTransferOrder:
                 product_id=cake.pk,
                 quantity=0,
             )
+
+    def test_locks_the_source_inventory_row_before_checking_stock(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        """Backend gap assessment item 26 (same class of risk as the POS
+        double-submission race): the commissary's Inventory row must be
+        locked with select_for_update() before the stock check, so two
+        near-simultaneous submissions can't both read the same
+        quantity_on_hand and both pass validation. In-memory sqlite can't
+        reproduce the real concurrent race in a test (no true
+        multi-connection row locking), so this asserts the locking call
+        itself is actually made rather than skipped."""
+        with patch(
+            "apps.inventory.models.Inventory.objects.select_for_update",
+            wraps=Inventory.objects.select_for_update,
+        ) as mock_lock:
+            services.create_stock_transfer_order(
+                commissary_staff=commissary_staff,
+                destination_branch_id=batangas.pk,
+                product_id=cake.pk,
+                quantity=10,
+            )
+        mock_lock.assert_called_once()
+
+    def test_a_second_submission_correctly_sees_the_reduced_stock(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        """Functional half of the double-submission fix: whether or not
+        the two submissions are truly concurrent, the second one must
+        always re-read the actual current stock (not a stale value from
+        before the first submission's deduction) -- so resubmitting
+        past what's really left on hand is rejected, not silently
+        allowed to go negative."""
+        services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=40,
+        )
+        # Only 10 of the original 50 remain -- a second, identical
+        # resubmission for 40 more must now be rejected.
+        with pytest.raises(services.StockTransferError, match="Not enough"):
+            services.create_stock_transfer_order(
+                commissary_staff=commissary_staff,
+                destination_branch_id=batangas.pk,
+                product_id=cake.pk,
+                quantity=40,
+            )
+        commissary_inventory = Inventory.objects.get(branch=commissary, product=cake)
+        assert commissary_inventory.quantity_on_hand == 10
+        assert StockTransferOrder.objects.count() == 1
 
     def test_no_commissary_configured_raises_clear_error(self, batangas):
         role = Role.objects.create(name=Role.COMMISSARY_STAFF)
