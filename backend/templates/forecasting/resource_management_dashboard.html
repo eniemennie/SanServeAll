@@ -71,9 +71,12 @@
     <div class="col-md-6">
         <div class="jc-card p-3 h-100">
             <div class="fw-semibold mb-2">AI-Driven Restocking Recommendations (Materials)</div>
+            <p class="text-muted small mb-2">
+                Based on trailing 30-day actual usage, not the Holt-Winters demand forecast.
+            </p>
             <div class="table-responsive">
             <table class="table table-sm mb-0">
-                <thead><tr><th>Material</th><th>Stock</th><th>Recommend</th></tr></thead>
+                <thead><tr><th>Material</th><th>Stock</th><th>Recommend (30-day avg)</th></tr></thead>
                 <tbody>
                     {% for alert in material_alerts %}
                     <tr>
