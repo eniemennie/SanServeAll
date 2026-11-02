@@ -23,9 +23,7 @@ def get_product_availability(branch=None, product_type=None, search=""):
     """
     from apps.accounts.models import Branch
 
-    queryset = Inventory.objects.select_related("product", "branch").filter(
-        product__is_active=True
-    )
+    queryset = Inventory.objects.select_related("product", "branch").filter(product__is_active=True)
     if branch is not None:
         queryset = queryset.filter(branch=branch)
     else:
@@ -117,9 +115,7 @@ def get_resource_status_summary(branch=None, product_type=None):
     """
     from apps.accounts.models import Branch
 
-    queryset = Inventory.objects.select_related("product", "branch").filter(
-        product__is_active=True
-    )
+    queryset = Inventory.objects.select_related("product", "branch").filter(product__is_active=True)
     if branch is not None:
         queryset = queryset.filter(branch=branch)
     else:

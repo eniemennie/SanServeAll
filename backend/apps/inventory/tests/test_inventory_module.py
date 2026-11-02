@@ -460,9 +460,7 @@ class TestProductAvailabilityEnhancements:
         assert stats["available_count"] == 1
         assert stats["total_stock"] == 50
 
-    def test_discontinued_product_is_excluded_from_the_list_and_stats(
-        self, owner_client, branch
-    ):
+    def test_discontinued_product_is_excluded_from_the_list_and_stats(self, owner_client, branch):
         discontinued = Product.objects.create(
             name="Discontinued Item", price="10.00", is_active=False
         )
