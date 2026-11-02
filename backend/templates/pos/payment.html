@@ -90,12 +90,22 @@
                     {% csrf_token %}
                     <input type="hidden" name="payment_method" id="payment-method-input" value="CASH">
 
-                    <label class="form-label fw-semibold small text-muted">Amount</label>
-                    <input type="number" name="amount_tendered" id="amount-input" class="form-control jc-amount-input mb-3"
-                           step="0.01" min="0" required autofocus>
+                    <div id="cash-tender-panel">
+                        <label class="form-label fw-semibold small text-muted">Amount</label>
+                        <input type="number" name="amount_tendered" id="amount-input" class="form-control jc-amount-input mb-3"
+                               step="0.01" min="0" required autofocus>
 
-                    <label class="form-label fw-semibold small text-muted">Change</label>
-                    <div class="form-control jc-change-display mb-3" id="change-display">₱0.00</div>
+                        <label class="form-label fw-semibold small text-muted">Change</label>
+                        <div class="form-control jc-change-display mb-3" id="change-display">₱0.00</div>
+                    </div>
+
+                    <div id="non-cash-panel" class="d-none">
+                        <!-- GCash/Card/Other Digital Banks have no "change" --
+                        the cashier charges the exact total, so there's
+                        nothing to tender or compute change against. -->
+                        <label class="form-label fw-semibold small text-muted">Amount to Charge</label>
+                        <div class="form-control jc-amount-input mb-3" id="non-cash-total-display">₱0.00</div>
+                    </div>
 
                     <label class="form-label fw-semibold small text-muted">Mode of Payment</label>
                     <div class="row row-cols-4 g-2 mb-3">
@@ -108,6 +118,7 @@
                         {% endfor %}
                     </div>
 
+                    <div id="quick-amount-panel">
                     <label class="form-label fw-semibold small text-muted">Quick Amount</label>
                     <div class="row row-cols-4 g-2 mb-4">
                         <div class="col"><button type="button" class="jc-quick-amount w-100 js-quick-amount" data-amount="1">1</button></div>
@@ -120,6 +131,7 @@
                         <div class="col"><button type="button" class="jc-quick-amount w-100 js-quick-amount" data-amount="500">500</button></div>
                         <div class="col"><button type="button" class="jc-quick-amount w-100 js-quick-amount" data-amount="1000">1k</button></div>
                         <div class="col"><button type="button" class="jc-quick-clear w-100" id="clear-amount">Clear</button></div>
+                    </div>
                     </div>
 
                     <div class="d-flex gap-2">
@@ -163,14 +175,38 @@
         recomputeChange();
     });
 
+    const cashTenderPanel = document.getElementById("cash-tender-panel");
+    const nonCashPanel = document.getElementById("non-cash-panel");
+    const quickAmountPanel = document.getElementById("quick-amount-panel");
+    const nonCashTotalDisplay = document.getElementById("non-cash-total-display");
+    nonCashTotalDisplay.textContent = "₱" + total.toFixed(2);
+
+    function applyPaymentModeVisibility(mode) {
+        // GCash/Card/Other Digital Banks have no "change" concept -- the
+        // cashier charges the exact total, so the cash-tendered amount/
+        // change/quick-amount inputs (which only make sense for Cash)
+        // are hidden, and `amount_tendered` is no longer required client-
+        // side for those modes (the server fills it in as the total
+        // regardless of what, if anything, is posted for it -- see
+        // apps/pos/services.complete_sale_payment).
+        const isCash = mode === "CASH";
+        cashTenderPanel.classList.toggle("d-none", !isCash);
+        quickAmountPanel.classList.toggle("d-none", !isCash);
+        nonCashPanel.classList.toggle("d-none", isCash);
+        amountInput.required = isCash;
+    }
+
     const methodInput = document.getElementById("payment-method-input");
     document.querySelectorAll(".js-payment-mode").forEach(function (btn) {
         btn.addEventListener("click", function () {
             document.querySelectorAll(".js-payment-mode").forEach(function (b) { b.classList.remove("active"); });
             btn.classList.add("active");
             methodInput.value = btn.dataset.value;
+            applyPaymentModeVisibility(btn.dataset.value);
         });
     });
+
+    applyPaymentModeVisibility(methodInput.value);
 })();
 </script>
 {% endblock %}
