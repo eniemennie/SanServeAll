@@ -328,7 +328,39 @@ class TestImportProductionAndIngredientUsage:
         assert br.product == broas
         assert bt.quantity_produced == 15
         assert br.quantity_produced == 15
-        assert not ProductionRecord.objects.filter(batch_ref="BATCH-0181").exists()
+
+    def test_combined_batch_with_odd_quantity_splits_without_losing_a_unit(
+        self, staff, butter_toast, broas, tmp_path
+    ):
+        """Plain `quantity // 2` would silently drop a unit for an odd
+        total (13 // 2 = 6 + 6 = 12, losing one) -- the real client data
+        for the sibling Stock_Transfer.xlsx file includes exactly this
+        case (odd combined-batch quantities), which is what surfaced the
+        need for split_evenly(). The remainder goes to the earliest
+        child (BT), by convention."""
+        path = tmp_path / "prod.xlsx"
+        _write_production_workbook(
+            path,
+            [
+                (
+                    "BATCH-0182",
+                    "commissary_staff",
+                    "Butter Toast and Broas (Jar)",
+                    13,
+                    "PASS",
+                    "COMPLETED",
+                    "2026-07-02",
+                    "",
+                )
+            ],
+        )
+        call_command("import_production_and_ingredient_usage", production_records=str(path))
+
+        bt = ProductionRecord.objects.get(batch_ref="BATCH-0182-BT")
+        br = ProductionRecord.objects.get(batch_ref="BATCH-0182-BR")
+        assert bt.quantity_produced == 7
+        assert br.quantity_produced == 6
+        assert bt.quantity_produced + br.quantity_produced == 13
 
     def test_ingredient_usage_is_attached_to_the_matching_batch(
         self, staff, product, flour, tmp_path
