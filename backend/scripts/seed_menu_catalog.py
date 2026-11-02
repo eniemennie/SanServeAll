@@ -165,6 +165,14 @@ def seed_sans_rival_cakes():
 def seed_silvanas():
     _product("Silvanas (Box of 10)", "380.00", Category.CAKES, is_best_seller=True)
     _product("Silvanas (Box of 20)", "760.00", Category.CAKES, is_best_seller=True)
+    # Per-piece Silvana flavors -- added for the client's real
+    # Production_Records.xlsx, which records per-flavor per-piece batches
+    # (e.g. "Silvanas – Pistachio (Per Piece)") that the box-only catalog
+    # above has no product for. Prices are the client's own, from
+    # Bakery_Products.xlsx's "Silvanas – <Flavor> (Per Piece)" rows.
+    _product("Silvanas – Classic Cashew (Per Piece)", "28.00", Category.CAKES)
+    _product("Silvanas – Walnut (Per Piece)", "34.00", Category.CAKES)
+    _product("Silvanas – Pistachio (Per Piece)", "50.00", Category.CAKES)
 
 
 def seed_soft_and_fluffy():
