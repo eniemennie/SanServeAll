@@ -233,24 +233,19 @@ def ensure_demo_users():
     return cashiers, commissary_user, commissary_branch
 
 
-def ensure_reorder_thresholds():
-    print("\nSetting reorder thresholds where unset...")
-    updated_fg = Product.objects.filter(
-        product_type=Product.ProductType.FINISHED_GOOD, reorder_threshold=0
-    ).update(reorder_threshold=FINISHED_GOOD_THRESHOLD)
-    updated_mat = Product.objects.filter(
-        product_type=Product.ProductType.MATERIAL, reorder_threshold=0
-    ).update(reorder_threshold=MATERIAL_THRESHOLD)
-    print(f"  Finished goods set to threshold {FINISHED_GOOD_THRESHOLD}: {updated_fg} products")
-    print(f"  Materials set to threshold {MATERIAL_THRESHOLD}: {updated_mat} products")
-
-
 def ensure_starting_inventory(cashiers, commissary_branch):
     """Generous starting stock so 90 days of simulated sales/production
     draw it down to a believable (not permanently-negative) level,
     rather than starting from zero. The final snapshot pass at the end
     of run() deliberately pushes a few specific items below threshold
-    for a realistic mixed adequate/low/critical picture."""
+    for a realistic mixed adequate/low/critical picture.
+
+    reorder_threshold lives on Inventory, not Product (client raw-data
+    import: real reorder points differ per branch), so FINISHED_GOOD_
+    THRESHOLD/MATERIAL_THRESHOLD are applied here, per row, at the same
+    moment each Inventory row is created -- the old separate
+    ensure_reorder_thresholds() pass (which set it on Product, before
+    any Inventory row existed) no longer has anywhere to run."""
     print("\nSeeding starting inventory levels (only where none exists yet)...")
     finished_goods = Product.objects.filter(
         product_type=Product.ProductType.FINISHED_GOOD, is_active=True
@@ -261,18 +256,24 @@ def ensure_starting_inventory(cashiers, commissary_branch):
     for branch in _native_branches():
         for product in finished_goods:
             _, created = Inventory.objects.get_or_create(
-                branch=branch, product=product, defaults={"quantity_on_hand": 400}
+                branch=branch,
+                product=product,
+                defaults={"quantity_on_hand": 400, "reorder_threshold": FINISHED_GOOD_THRESHOLD},
             )
             created_count += int(created)
 
     for product in finished_goods:
         _, created = Inventory.objects.get_or_create(
-            branch=commissary_branch, product=product, defaults={"quantity_on_hand": 200}
+            branch=commissary_branch,
+            product=product,
+            defaults={"quantity_on_hand": 200, "reorder_threshold": FINISHED_GOOD_THRESHOLD},
         )
         created_count += int(created)
     for product in materials:
         _, created = Inventory.objects.get_or_create(
-            branch=commissary_branch, product=product, defaults={"quantity_on_hand": 5000}
+            branch=commissary_branch,
+            product=product,
+            defaults={"quantity_on_hand": 5000, "reorder_threshold": MATERIAL_THRESHOLD},
         )
         created_count += int(created)
     print(f"  Created {created_count} new inventory rows (existing rows left untouched).")
@@ -492,9 +493,11 @@ def apply_demo_stock_snapshot(commissary_branch):
         product_type=Product.ProductType.MATERIAL, is_active=True
     ).order_by("name")[:2]
     for material in critical_materials:
-        Inventory.objects.filter(branch=commissary_branch, product=material).update(
-            quantity_on_hand=max(0, material.reorder_threshold // 3)
-        )
+        inv = Inventory.objects.filter(branch=commissary_branch, product=material).first()
+        if inv is None:
+            continue
+        inv.quantity_on_hand = max(0, inv.reorder_threshold // 3)
+        inv.save(update_fields=["quantity_on_hand"])
         print(f"  {material.name} @ Commissary -> critical/low stock")
 
     low_finished_goods = Product.objects.filter(
@@ -502,9 +505,11 @@ def apply_demo_stock_snapshot(commissary_branch):
     ).order_by("name")[:2]
     for branch in _native_branches()[:1]:
         for product in low_finished_goods:
-            Inventory.objects.filter(branch=branch, product=product).update(
-                quantity_on_hand=max(0, product.reorder_threshold // 2)
-            )
+            inv = Inventory.objects.filter(branch=branch, product=product).first()
+            if inv is None:
+                continue
+            inv.quantity_on_hand = max(0, inv.reorder_threshold // 2)
+            inv.save(update_fields=["quantity_on_hand"])
             print(f"  {product.name} @ {branch.name} -> low stock")
 
 
@@ -589,7 +594,9 @@ def run():
 
     # Snapshot BEFORE anything below mutates these -- this is what makes
     # a later, precise removal possible (see _write_removal_manifest).
-    reorder_snapshot = dict(Product.objects.values_list("id", "reorder_threshold"))
+    # reorder_threshold now lives on Inventory, not Product -- keyed by
+    # Inventory id, same as the quantity_on_hand snapshot right below it.
+    reorder_snapshot = dict(Inventory.objects.values_list("id", "reorder_threshold"))
     inventory_snapshot = dict(Inventory.objects.values_list("id", "quantity_on_hand"))
     pk_floor = {
         "sales_transaction": _max_pk(SalesTransaction),
@@ -601,7 +608,6 @@ def run():
     }
 
     cashiers, commissary_user, commissary_branch = ensure_demo_users()
-    ensure_reorder_thresholds()
     ensure_starting_inventory(cashiers, commissary_branch)
     seed_operational_history(cashiers, commissary_user, commissary_branch)
     apply_demo_stock_snapshot(commissary_branch)

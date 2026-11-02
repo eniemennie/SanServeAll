@@ -33,6 +33,11 @@ class Product(models.Model):
         MILLILITER = "MILLILITER", "mL"
         PACK = "PACK", "pack"
         BOX = "BOX", "box"
+        # Client raw-data import (Packaging_Materials.xlsx): rolls of
+        # receipt/register tape, cling wrap, etc. -- distinct from PACK
+        # (a bundle of discrete pieces), not a value any existing unit
+        # could stand in for without losing information.
+        ROLL = "ROLL", "roll"
 
     class Category(models.TextChoices):
         COFFEE = "COFFEE", "Coffee"
@@ -64,13 +69,16 @@ class Product(models.Model):
     # (Row 3 redesign, POS category tabs), materials aren't browsed there.
     category = models.CharField(max_length=32, choices=Category.choices, blank=True)
     is_best_seller = models.BooleanField(default=False)
-    # Below this quantity_on_hand, Inventory.is_low_stock flags the item
-    # (Row 6.4). Zero means "don't flag" rather than "always flag" -- a
-    # product with no threshold configured yet shouldn't spam alerts.
-    reorder_threshold = models.PositiveIntegerField(default=0)
     unit_of_measure = models.CharField(
         max_length=16, choices=UnitOfMeasure.choices, default=UnitOfMeasure.PIECE
     )
+    # Client raw-data import (Raw_Materials.xlsx / Packaging_Materials.xlsx):
+    # every material carries a real supplier name (e.g. "Juan Store",
+    # "Restaurant Depot"), consistent across every branch's row for that
+    # same material -- a genuine catalog-level fact with nowhere to live
+    # until now. Blank for finished goods and any material whose supplier
+    # isn't tracked yet.
+    supplier = models.CharField(max_length=150, blank=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -109,6 +117,15 @@ class Inventory(models.Model):
     branch = models.ForeignKey("accounts.Branch", on_delete=models.PROTECT)
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
     quantity_on_hand = models.IntegerField(default=0)
+    # Backend gap assessment (client raw-data import): moved here from
+    # Product.reorder_threshold -- the client's own Raw_Materials.xlsx /
+    # Packaging_Materials.xlsx data showed real materials genuinely
+    # needing a different reorder point per branch (e.g. a branch that
+    # burns through coffee beans faster), which one global per-Product
+    # value could never represent. Zero means "don't flag" rather than
+    # "always flag" -- a row with no threshold configured yet shouldn't
+    # spam alerts, same convention the old Product field used.
+    reorder_threshold = models.PositiveIntegerField(default=0)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -142,12 +159,12 @@ class Inventory(models.Model):
 
     @property
     def is_low_stock(self):
-        """True when stock is at or below the product's configured reorder
-        threshold, but still above zero (out-of-stock is its own, more
-        urgent status -- Fig. 3-20/3-32 distinguish the two)."""
-        if self.product.reorder_threshold <= 0:
+        """True when stock is at or below this branch's own configured
+        reorder threshold, but still above zero (out-of-stock is its own,
+        more urgent status -- Fig. 3-20/3-32 distinguish the two)."""
+        if self.reorder_threshold <= 0:
             return False
-        return 0 < self.quantity_on_hand <= self.product.reorder_threshold
+        return 0 < self.quantity_on_hand <= self.reorder_threshold
 
     @property
     def status_label(self):

@@ -60,26 +60,34 @@ def staff_client(client, branch_staff, branch):
 
 class TestInventoryModelStatus:
     def test_zero_threshold_never_flags_low_stock(self, branch):
-        product = Product.objects.create(name="Widget", price="10.00", reorder_threshold=0)
-        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=1)
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(
+            branch=branch, product=product, quantity_on_hand=1, reorder_threshold=0
+        )
         assert inv.is_low_stock is False
 
     def test_stock_at_or_below_threshold_is_low_stock(self, branch):
-        product = Product.objects.create(name="Widget", price="10.00", reorder_threshold=5)
-        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=5)
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(
+            branch=branch, product=product, quantity_on_hand=5, reorder_threshold=5
+        )
         assert inv.is_low_stock is True
         assert inv.status_label == "Low Stock"
 
     def test_zero_stock_is_out_of_stock_not_low_stock(self, branch):
-        product = Product.objects.create(name="Widget", price="10.00", reorder_threshold=5)
-        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=0)
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(
+            branch=branch, product=product, quantity_on_hand=0, reorder_threshold=5
+        )
         assert inv.is_out_of_stock is True
         assert inv.is_low_stock is False  # out-of-stock is the more urgent, distinct status
         assert inv.status_label == "Out of Stock"
 
     def test_stock_above_threshold_is_available(self, branch):
-        product = Product.objects.create(name="Widget", price="10.00", reorder_threshold=5)
-        inv = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=20)
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = Inventory.objects.create(
+            branch=branch, product=product, quantity_on_hand=20, reorder_threshold=5
+        )
         assert inv.status_label == "Available"
 
     def test_negative_quantity_displays_as_zero(self, branch):
@@ -127,18 +135,24 @@ class TestGetBranchInventory:
         assert materials_only[0].product == material
 
     def test_low_stock_only_excludes_healthy_stock(self, branch):
-        low = Product.objects.create(name="Low Item", price="10.00", reorder_threshold=5)
-        healthy = Product.objects.create(name="Healthy Item", price="10.00", reorder_threshold=5)
-        Inventory.objects.create(branch=branch, product=low, quantity_on_hand=2)
-        Inventory.objects.create(branch=branch, product=healthy, quantity_on_hand=50)
+        low = Product.objects.create(name="Low Item", price="10.00")
+        healthy = Product.objects.create(name="Healthy Item", price="10.00")
+        Inventory.objects.create(
+            branch=branch, product=low, quantity_on_hand=2, reorder_threshold=5
+        )
+        Inventory.objects.create(
+            branch=branch, product=healthy, quantity_on_hand=50, reorder_threshold=5
+        )
 
         result = services.get_branch_inventory(branch, low_stock_only=True)
         assert len(result) == 1
         assert result[0].product == low
 
     def test_low_stock_only_includes_out_of_stock_items(self, branch):
-        product = Product.objects.create(name="Empty", price="10.00", reorder_threshold=5)
-        Inventory.objects.create(branch=branch, product=product, quantity_on_hand=0)
+        product = Product.objects.create(name="Empty", price="10.00")
+        Inventory.objects.create(
+            branch=branch, product=product, quantity_on_hand=0, reorder_threshold=5
+        )
 
         result = services.get_branch_inventory(branch, low_stock_only=True)
         assert len(result) == 1
@@ -238,18 +252,24 @@ class TestGetLowStockAlertsForAllBranches:
     Monitoring screens show for the same branch."""
 
     def test_branch_with_nothing_low_is_excluded(self, branch):
-        healthy = Product.objects.create(name="Flour", price="45.00", reorder_threshold=10)
-        Inventory.objects.create(branch=branch, product=healthy, quantity_on_hand=50)
+        healthy = Product.objects.create(name="Flour", price="45.00")
+        Inventory.objects.create(
+            branch=branch, product=healthy, quantity_on_hand=50, reorder_threshold=10
+        )
 
         alerts = services.get_low_stock_alerts_for_all_branches()
         assert alerts == []
 
     def test_branch_with_a_critical_item_is_included(self, branch, other_branch):
-        healthy = Product.objects.create(name="Flour", price="45.00", reorder_threshold=10)
-        Inventory.objects.create(branch=other_branch, product=healthy, quantity_on_hand=50)
+        healthy = Product.objects.create(name="Flour", price="45.00")
+        Inventory.objects.create(
+            branch=other_branch, product=healthy, quantity_on_hand=50, reorder_threshold=10
+        )
 
-        critical = Product.objects.create(name="Cashews", price="650.00", reorder_threshold=10)
-        Inventory.objects.create(branch=branch, product=critical, quantity_on_hand=0)
+        critical = Product.objects.create(name="Cashews", price="650.00")
+        Inventory.objects.create(
+            branch=branch, product=critical, quantity_on_hand=0, reorder_threshold=10
+        )
 
         alerts = services.get_low_stock_alerts_for_all_branches()
         assert len(alerts) == 1
@@ -263,10 +283,11 @@ class TestGetLowStockAlertsForAllBranches:
         material = Product.objects.create(
             name="Milk",
             price="80.00",
-            reorder_threshold=20,
             product_type=Product.ProductType.MATERIAL,
         )
-        Inventory.objects.create(branch=commissary, product=material, quantity_on_hand=5)
+        Inventory.objects.create(
+            branch=commissary, product=material, quantity_on_hand=5, reorder_threshold=20
+        )
 
         alerts = services.get_low_stock_alerts_for_all_branches()
         assert len(alerts) == 1
@@ -331,11 +352,24 @@ class TestFindLedgerDiscrepancies:
 
 class TestCreateProduct:
     def test_creates_a_product_with_given_fields(self):
-        product = services.create_product(
-            "New Item", "99.00", Product.ProductType.FINISHED_GOOD, reorder_threshold=10
-        )
+        product = services.create_product("New Item", "99.00", Product.ProductType.FINISHED_GOOD)
         assert product.name == "New Item"
-        assert product.reorder_threshold == 10
+
+    def test_reorder_threshold_applies_to_each_provisioned_branchs_inventory_row(
+        self, branch, other_branch
+    ):
+        """reorder_threshold now lives on Inventory, not Product (client
+        raw-data import: real reorder points differ per branch), so it's
+        applied to every Inventory row create_product provisions."""
+        product = services.create_product(
+            "New Item",
+            "99.00",
+            Product.ProductType.FINISHED_GOOD,
+            reorder_threshold=10,
+            branch_ids=[branch.pk, other_branch.pk],
+        )
+        assert Inventory.objects.get(branch=branch, product=product).reorder_threshold == 10
+        assert Inventory.objects.get(branch=other_branch, product=product).reorder_threshold == 10
 
     def test_blank_name_is_rejected(self):
         with pytest.raises(services.InventoryServiceError, match="name is required"):
@@ -422,10 +456,14 @@ class TestInventoryMonitoringView:
         assert response.context["items"][0].display_quantity == 0
 
     def test_low_stock_toggle_filters_results(self, staff_client, branch):
-        low = Product.objects.create(name="Low Item", price="10.00", reorder_threshold=5)
-        healthy = Product.objects.create(name="Healthy Item", price="10.00", reorder_threshold=5)
-        Inventory.objects.create(branch=branch, product=low, quantity_on_hand=1)
-        Inventory.objects.create(branch=branch, product=healthy, quantity_on_hand=99)
+        low = Product.objects.create(name="Low Item", price="10.00")
+        healthy = Product.objects.create(name="Healthy Item", price="10.00")
+        Inventory.objects.create(
+            branch=branch, product=low, quantity_on_hand=1, reorder_threshold=5
+        )
+        Inventory.objects.create(
+            branch=branch, product=healthy, quantity_on_hand=99, reorder_threshold=5
+        )
 
         response = staff_client.get(reverse("inventory:monitoring"), {"low_stock": "1"})
         assert b"Low Item" in response.content
@@ -568,14 +606,18 @@ class TestResourceStatusSummary:
     (Critical/Low/Adequate) documented in get_resource_status_summary."""
 
     def test_collapses_to_three_real_tiers_with_correct_counts(self, branch):
-        critical_product = Product.objects.create(
-            name="Cashew Nuts", price="650.00", reorder_threshold=10
+        critical_product = Product.objects.create(name="Cashew Nuts", price="650.00")
+        low_product = Product.objects.create(name="Butter", price="280.00")
+        adequate_product = Product.objects.create(name="Flour", price="45.00")
+        Inventory.objects.create(
+            branch=branch, product=critical_product, quantity_on_hand=0, reorder_threshold=10
         )
-        low_product = Product.objects.create(name="Butter", price="280.00", reorder_threshold=10)
-        adequate_product = Product.objects.create(name="Flour", price="45.00", reorder_threshold=10)
-        Inventory.objects.create(branch=branch, product=critical_product, quantity_on_hand=0)
-        Inventory.objects.create(branch=branch, product=low_product, quantity_on_hand=5)
-        Inventory.objects.create(branch=branch, product=adequate_product, quantity_on_hand=50)
+        Inventory.objects.create(
+            branch=branch, product=low_product, quantity_on_hand=5, reorder_threshold=10
+        )
+        Inventory.objects.create(
+            branch=branch, product=adequate_product, quantity_on_hand=50, reorder_threshold=10
+        )
 
         summary = services.get_resource_status_summary(branch=branch)
 
@@ -590,9 +632,13 @@ class TestResourceStatusSummary:
 
     def test_all_branches_aggregates_active_non_commissary_only(self, branch):
         commissary = Branch.objects.create(name="Central Kitchen", code="CK", is_commissary=True)
-        product = Product.objects.create(name="Sugar", price="55.00", reorder_threshold=10)
-        Inventory.objects.create(branch=branch, product=product, quantity_on_hand=50)
-        Inventory.objects.create(branch=commissary, product=product, quantity_on_hand=200)
+        product = Product.objects.create(name="Sugar", price="55.00")
+        Inventory.objects.create(
+            branch=branch, product=product, quantity_on_hand=50, reorder_threshold=10
+        )
+        Inventory.objects.create(
+            branch=commissary, product=product, quantity_on_hand=200, reorder_threshold=10
+        )
 
         summary = services.get_resource_status_summary(branch=None)
 
@@ -607,11 +653,15 @@ class TestResourceStatusSummary:
         """A discontinued item shouldn't count toward or against the
         sufficiency percentage shown on the Dashboard KPI card."""
         discontinued = Product.objects.create(
-            name="Discontinued Item", price="10.00", reorder_threshold=10, is_active=False
+            name="Discontinued Item", price="10.00", is_active=False
         )
-        Inventory.objects.create(branch=branch, product=discontinued, quantity_on_hand=0)
-        adequate = Product.objects.create(name="Flour", price="45.00", reorder_threshold=10)
-        Inventory.objects.create(branch=branch, product=adequate, quantity_on_hand=50)
+        Inventory.objects.create(
+            branch=branch, product=discontinued, quantity_on_hand=0, reorder_threshold=10
+        )
+        adequate = Product.objects.create(name="Flour", price="45.00")
+        Inventory.objects.create(
+            branch=branch, product=adequate, quantity_on_hand=50, reorder_threshold=10
+        )
 
         summary = services.get_resource_status_summary(branch=branch)
         assert summary["total_items"] == 1
@@ -631,10 +681,14 @@ class TestProductAvailabilityEnhancements:
     def test_stats_reflect_real_inventory_across_all_branches(
         self, owner_client, branch, other_branch
     ):
-        cashew = Product.objects.create(name="Cashew Nuts", price="650.00", reorder_threshold=10)
-        flour = Product.objects.create(name="Flour", price="45.00", reorder_threshold=10)
-        Inventory.objects.create(branch=branch, product=cashew, quantity_on_hand=0)
-        Inventory.objects.create(branch=other_branch, product=flour, quantity_on_hand=50)
+        cashew = Product.objects.create(name="Cashew Nuts", price="650.00")
+        flour = Product.objects.create(name="Flour", price="45.00")
+        Inventory.objects.create(
+            branch=branch, product=cashew, quantity_on_hand=0, reorder_threshold=10
+        )
+        Inventory.objects.create(
+            branch=other_branch, product=flour, quantity_on_hand=50, reorder_threshold=10
+        )
 
         response = owner_client.get(reverse("inventory:product_management"))
         stats = response.context["stats"]
