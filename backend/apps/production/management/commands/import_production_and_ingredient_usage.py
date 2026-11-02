@@ -288,7 +288,20 @@ class Command(BaseCommand):
         """Returns the list of ProductionRecord rows created for this
         source row (more than one only for a combined batch), or None if
         this batch_ref was already imported."""
-        if ProductionRecord.objects.filter(batch_ref=row["batch_ref"]).exists():
+        combo = COMBINED_PRODUCTS.get(row["product_name"])
+        plan = (
+            [(f"{row['batch_ref']}-{suffix}", name) for suffix, name in combo]
+            if combo
+            else [(row["batch_ref"], row["product_name"])]
+        )
+        # Idempotency check must use the actual ref(s) that get created --
+        # for a combined batch that's the suffixed child refs
+        # ("BATCH-0181-BT"/"-BR"), never the bare source batch_ref itself
+        # (no row is ever created under that exact ref). Checking the
+        # first child's ref is enough: all of a batch's children are
+        # created together, in the same call, so they exist or don't as
+        # a unit.
+        if ProductionRecord.objects.filter(batch_ref=plan[0][0]).exists():
             return None
 
         staff = self._resolve_staff(row["staff_username"])
@@ -297,12 +310,6 @@ class Command(BaseCommand):
         quality = self._map_quality(row["quality"], row["batch_ref"])
         status = self._map_status(row["status"], row["batch_ref"])
 
-        combo = COMBINED_PRODUCTS.get(row["product_name"])
-        plan = (
-            [(f"{row['batch_ref']}-{suffix}", name) for suffix, name in combo]
-            if combo
-            else [(row["batch_ref"], row["product_name"])]
-        )
         # Split evenly (exactly -- any remainder goes to the earliest
         # child, see split_evenly) across every child -- there's no
         # finer real breakdown of a combined batch's output per product
