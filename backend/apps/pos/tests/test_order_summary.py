@@ -87,6 +87,37 @@ class TestGrandTotalAndDiscountMath:
         assert vat_exclusive == Decimal("200.89")
         assert vat_amount == Decimal("24.11")
 
+    def test_sc2_transaction_discount_zeroes_out_vat(self, draft, item):
+        """Backend gap assessment item 1 (Phase 1, critical/compliance):
+        a Senior Citizen (RA 9994) discounted sale is VAT-exempt by law
+        -- the VAT portion must be exactly zero, and the "VAT-exclusive"
+        figure must equal the full grand_total rather than being
+        computed as an ordinary taxable sale."""
+        services.apply_transaction_discount(draft, "SC2", "PERCENT", "20")
+        assert draft.grand_total == Decimal("100.00")  # 125 - 20%
+
+        vat_exclusive, vat_amount = draft.vat_breakdown(Decimal("12.00"))
+        assert vat_amount == Decimal("0.00")
+        assert vat_exclusive == Decimal("100.00")
+
+    def test_pwd2_transaction_discount_zeroes_out_vat(self, draft, item):
+        """Same exemption, for a PWD (RA 10754) discounted sale."""
+        services.apply_transaction_discount(draft, "PWD2", "PERCENT", "20")
+
+        vat_exclusive, vat_amount = draft.vat_breakdown(Decimal("12.00"))
+        assert vat_amount == Decimal("0.00")
+        assert vat_exclusive == draft.grand_total
+
+    def test_an_ordinary_discount_category_does_not_exempt_vat(self, draft, item):
+        """Only SC2/PWD2 are legally VAT-exempt -- an otherwise-identical
+        discount under a different category (e.g. a plain Senior
+        Discount note, "SD") must still be taxed normally."""
+        services.apply_transaction_discount(draft, "SD", "PERCENT", "20")
+
+        vat_exclusive, vat_amount = draft.vat_breakdown(Decimal("12.00"))
+        assert vat_amount != Decimal("0.00")
+        assert vat_exclusive != draft.grand_total
+
     def test_transaction_discount_amount_reduces_grand_total(self, draft, item):
         services.apply_transaction_discount(draft, "SD", "AMOUNT", "20.00")
         assert draft.grand_total == Decimal("105.00")  # 125 - 20

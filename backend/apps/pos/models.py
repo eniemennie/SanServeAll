@@ -157,8 +157,23 @@ class SalesTransaction(models.Model):
         VAT-exclusive = grand_total / (1 + rate), VAT = grand_total minus
         that. Takes the rate as a parameter rather than importing
         SystemConfiguration directly, keeping this model free of a
-        cross-app import for one property."""
+        cross-app import for one property.
+
+        Backend gap assessment item 1 (Phase 1, critical/compliance):
+        Senior Citizen (RA 9994) and PWD (RA 10754) sales are VAT-exempt
+        by law -- the VAT component must be zero, not computed as if
+        this were an ordinary taxable sale. Gated on the transaction-
+        wide discount category (SC2/PWD2), which is how an SC/PWD
+        discount is normally applied to a whole receipt in this system,
+        rather than on any per-item discount category -- splitting one
+        receipt into partially-VATable and partially-VAT-exempt portions
+        line by line is a real BIR scenario but a materially bigger
+        change than this fix, and deliberately out of scope here.
+        """
         grand_total = self.grand_total
+        if self.transaction_discount_category in (DiscountCategory.SC2, DiscountCategory.PWD2):
+            return grand_total.quantize(Decimal("0.01")), Decimal("0.00")
+
         rate = Decimal(str(tax_rate_percent)) / Decimal("100")
         vat_exclusive = grand_total / (Decimal("1") + rate)
         vat_amount = grand_total - vat_exclusive
