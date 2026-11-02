@@ -1,4 +1,5 @@
-from django.urls import path
+from django.contrib.auth import views as auth_views
+from django.urls import path, reverse_lazy
 
 from apps.accounts import views
 
@@ -7,6 +8,43 @@ app_name = "accounts"
 urlpatterns = [
     path("login/", views.SanServeAllLoginView.as_view(), name="login"),
     path("logout/", views.SanServeAllLogoutView.as_view(), name="logout"),
+    # Password reset (backend gap assessment): Owner/Admin and Commissary
+    # Staff only -- the only two roles with a real password at all (Branch
+    # Staff is PIN-only, see CashierPIN). Django's own PasswordResetForm
+    # already excludes inactive accounts and accounts with an unusable
+    # password, so a Branch Staff account can't reach this by email lookup
+    # even though the URL itself isn't role-gated (it can't be -- the
+    # requester isn't logged in yet).
+    path(
+        "password-reset/",
+        auth_views.PasswordResetView.as_view(
+            template_name="accounts/password_reset_form.html",
+            email_template_name="accounts/password_reset_email.html",
+            subject_template_name="accounts/password_reset_subject.txt",
+            success_url=reverse_lazy("accounts:password_reset_done"),
+        ),
+        name="password_reset",
+    ),
+    path(
+        "password-reset/done/",
+        auth_views.PasswordResetDoneView.as_view(template_name="accounts/password_reset_done.html"),
+        name="password_reset_done",
+    ),
+    path(
+        "reset/<uidb64>/<token>/",
+        auth_views.PasswordResetConfirmView.as_view(
+            template_name="accounts/password_reset_confirm.html",
+            success_url=reverse_lazy("accounts:password_reset_complete"),
+        ),
+        name="password_reset_confirm",
+    ),
+    path(
+        "reset/done/",
+        auth_views.PasswordResetCompleteView.as_view(
+            template_name="accounts/password_reset_complete.html"
+        ),
+        name="password_reset_complete",
+    ),
     path("select-cashier/", views.SelectCashierView.as_view(), name="select_cashier"),
     path("cashier-lock/<int:user_id>/", views.CashierLockView.as_view(), name="cashier_lock"),
     path("select-branch/", views.BranchSelectionView.as_view(), name="select_branch"),
