@@ -8,11 +8,12 @@ from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse
 from django.test import RequestFactory
 from django.urls import reverse
+from django.views import View
 from django_otp.oath import totp
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
 from apps.accounts.models import Branch, Role, User
-from apps.accounts.permissions import role_required
+from apps.accounts.permissions import RoleRequiredMixin, role_required
 from apps.core.middleware import BranchScopingMiddleware
 
 pytestmark = pytest.mark.django_db
@@ -127,6 +128,75 @@ class TestRoleRequiredDecorator:
         request.user = cashier
         with pytest.raises(PermissionDenied):
             dummy_view(request)
+
+
+class _DummyMixinView(RoleRequiredMixin, View):
+    """Minimal class-based view for exercising RoleRequiredMixin directly
+    (backend gap assessment: the mixin was added in anticipation of
+    future class-based views per the Phase 4 pattern, but no current CBV
+    uses it, and unlike its function-based sibling role_required -- see
+    TestRoleRequiredDecorator above -- it had no test of its own at all).
+    """
+
+    allowed_roles = [Role.OWNER_ADMIN]
+
+    def get(self, request, *args, **kwargs):
+        return HttpResponse("ok")
+
+
+class TestRoleRequiredMixin:
+    def test_user_with_allowed_role_passes(self, admin):
+        rf = RequestFactory()
+        request = rf.get("/")
+        request.user = admin
+        # Same reasoning as TestRoleRequiredDecorator's equivalent test:
+        # RequestFactory bypasses OTPMiddleware, so the verified-session
+        # state is simulated directly -- this test is about the mixin's
+        # ROLE check, not re-proving OTP enforcement.
+        request.user.is_verified = lambda: True
+
+        response = _DummyMixinView.as_view()(request)
+        assert response.status_code == 200
+
+    def test_user_without_allowed_role_is_denied(self, cashier):
+        rf = RequestFactory()
+        request = rf.get("/")
+        request.user = cashier
+
+        with pytest.raises(PermissionDenied):
+            _DummyMixinView.as_view()(request)
+
+    def test_owner_admin_without_otp_verification_is_redirected_to_admin_login(self, admin):
+        """Same Row 12.4 guarantee role_required enforces: holding the
+        allowed role alone isn't enough for Owner/Admin -- the current
+        session must have completed 2FA too, or the mixin redirects to
+        complete it rather than letting the view run."""
+        rf = RequestFactory()
+        request = rf.get("/")
+        request.user = admin
+        request.user.is_verified = lambda: False
+
+        response = _DummyMixinView.as_view()(request)
+        assert response.status_code == 302
+        assert response.url == reverse("accounts:admin_login")
+
+    def test_non_owner_admin_role_skips_otp_check_entirely(self, cashier):
+        """A role other than Owner/Admin never goes through 2FA at all
+        (see _user_requires_otp's own docstring) -- granting it access
+        here must not get blocked on an OTP check that doesn't apply."""
+
+        class _BranchStaffView(RoleRequiredMixin, View):
+            allowed_roles = [Role.BRANCH_STAFF]
+
+            def get(self, request, *args, **kwargs):
+                return HttpResponse("ok")
+
+        rf = RequestFactory()
+        request = rf.get("/")
+        request.user = cashier
+
+        response = _BranchStaffView.as_view()(request)
+        assert response.status_code == 200
 
 
 class TestAdminLogin:
