@@ -286,6 +286,43 @@ class TestAdvanceStockTransferStatus:
         with pytest.raises(services.StockTransferError, match="no further status change"):
             services.advance_stock_transfer_status(order, StockTransferOrder.Status.DELIVERED)
 
+    def test_an_unrecognized_status_value_raises_stock_transfer_error_not_valueerror(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        """Backend gap assessment item 25: a garbage next_status value
+        (e.g. a tampered form field) used to blow up with a bare,
+        uncaught ValueError from StockTransferOrder.Status(new_status)
+        inside the error-message formatting itself, before the service
+        ever got a chance to report a clean, catchable error."""
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        with pytest.raises(
+            services.StockTransferError, match="not a recognized stock transfer status"
+        ):
+            services.advance_stock_transfer_status(order, "BOGUS")
+        order.refresh_from_db()
+        assert order.status == StockTransferOrder.Status.PROCESSING
+
+    def test_a_missing_status_value_also_raises_stock_transfer_error(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        """Same bug, the other common trigger: request.POST.get(...)
+        returns None when the field is simply missing from the form."""
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        with pytest.raises(
+            services.StockTransferError, match="not a recognized stock transfer status"
+        ):
+            services.advance_stock_transfer_status(order, None)
+
 
 class TestStockTransfersView:
     def test_commissary_staff_can_view_the_page(self, commissary_client):
@@ -357,6 +394,27 @@ class TestStockTransfersView:
         response = commissary_client.post(
             reverse("production:advance_stock_transfer", args=[order.pk]),
             {"next_status": "DELIVERED"},
+        )
+        assert response.status_code == 302
+        order.refresh_from_db()
+        assert order.status == StockTransferOrder.Status.PROCESSING
+
+    def test_advance_view_does_not_500_on_a_bogus_status_value(
+        self, commissary_client, commissary, commissary_staff, batangas, cake
+    ):
+        """Backend gap assessment item 25: a tampered/garbage next_status
+        form value used to raise an uncaught ValueError past the view's
+        own except services.StockTransferError. Now it's just another
+        clean, no-op StockTransferError like any other illegal move."""
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        response = commissary_client.post(
+            reverse("production:advance_stock_transfer", args=[order.pk]),
+            {"next_status": "BOGUS"},
         )
         assert response.status_code == 302
         order.refresh_from_db()
