@@ -84,6 +84,16 @@ class TestSeedMenuCatalog:
         _run_seed()
         assert Product.objects.count() == count_after_first_run
 
+    def test_per_piece_silvana_flavors_match_the_clients_production_records(self):
+        """Production_Records.xlsx records real per-flavor, per-piece
+        Silvana batches (e.g. "Silvanas – Pistachio (Per Piece)") that
+        the box-only catalog had no product for. Prices come from the
+        client's own Bakery_Products.xlsx."""
+        _run_seed()
+        assert Product.objects.get(name="Silvanas – Classic Cashew (Per Piece)").price == 28
+        assert Product.objects.get(name="Silvanas – Walnut (Per Piece)").price == 34
+        assert Product.objects.get(name="Silvanas – Pistachio (Per Piece)").price == 50
+
     def test_expected_total_product_count(self):
         """Pinned to a real number so an accidental duplicate or a
         silently-dropped item changes this test, not just a vague
@@ -91,9 +101,9 @@ class TestSeedMenuCatalog:
         _run_seed()
         # 7 Hot + 7 Iced (coffee) + 4 Sea Salt + 5 Coffee Frappe +
         # 6 Non-Coffee Frappe + 7 Specialty + 4 Pasta + 5 Desserts +
-        # 24 Cakes (6 flavors x 4 sizes) + 2 Silvanas + 5 Soft & Fluffy +
-        # 9 Bakery Corner = 85
-        assert Product.objects.count() == 85
+        # 24 Cakes (6 flavors x 4 sizes) + 2 Silvanas (box) +
+        # 3 Silvanas (per piece) + 5 Soft & Fluffy + 9 Bakery Corner = 88
+        assert Product.objects.count() == 88
         assert (
             AddOn.objects.filter(
                 name__in=[
