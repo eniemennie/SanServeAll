@@ -273,6 +273,62 @@ class TestGetLowStockAlertsForAllBranches:
         assert alerts[0]["branch"] == commissary
 
 
+class TestFindLedgerDiscrepancies:
+    """Backend gap assessment item 29: a periodic check summing
+    InventoryTransaction deltas and comparing the total to
+    Inventory.quantity_on_hand, since the two are written together in
+    every service function but nothing ties them back to each other
+    afterward."""
+
+    def test_an_inventory_row_built_up_entirely_through_adjust_stock_reconciles_cleanly(
+        self, branch
+    ):
+        product = Product.objects.create(name="Widget", price="10.00")
+        # Starts at 0 with no transaction -- a brand-new row with
+        # nothing in the ledger yet is not itself a discrepancy, since
+        # 0 == sum([]).
+        inv = services.get_or_create_inventory_row(branch, product)
+        services.adjust_stock(inv, 10)
+        services.adjust_stock(inv, -3)
+
+        assert services.find_ledger_discrepancies() == []
+
+    def test_detects_a_balance_that_drifted_from_its_own_ledger(self, branch):
+        product = Product.objects.create(name="Widget", price="10.00")
+        inv = services.get_or_create_inventory_row(branch, product)
+        services.adjust_stock(inv, 10)  # ledger now sums to 10, balance is 10
+
+        # Simulate the exact bug this check exists to catch: some future
+        # code path updates quantity_on_hand directly without writing a
+        # matching InventoryTransaction.
+        inv.quantity_on_hand = 25
+        inv.save()
+
+        discrepancies = services.find_ledger_discrepancies()
+        assert len(discrepancies) == 1
+        entry = discrepancies[0]
+        assert entry["inventory"] == inv
+        assert entry["ledger_total"] == 10
+        assert entry["recorded_balance"] == 25
+        assert entry["difference"] == 15
+
+    def test_multiple_branches_and_products_are_each_checked_independently(
+        self, branch, other_branch
+    ):
+        product = Product.objects.create(name="Widget", price="10.00")
+        clean_inv = services.get_or_create_inventory_row(branch, product)
+        services.adjust_stock(clean_inv, 5)
+
+        drifted_inv = services.get_or_create_inventory_row(other_branch, product)
+        services.adjust_stock(drifted_inv, 5)
+        drifted_inv.quantity_on_hand = 999
+        drifted_inv.save()
+
+        discrepancies = services.find_ledger_discrepancies()
+        assert len(discrepancies) == 1
+        assert discrepancies[0]["inventory"] == drifted_inv
+
+
 class TestCreateProduct:
     def test_creates_a_product_with_given_fields(self):
         product = services.create_product(
