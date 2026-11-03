@@ -48,6 +48,17 @@ if ! command -v sqlite3 >/dev/null 2>&1; then
   exit 1
 fi
 
+# Found via an actual restore drill against staging (the deployment notes'
+# own warning not to trust "the script exits 0" without one): MEDIA_ROOT
+# (config/settings/base.py) is never created by Django itself -- it only
+# comes into existence the first time something is actually saved there.
+# A freshly-deployed environment with no uploads yet has no media/
+# directory at all, so `tar` failed outright here, and `set -e` aborted
+# the whole script before it ever reached the database backup below --
+# silently skipping the one part of this backup that actually matters.
+# Creating it first makes an empty media/ back up as a (harmless) empty
+# archive instead of taking the whole nightly backup down with it.
+mkdir -p "$SCRIPT_DIR/../media/"
 tar -czf "$BACKUP_DIR/media_$TIMESTAMP.tar.gz" "$SCRIPT_DIR/../media/"
 
 sqlite3 "$SQLITE_DB_PATH" ".backup '$BACKUP_DIR/db_$TIMESTAMP.sqlite3'"
