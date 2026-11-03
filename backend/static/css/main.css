@@ -103,6 +103,23 @@ body {
   box-shadow: 0 1px 2px rgba(30, 42, 58, 0.04);
 }
 
+/* --- Icon chips (Figma-mockup stat pattern: a colored icon tile that
+   anchors each stat so it doesn't read as a flat row of numbers competing
+   equally for attention -- Figma-alignment pass, Nov 3) --- */
+.jc-icon-chip {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--jc-radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.jc-icon-chip-orange { background-color: rgba(232, 139, 90, 0.14); color: var(--jc-orange-dark); }
+.jc-icon-chip-sage   { background-color: rgba(143, 168, 148, 0.16); color: var(--jc-sage); }
+.jc-icon-chip-teal   { background-color: rgba(92, 138, 153, 0.14); color: var(--jc-teal); }
+.jc-icon-chip-critical { background-color: rgba(220, 91, 78, 0.12); color: var(--jc-critical); }
+
 /* Left accent bar -- encodes branch/priority, not decorative (per skill
    guidance: structural devices should carry real information) */
 .jc-card-accent {
