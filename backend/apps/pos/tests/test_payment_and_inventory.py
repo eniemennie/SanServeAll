@@ -451,3 +451,56 @@ class TestReceiptView:
 
         response = unlocked_client.get(reverse("pos:receipt", kwargs={"transaction_id": draft.pk}))
         assert response.status_code == 404
+
+    def test_receipt_shows_vat_breakdown_for_an_ordinary_sale(
+        self, unlocked_client, cashier, branch, product
+    ):
+        """Regression test (found via task #48's live demo dry-run): the
+        receipt used to jump straight from Subtotal to Total with no VAT
+        breakdown at all, even though SalesTransaction.vat_breakdown()
+        already computed it correctly -- it just was never rendered."""
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 1)
+        services.complete_sale_payment(draft, "CASH", "200.00")
+
+        response = unlocked_client.get(reverse("pos:receipt", kwargs={"transaction_id": draft.pk}))
+        assert response.status_code == 200
+        assert b"VATable Sales" in response.content
+        assert b"VAT (12%)" in response.content
+        assert b"VAT-Exempt Sales" not in response.content
+        vat_exclusive, vat_amount = draft.vat_breakdown(12)
+        assert f"{vat_amount}".encode() in response.content
+        assert f"{vat_exclusive}".encode() in response.content
+
+    def test_receipt_shows_discount_line_for_an_ordinary_discount(
+        self, unlocked_client, cashier, branch, product
+    ):
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 1)
+        services.apply_transaction_discount(draft, "FAMILY", "PERCENT", "10")
+        services.complete_sale_payment(draft, "CASH", "200.00")
+
+        response = unlocked_client.get(reverse("pos:receipt", kwargs={"transaction_id": draft.pk}))
+        assert response.status_code == 200
+        assert b"Discount" in response.content
+        assert b"(FAMILY)" in response.content
+        # An ordinary discount (not SC2/PWD2) is still subject to VAT.
+        assert b"VATable Sales" in response.content
+
+    def test_receipt_shows_vat_exempt_sales_for_sc_pwd_discount(
+        self, unlocked_client, cashier, branch, product
+    ):
+        """BIR rules make an SC2/PWD2-discounted sale wholly VAT-exempt
+        (SalesTransaction.VAT_EXEMPT_DISCOUNT_CATEGORIES), not merely
+        discounted -- the receipt must say so, not silently omit VAT."""
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 1)
+        services.apply_transaction_discount(draft, "SC2", "PERCENT", "20")
+        services.complete_sale_payment(draft, "CASH", "200.00")
+
+        response = unlocked_client.get(reverse("pos:receipt", kwargs={"transaction_id": draft.pk}))
+        assert response.status_code == 200
+        assert b"(SC2)" in response.content
+        assert b"VAT-Exempt Sales" in response.content
+        assert b"VATable Sales" not in response.content
+        assert b"VAT (12%)" not in response.content
