@@ -75,12 +75,14 @@ def forecasting_dashboard(request):
 def resource_management_dashboard(request):
     """AI-Powered Resource Management Dashboard (Fig. 3-26).
 
-    Material consumption/restocking data is deliberately commissary-wide
-    and not branch-filtered -- raw materials only exist at the commissary
-    (Week 8), so a per-branch view of that section would always show
-    empty results for every real branch. The branch dropdown in the
-    shared Admin Shell topbar instead scopes a second, added section:
-    real per-branch finished-goods stock health (reusing
+    Material consumption/restocking data (the top KPI row, the pie chart,
+    and the restocking table) is deliberately NOT filtered by the branch
+    dropdown -- it's a materials-wide view across every branch that
+    stocks materials (several real branches do; see
+    services.get_resource_management_dashboard_data's docstring for the
+    corrected history here). The branch dropdown in the shared Admin
+    Shell topbar instead scopes a second, added section: real per-branch
+    finished-goods stock health (reusing
     inventory.get_resource_status_summary from the Dashboard Home batch,
     rather than re-deriving the same thing twice)."""
     data = services.get_resource_management_dashboard_data()
@@ -89,7 +91,19 @@ def resource_management_dashboard(request):
     branch_id = request.GET.get("branch")
     selected_branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
 
-    category_labels = [m["material__name"] for m in consumption["by_material"]]
+    # Pie-chart legend readability (pre-defense UI review): the real
+    # material catalog has 37 distinct materials with usage in a given
+    # 30-day window, which makes for an unreadable legend and a chart
+    # that gets squeezed or cut off. Show the top N by usage and fold
+    # the rest into a single "Other materials" slice -- the chart stays
+    # legible without hiding any usage (the folded total is still real,
+    # just not broken out by name).
+    TOP_N_MATERIALS = 8
+    by_material = consumption["by_material"]
+    top_materials = by_material[:TOP_N_MATERIALS]
+    other_materials = by_material[TOP_N_MATERIALS:]
+
+    category_labels = [m["material__name"] for m in top_materials]
     # total_used comes from Sum("quantity_used") over IngredientUsage's
     # DecimalField -- the aggregate returns Decimal, which json.dumps()
     # can't serialize on its own (TypeError: Object of type Decimal is
@@ -99,7 +113,24 @@ def resource_management_dashboard(request):
     # Production_Records/Ingredient_Usage import -- cast to float for the
     # Chart.js payload (display-only; every other use of this value keeps
     # the original Decimal precision).
-    category_values = [float(m["total_used"]) for m in consumption["by_material"]]
+    category_values = [float(m["total_used"]) for m in top_materials]
+
+    if other_materials:
+        category_labels.append(f"Other materials ({len(other_materials)})")
+        category_values.append(float(sum(m["total_used"] for m in other_materials)))
+
+    # Finished-Goods Stock Health list overcrowding (pre-defense UI review):
+    # with real client data across every branch, this list runs to 175+
+    # rows and made the page roughly 14,000px tall. Critical items are
+    # already sorted first, then Low, then Adequate (see
+    # get_resource_status_summary), so showing only the first N still
+    # surfaces every Critical/Low item -- nothing that needs attention is
+    # hidden, only the long, unremarkable Adequate tail.
+    STOCK_HEALTH_DISPLAY_LIMIT = 20
+    resource_status = inventory_services.get_resource_status_summary(branch=selected_branch)
+    resource_status_items = resource_status["items"]
+    resource_status_hidden_count = max(0, len(resource_status_items) - STOCK_HEALTH_DISPLAY_LIMIT)
+    resource_status["items"] = resource_status_items[:STOCK_HEALTH_DISPLAY_LIMIT]
 
     return render(
         request,
@@ -110,9 +141,8 @@ def resource_management_dashboard(request):
             "selected_branch": selected_branch,
             "consumption": consumption,
             "material_alerts": data["material_alerts"],
-            "resource_status": inventory_services.get_resource_status_summary(
-                branch=selected_branch
-            ),
+            "resource_status": resource_status,
+            "resource_status_hidden_count": resource_status_hidden_count,
             "category_labels_json": json.dumps(category_labels),
             "category_values_json": json.dumps(category_values),
         },
