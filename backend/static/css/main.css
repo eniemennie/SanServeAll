@@ -124,6 +124,60 @@ body {
 .jc-badge-adequate { background-color: #E3F1E8; color: var(--jc-adequate); }
 .jc-badge-info { background-color: #E5EEF6; color: #3E6B92; }
 
+/* --- Filter tabs (two-way filter toggles, e.g. Product Availability's
+   Finished Products / Raw Materials) --- cross-role consistency pass,
+   Nov 3: was previously a one-off <style> block defined inline in
+   product_management.html's own extra_js, using the class name
+   jc-tab-active. Moved here, under this name, so any future
+   two-choice filter toggle can reuse it instead of re-inventing it in
+   its own template again. Same look as before -- solid accent color
+   on the active choice. */
+.jc-filter-tab-active {
+  background-color: var(--jc-orange);
+  color: #fff;
+}
+
+/* --- Category tabs (scrollable pill row, e.g. POS product catalog) ---
+   cross-role consistency pass, Nov 3: was previously defined inline in
+   pos_ordering.html's own extra_css. Moved here unchanged so it's the
+   one definition instead of a page-local copy; POS's own markup and
+   JS (jc-category-tab.active selector) are untouched. Deliberately
+   kept visually distinct from .jc-filter-tab-active above -- a
+   scrollable multi-category pill row and a two-way toggle are
+   different UI patterns serving different numbers of options, so
+   unifying their look would be a redesign, not a consistency fix. */
+.jc-category-tab {
+  border: none;
+  border-radius: var(--jc-radius-pill);
+  padding: 0.45rem 1.1rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  background-color: var(--jc-sage);
+  color: #fff;
+  opacity: 0.55;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.jc-category-tab.active { opacity: 1; background-color: var(--jc-teal); }
+.jc-category-tab:hover { opacity: 0.85; color: #fff; }
+
+/* --- Back link (plain, inline-flow "← Back" link used by the
+   standalone Cashier Lock and Select Cashier screens) --- cross-role
+   consistency pass, Nov 3: was defined identically, twice, once per
+   page. Moved here as the one definition. Deliberately NOT merged
+   with .jc-auth-back-link below, which is positioned absolute inside
+   .jc-auth-bg's positioning context -- these two screens use a plain
+   .container instead, so reusing the absolute-positioned version
+   would misplace the link rather than fix anything. */
+.jc-back-link {
+  color: var(--jc-navy);
+  text-decoration: none;
+  font-weight: 500;
+}
+.jc-back-link:hover {
+  color: var(--jc-navy);
+}
+
 /* --- Sidebar (admin shell) ---
    Collapses to 68px icon-only (original spec) or expands to 240px with
    labels, toggled by the hamburger button in admin_base.html. Width
@@ -324,18 +378,36 @@ body.jc-dark .jc-nav-item:hover {
   font-weight: 600;
 }
 
-/* --- Cashier PIN keypad --- */
+/* --- Cashier PIN keypad ---
+   Single source of truth for the PIN dot/keypad look (cross-role
+   consistency pass, Nov 3): previously cashier_lock.html redefined
+   these two classes locally with the opposite "filled" state
+   convention from what was here, which happened to work only because
+   the page's own <style> block loads after this one and wins -- a
+   silent duplicate that could drift further unnoticed. This is now
+   the only definition; cashier_lock.html's template markup toggles
+   the "filled" state via JS exactly as it always has. */
 .jc-pin-dot {
   width: 56px;
   height: 56px;
   border-radius: var(--jc-radius-sm);
-  background-color: var(--jc-orange);
+  background-color: #E9E9E9;
   display: flex;
   align-items: center;
   justify-content: center;
 }
-.jc-pin-dot.empty {
-  background-color: #E9E9E9;
+.jc-pin-dot.filled {
+  background-color: var(--jc-orange);
+}
+.jc-pin-dot span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #fff;
+  display: none;
+}
+.jc-pin-dot.filled span {
+  display: block;
 }
 .jc-pin-key {
   border: 1px solid #E3E6E9;
@@ -343,9 +415,13 @@ body.jc-dark .jc-nav-item:hover {
   background-color: #fff;
   font-size: 1.25rem;
   padding: 1rem;
+  width: 100%;
 }
 .jc-pin-key:hover {
   background-color: var(--jc-canvas);
+}
+.jc-pin-key.jc-pin-key-active {
+  border-color: var(--jc-orange);
 }
 
 /* --- Dark Theme (Row 3 redesign, Settings modal) ---
@@ -364,7 +440,7 @@ body.jc-dark {
   color: var(--jc-text);
 }
 body.jc-dark .jc-card,
-body.jc-dark .jc-pos-topbar {
+body.jc-dark .jc-topbar {
   background-color: var(--jc-white);
   border-color: #2C3847;
 }

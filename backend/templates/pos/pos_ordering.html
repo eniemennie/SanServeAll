@@ -2,34 +2,16 @@
 {% block title %}POS - SanServeAll{% endblock %}
 {% block extra_css %}
 <style>
-    .jc-pos-topbar {
-        background-color: #fff;
-        border-bottom: 1px solid #EEF0F2;
-        padding: 0.85rem 1.5rem;
-    }
+    /* .jc-pos-topbar, .jc-category-tab, .jc-add-btn removed here --
+       cross-role consistency pass, Nov 3. The topbar now reuses the
+       shared .jc-topbar class (main.css, same one Admin/Commissary
+       use); .jc-category-tab moved to main.css unchanged so it's one
+       definition instead of a page-local copy; .jc-add-btn duplicated
+       the already-shared .btn-jc-teal under a different name, so the
+       markup below now uses that directly instead. */
     .jc-cashier-name { font-weight: 600; color: var(--jc-orange-dark); }
     .jc-cashier-role { font-size: 0.8rem; color: var(--jc-text-muted); }
     .jc-branch-label { font-weight: 500; color: var(--jc-text); }
-    .jc-category-tab {
-        border: none;
-        border-radius: var(--jc-radius-pill);
-        padding: 0.45rem 1.1rem;
-        font-size: 0.9rem;
-        font-weight: 500;
-        background-color: var(--jc-sage);
-        color: #fff;
-        opacity: 0.55;
-        text-decoration: none;
-        white-space: nowrap;
-    }
-    .jc-category-tab.active { opacity: 1; background-color: var(--jc-teal); }
-    .jc-category-tab:hover { opacity: 0.85; color: #fff; }
-    .jc-add-btn {
-        background-color: var(--jc-teal);
-        border-color: var(--jc-teal);
-        color: #fff;
-    }
-    .jc-add-btn:hover { background-color: #4A7684; border-color: #4A7684; color: #fff; }
     .jc-best-seller-badge {
         position: absolute;
         top: 0.5rem;
@@ -94,10 +76,9 @@
        product grid and category-tab strip already have their own
        responsive/scrollable behavior, so neither needs changes here. */
     @media (max-width: 575.98px) {
-        .jc-pos-topbar {
-            flex-wrap: wrap;
-            row-gap: 0.5rem;
-        }
+        /* .jc-topbar (main.css, shared) already flex-wraps below
+           767.98px, which covers this breakpoint too -- no local
+           override needed now that the topbar uses that shared class. */
         .jc-branch-label {
             order: 3;
             flex-basis: 100%;
@@ -145,7 +126,7 @@
     {% endfor %}
 {% endif %}
 
-<div class="jc-pos-topbar d-flex justify-content-between align-items-center">
+<div class="jc-topbar d-flex justify-content-between align-items-center">
     <div class="d-flex align-items-center gap-3">
         {% include "partials/logo.html" with size="sm" %}
         <div>
@@ -198,7 +179,7 @@
                             {% endif %}
                             <div class="fw-semibold mb-1">{{ product.name }}</div>
                             <div class="jc-price mb-2">₱{{ product.price }}+</div>
-                            <button type="button" class="btn jc-add-btn btn-sm js-open-customize"
+                            <button type="button" class="btn btn-jc-teal btn-sm js-open-customize"
                                     data-product-id="{{ product.pk }}"
                                     data-name="{{ product.name }}"
                                     data-price="{{ product.price }}"

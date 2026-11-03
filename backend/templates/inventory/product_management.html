@@ -46,8 +46,8 @@
 </div>
 
 <div class="d-flex gap-2 mb-3">
-    <a href="?type=" class="btn btn-sm {% if not selected_type %}jc-tab-active{% else %}btn-outline-secondary{% endif %}">Finished Products</a>
-    <a href="?type=MATERIAL" class="btn btn-sm {% if selected_type == 'MATERIAL' %}jc-tab-active{% else %}btn-outline-secondary{% endif %}">Raw Materials</a>
+    <a href="?type=" class="btn btn-sm {% if not selected_type %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">Finished Products</a>
+    <a href="?type=MATERIAL" class="btn btn-sm {% if selected_type == 'MATERIAL' %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">Raw Materials</a>
 </div>
 
 <div class="jc-card p-3 mb-4">
@@ -176,8 +176,4 @@
     </form>
 </div>
 
-{% endblock %}
-
-{% block extra_js %}
-<style>.jc-tab-active { background: var(--jc-orange); color: #fff; }</style>
 {% endblock %}
