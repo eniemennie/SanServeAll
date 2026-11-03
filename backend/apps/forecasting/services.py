@@ -477,11 +477,21 @@ def get_resource_management_dashboard_data(days=30):
     breakdown (for a pie chart) and restocking recommendations scoped to
     raw materials specifically (Fig. 3-26).
 
-    Deliberately NOT branch-filterable: raw materials only ever have
-    Inventory rows at the commissary (Week 8's design), never at a
-    customer-facing branch. A branch filter here would silently show
-    zero results for every real branch, masking genuine restocking
-    alerts -- confirmed and fixed after finding this during review.
+    NOTE (corrected pre-defense review): an earlier version of this
+    docstring claimed raw materials only ever have Inventory rows at the
+    commissary, and that this is why the results below aren't filtered
+    by the page's branch selector. That claim is false for the real
+    client dataset -- several branches (e.g. Lipa City) do stock their
+    own material Inventory rows (confirmed via direct query). The
+    results here are still deliberately NOT filtered by the page's
+    branch selector (branch=None below, same as before), but that is now
+    a known, intentional scope choice -- materials-wide restocking
+    alerts across every branch that stocks materials, same table either
+    way -- rather than something forced by a commissary-only assumption
+    that doesn't hold. The `material_alerts` the template renders each
+    carry their own `score.branch`, which the template now shows per row
+    so a materials-wide list reads correctly even when one material has
+    more than one alert (one per branch).
     """
     from apps.analytics.services import get_resource_consumption_summary
 
