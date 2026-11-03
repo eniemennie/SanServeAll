@@ -70,7 +70,17 @@ def compute_average_daily_demand(branch, product, days_history=30):
         ).values_list("quantity", flat=True)
         total = sum(total_sold)
 
-    return total / days_history if days_history else 0.0
+    # Cast to float before dividing, not after: IngredientUsage.quantity_used
+    # (the MATERIAL path above) is a Decimal field, so `total` is a Decimal
+    # whenever there's any real material consumption -- SalesItem.quantity's
+    # plain-int sum (the finished-good path) never exposed this, since
+    # int/int division is already a float in Python 3. compute_features
+    # below relies on this always being a float (its own comment says so)
+    # and does `float(quantity_on_hand) / avg_daily_demand`, which raises
+    # TypeError for float / Decimal -- never caught by tests since
+    # IngredientUsage was empty (zero real consumption, never reaching the
+    # `avg_daily_demand > 0` branch) until the 2026-11-03 historical import.
+    return float(total) / days_history if days_history else 0.0
 
 
 def compute_features(inventory):
