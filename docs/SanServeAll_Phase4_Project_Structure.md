@@ -196,7 +196,7 @@ backend/
 │   └── production.txt                    # base.txt + WhiteNoise, gunicorn (if applicable), production-only hardening packages
 │
 ├── scripts/
-│   ├── backup_media_and_db.sh            # Nightly backup script (media/ folder + mysqldump) referenced by Phase 3 durability decision
+│   ├── backup_media_and_db.sh            # Nightly backup script (media/ folder + a safe live sqlite3 .backup) referenced by Phase 3 durability decision
 │   ├── seed_demo_data.py                 # Loads database/ seed SQL for local dev/demo
 │   └── run_scheduler_check.py            # Manual health-check script to confirm APScheduler jobs are registered/firing
 │
