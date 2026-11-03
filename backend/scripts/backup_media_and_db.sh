@@ -24,8 +24,10 @@
 # or credentials in this file:
 #   SQLITE_DB_PATH   Same variable Django itself reads (config/settings/
 #                     production.py / staging.py). Defaults below to the
-#                     staging path, since staging is the live system
-#                     (deployment/production/notes.md) -- override if
+#                     production path, since the team's one live app
+#                     actually runs config.settings.production (confirmed
+#                     2026-11-03 from its real WSGI file and .env -- see
+#                     deployment/production/notes.md) -- override if
 #                     backing up a different environment.
 set -e
 
@@ -34,7 +36,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKUP_DIR="$SCRIPT_DIR/../../database/backups"
 mkdir -p "$BACKUP_DIR"
 
-SQLITE_DB_PATH="${SQLITE_DB_PATH:-$HOME/data/sanserveall_staging.sqlite3}"
+SQLITE_DB_PATH="${SQLITE_DB_PATH:-$HOME/data/sanserveall_production.sqlite3}"
 
 if [ ! -f "$SQLITE_DB_PATH" ]; then
   echo "ERROR: SQLite database not found at $SQLITE_DB_PATH" >&2
