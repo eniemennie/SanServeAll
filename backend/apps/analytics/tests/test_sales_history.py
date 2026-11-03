@@ -95,7 +95,20 @@ class TestGetSalesHistoryService:
         assert results == [alex_sale]
 
     def test_filters_by_date_range_inclusive(self, branches, cashiers, latte):
-        today = timezone.now()
+        # get_sales_history's date_from/date_to are calendar dates in the
+        # business's own local time (settings.TIME_ZONE="Asia/Manila", see
+        # its docstring), so the boundary here must be computed the same
+        # way. timezone.now() returns a UTC-aware datetime; calling .date()
+        # on it directly grabs the *UTC* calendar date, not the local one --
+        # those only diverge during the UTC 16:00-23:59 window (Manila's
+        # own midnight-to-08:00), which is exactly when this test started
+        # flaking: "today" and "yesterday" as computed here silently
+        # shifted a day earlier than what the service was actually
+        # filtering by, so the real today_sale fell outside the (wrong)
+        # requested range. localtime() converts to Asia/Manila first so
+        # .date() matches the service's own local-date semantics regardless
+        # of what time of day the suite runs.
+        today = timezone.localtime(timezone.now())
         yesterday_sale = _sale(
             branches["batangas"], cashiers["alex"], latte, when=today - timedelta(days=1)
         )
