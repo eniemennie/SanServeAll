@@ -174,10 +174,28 @@ def get_latest_risk_scores(branch=None):
     adds new rows rather than updating old ones (same pattern as
     Forecast). This returns only the MOST RECENT score per (branch,
     product) pair, not every score ever computed -- without this, a
-    dashboard would mix fresh and stale risk levels together forever."""
+    dashboard would mix fresh and stale risk levels together forever.
+
+    Excludes discontinued products (Product.is_active=False). This is a
+    *read-side* companion to run_risk_classification_for_all_inventory's
+    own is_active exclusion on the *write* side (2026-11-03 fix,
+    "Exclude discontinued products from nightly risk classification"):
+    that earlier fix only stops the nightly job from scoring an inactive
+    product going forward -- it does nothing about a score the job
+    already wrote before the product was deactivated. Without this
+    filter, that leftover score stays the "latest" one for that
+    (branch, product) pair forever, since no future run will ever
+    supersede it once the product is excluded from classification.
+    Confirmed live on 2026-11-03: deactivating 5 placeholder MATERIAL
+    products removed them from Resource Monitoring immediately (that
+    view queries Inventory/Product directly) but left them showing as
+    "Critical" on the Resource Management page and in AI Insights,
+    because both read through this function."""
     from apps.forecasting.models import InventoryRiskScore
 
-    queryset = InventoryRiskScore.objects.select_related("branch", "product")
+    queryset = InventoryRiskScore.objects.filter(product__is_active=True).select_related(
+        "branch", "product"
+    )
     if branch is not None:
         queryset = queryset.filter(branch=branch)
 
