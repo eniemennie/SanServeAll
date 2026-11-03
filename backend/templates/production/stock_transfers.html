@@ -10,38 +10,36 @@
     <div class="alert alert-danger py-2">{{ error }}</div>
 {% endif %}
 
-<div class="card mb-3">
-    <div class="card-body">
-        <h2 class="h6">Dispatch Stock to a Branch</h2>
-        <p class="text-muted small">Sends finished goods from the commissary's own stock to a branch. The quantity leaves the commissary's inventory immediately; it only reaches the destination branch once the order is marked Delivered.</p>
-        <form method="post">
-            {% csrf_token %}
-            <div class="row g-2">
-                <div class="col-md-4">
-                    <select name="product_id" class="form-select" required>
-                        <option value="" selected disabled>Select product</option>
-                        {% for p in finished_goods %}
-                        <option value="{{ p.pk }}">{{ p.name }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-4">
-                    <select name="destination_branch_id" class="form-select" required>
-                        <option value="" selected disabled>Select destination branch</option>
-                        {% for b in destination_branches %}
-                        <option value="{{ b.pk }}">{{ b.name }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div class="col-md-2">
-                    <input type="number" name="quantity" min="1" class="form-control" placeholder="Quantity" required>
-                </div>
-                <div class="col-md-2">
-                    <button type="submit" class="btn w-100" style="background: var(--jc-orange); color: #fff;">Dispatch</button>
-                </div>
+<div class="jc-card p-3 p-md-4 mb-3">
+    <h2 class="h6">Dispatch Stock to a Branch</h2>
+    <p class="text-muted small">Sends finished goods from the commissary's own stock to a branch. The quantity leaves the commissary's inventory immediately; it only reaches the destination branch once the order is marked Delivered.</p>
+    <form method="post">
+        {% csrf_token %}
+        <div class="row g-2">
+            <div class="col-md-4">
+                <select name="product_id" class="form-select" required>
+                    <option value="" selected disabled>Select product</option>
+                    {% for p in finished_goods %}
+                    <option value="{{ p.pk }}">{{ p.name }}</option>
+                    {% endfor %}
+                </select>
             </div>
-        </form>
-    </div>
+            <div class="col-md-4">
+                <select name="destination_branch_id" class="form-select" required>
+                    <option value="" selected disabled>Select destination branch</option>
+                    {% for b in destination_branches %}
+                    <option value="{{ b.pk }}">{{ b.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <input type="number" name="quantity" min="1" class="form-control" placeholder="Quantity" required>
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-jc-primary w-100">Dispatch</button>
+            </div>
+        </div>
+    </form>
 </div>
 
 <div class="jc-card p-3 p-md-4">
