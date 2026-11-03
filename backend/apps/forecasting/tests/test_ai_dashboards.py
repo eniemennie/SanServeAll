@@ -125,6 +125,27 @@ class TestGetLatestRiskScores:
         assert len(latest) == 1
         assert latest[0].branch == branch
 
+    def test_excludes_a_discontinued_products_leftover_score(self, branch, latte):
+        """Regression test for the 2026-11-03 finding: a product
+        deactivated AFTER its most recent score was written must not
+        keep showing as that score forever -- run_risk_classification_
+        for_all_inventory already won't write a new one for it, so
+        without this exclusion here too, the stale score would be
+        the "latest" permanently."""
+        InventoryRiskScore.objects.create(
+            branch=branch,
+            product=latte,
+            risk_level="HIGH",
+            quantity_on_hand=0,
+            avg_daily_demand=5.0,
+            days_of_stock_left=0.0,
+        )
+        latte.is_active = False
+        latte.save()
+
+        latest = list(services.get_latest_risk_scores(branch))
+        assert latest == []
+
 
 class TestCalculateRecommendedReorderQuantity:
     def test_zero_demand_recommends_nothing(self):
@@ -184,6 +205,25 @@ class TestGetCriticalAlerts:
         alerts = services.get_critical_alerts(branch)
         assert len(alerts) == 1
         assert alerts[0]["recommended_reorder_quantity"] > 0
+
+    def test_excludes_high_risk_with_zero_reorder_quantity(self, branch, latte):
+        """Regression test for the 2026-11-03 finding: a product never
+        sold at this branch (zero stock, zero demand) is classified
+        HIGH risk by the same rule that flags a genuine stockout, but
+        avg_daily_demand<=0 means calculate_recommended_reorder_quantity
+        always returns 0 for it -- a "critical" alert that recommends
+        ordering nothing isn't actionable and shouldn't be listed. This
+        was ~150 of ~155 rows on the live Decision Support page."""
+        InventoryRiskScore.objects.create(
+            branch=branch,
+            product=latte,
+            risk_level="HIGH",
+            quantity_on_hand=0,
+            avg_daily_demand=0,
+            days_of_stock_left=None,
+        )
+        alerts = services.get_critical_alerts(branch)
+        assert alerts == []
 
 
 class TestGetSlowMovingProducts:
