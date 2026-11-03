@@ -241,8 +241,33 @@ def receipt(request, transaction_id):
         status=SalesTransaction.Status.COMPLETED,
     )
     rawbt_url = printing.build_rawbt_print_url(completed_transaction)
+
+    from apps.system_config.models import BusinessSettings
+
+    business_settings = BusinessSettings.load()
+    # Found during task #48's demo dry-run: the receipt itself never
+    # showed a discount line or a VAT breakdown at all, even though the
+    # pre-payment Order Summary (pos_ordering.html) already computes and
+    # displays both -- a real gap for an SC/PWD sale, where BIR requires
+    # the official receipt to show the VAT-exempt sales breakdown, not
+    # just a lower total with no explanation.
+    vat_exclusive, vat_amount = completed_transaction.vat_breakdown(
+        business_settings.tax_rate_percent
+    )
+    discount_total = (
+        completed_transaction.item_discounts_total
+        + completed_transaction.transaction_discount_value
+    )
     return render(
         request,
         "pos/receipt.html",
-        {"transaction": completed_transaction, "rawbt_url": rawbt_url},
+        {
+            "transaction": completed_transaction,
+            "rawbt_url": rawbt_url,
+            "business_settings": business_settings,
+            "tax_rate_percent": business_settings.tax_rate_percent,
+            "vat_exclusive": vat_exclusive,
+            "vat_amount": vat_amount,
+            "discount_total": discount_total,
+        },
     )
