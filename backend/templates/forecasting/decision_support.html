@@ -35,7 +35,7 @@
 </div>
 {% endif %}
 
-<div class="jc-card p-3 mb-4">
+<div class="jc-card p-3 p-md-4 mb-4">
     <div class="fw-semibold mb-2">Critical Alerts &amp; Restocking Recommendations</div>
     <p class="text-muted small mb-2">
         Based on trailing 30-day actual sales, not the Holt-Winters forecast on the
@@ -62,9 +62,9 @@
     </div>
 </div>
 
-<div class="row g-3">
+<div class="row g-4">
     <div class="col-md-6">
-        <div class="jc-card p-3 h-100">
+        <div class="jc-card p-3 p-md-4 h-100">
             <div class="fw-semibold mb-2">Slow-Moving Products</div>
             <div class="table-responsive">
             <table class="table table-sm mb-0">
@@ -85,7 +85,7 @@
         </div>
     </div>
     <div class="col-md-6">
-        <div class="jc-card p-3 h-100">
+        <div class="jc-card p-3 p-md-4 h-100">
             <div class="fw-semibold mb-2">Peak Hour &amp; Unusual Patterns</div>
             {% if peak_hour %}
             <p class="small">Peak transaction hour: <strong>{{ peak_hour.hour }}:00</strong> ({{ peak_hour.transaction_count }} transactions, last 30 days)</p>

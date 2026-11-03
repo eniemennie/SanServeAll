@@ -43,37 +43,37 @@
 <p class="text-muted small mb-3">Showing data for: <strong>Last {{ days }} Days</strong></p>
 
 <div id="panel-sales" class="report-panel">
-    <div class="row g-3 mb-3">
+    <div class="row g-4 mb-3">
         <div class="col-md-4">
-            <div class="jc-card p-3 text-center">
+            <div class="jc-card p-3 p-md-4 text-center">
                 <div class="text-muted small">Total Revenue</div>
                 <div class="fs-4 fw-bold">&#8369;{{ sales_summary.total_revenue|floatformat:2 }}</div>
             </div>
         </div>
         <div class="col-md-4">
-            <div class="jc-card p-3 text-center">
+            <div class="jc-card p-3 p-md-4 text-center">
                 <div class="text-muted small">Avg Daily Revenue</div>
                 <div class="fs-4 fw-bold">&#8369;{{ sales_summary.average_daily_revenue|floatformat:2 }}</div>
             </div>
         </div>
         <div class="col-md-4">
-            <div class="jc-card p-3 text-center">
+            <div class="jc-card p-3 p-md-4 text-center">
                 <div class="text-muted small">Total Units Sold</div>
                 <div class="fs-4 fw-bold">{{ sales_summary.total_units_sold }}</div>
             </div>
         </div>
     </div>
-    <div class="jc-card p-3">
+    <div class="jc-card p-3 p-md-4">
         <div class="fw-semibold mb-2">Sales &amp; Trend Analysis</div>
         <canvas id="salesTrendChart" height="90"></canvas>
     </div>
 </div>
 
 <div id="panel-products" class="report-panel d-none">
-    <div class="jc-card p-3 mb-3">
+    <div class="jc-card p-3 p-md-4 mb-3">
         <canvas id="productPerformanceChart" height="90"></canvas>
     </div>
-    <div class="jc-card p-3">
+    <div class="jc-card p-3 p-md-4">
         <div class="table-responsive">
         <table class="table table-sm mb-0">
             <thead><tr><th>Product</th><th>This Period</th><th>Previous Period</th><th>Growth</th></tr></thead>
@@ -103,33 +103,33 @@
 </div>
 
 <div id="panel-resources" class="report-panel d-none">
-    <div class="row g-3 mb-3">
+    <div class="row g-4 mb-3">
         <div class="col-md-3">
-            <div class="jc-card p-3 text-center">
+            <div class="jc-card p-3 p-md-4 text-center">
                 <div class="text-muted small">Materials Used</div>
                 <div class="fs-4 fw-bold">{{ consumption.total_units_used }}</div>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="jc-card p-3 text-center">
+            <div class="jc-card p-3 p-md-4 text-center">
                 <div class="text-muted small">Material Cost</div>
                 <div class="fs-4 fw-bold">&#8369;{{ consumption.total_cost|floatformat:2 }}</div>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="jc-card p-3 text-center">
+            <div class="jc-card p-3 p-md-4 text-center">
                 <div class="text-muted small">Units Produced</div>
                 <div class="fs-4 fw-bold">{{ consumption.total_produced }}</div>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="jc-card p-3 text-center">
+            <div class="jc-card p-3 p-md-4 text-center">
                 <div class="text-muted small">Cost per Unit</div>
                 <div class="fs-4 fw-bold">&#8369;{{ consumption.cost_per_unit_produced|floatformat:2 }}</div>
             </div>
         </div>
     </div>
-    <div class="jc-card p-3">
+    <div class="jc-card p-3 p-md-4">
         <div class="table-responsive">
         <table class="table table-sm mb-0">
             <thead><tr><th>Material</th><th>Total Used</th><th>Total Cost</th></tr></thead>
@@ -150,9 +150,9 @@
 </div>
 
 <div id="panel-operational" class="report-panel d-none">
-    <div class="row g-3">
+    <div class="row g-4">
         <div class="col-md-4">
-            <div class="jc-card p-3 text-center">
+            <div class="jc-card p-3 p-md-4 text-center">
                 <div class="text-muted small">Batch Completion Rate</div>
                 <div class="fs-4 fw-bold">
                     {% if operational.completion_rate is not None %}{{ operational.completion_rate|floatformat:1 }}%{% else %}&mdash;{% endif %}
@@ -161,7 +161,7 @@
             </div>
         </div>
         <div class="col-md-4">
-            <div class="jc-card p-3 text-center">
+            <div class="jc-card p-3 p-md-4 text-center">
                 <div class="text-muted small">Quality Pass Rate</div>
                 <div class="fs-4 fw-bold">
                     {% if operational.quality_pass_rate is not None %}{{ operational.quality_pass_rate|floatformat:1 }}%{% else %}&mdash;{% endif %}
@@ -170,7 +170,7 @@
             </div>
         </div>
         <div class="col-md-4">
-            <div class="jc-card p-3 text-center">
+            <div class="jc-card p-3 p-md-4 text-center">
                 <div class="text-muted small">Total Batches</div>
                 <div class="fs-4 fw-bold">{{ operational.total_batches }}</div>
             </div>
