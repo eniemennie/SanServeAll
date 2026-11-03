@@ -82,12 +82,24 @@ def run_risk_classification_for_all_inventory():
     """Entry point for the risk-classification scheduled job (Row 11.1).
     Classifies every Inventory row across every branch and saves the
     results -- the dashboard (Week 11.3) reads these saved rows rather
-    than re-running the classifier on every page load."""
+    than re-running the classifier on every page load.
+
+    Excludes discontinued products (Product.is_active=False), same
+    exclusion get_resource_status_summary already applies -- found
+    missing here on 2026-11-03 when deactivating 5 leftover placeholder
+    MATERIAL products (zero real usage, 0/0 stock/threshold) still left
+    them showing as "Critical" restocking recommendations on the
+    Resource Management page, since that page reads saved
+    InventoryRiskScore rows from this job rather than Inventory
+    directly. A discontinued item shouldn't be recommended for
+    restocking any more than it should count toward Resource Status."""
     from apps.forecasting.ml.risk_classifier import classify_inventory_rows
     from apps.forecasting.models import InventoryRiskScore
     from apps.inventory.models import Inventory
 
-    results = classify_inventory_rows(Inventory.objects.select_related("branch", "product").all())
+    results = classify_inventory_rows(
+        Inventory.objects.select_related("branch", "product").filter(product__is_active=True)
+    )
 
     scores = [
         InventoryRiskScore(

@@ -191,6 +191,22 @@ class TestRunRiskClassificationForAllInventory:
         scores = services.run_risk_classification_for_all_inventory()
         assert scores == []
 
+    def test_excludes_inventory_for_a_discontinued_product(self, branch, latte):
+        # A discontinued product's leftover Inventory row must not be
+        # scored/recommended for restocking -- same exclusion
+        # get_resource_status_summary already applies. Regression test
+        # for the 2026-11-03 finding: deactivating 5 placeholder
+        # materials left them still showing as "Critical" on the
+        # Resource Management page because this job scored them anyway.
+        latte.is_active = False
+        latte.save()
+        Inventory.objects.create(branch=branch, product=latte, quantity_on_hand=0)
+
+        scores = services.run_risk_classification_for_all_inventory()
+
+        assert scores == []
+        assert InventoryRiskScore.objects.count() == 0
+
 
 class TestInsightGenerator:
     def test_no_api_key_falls_back_to_template(self, settings):
