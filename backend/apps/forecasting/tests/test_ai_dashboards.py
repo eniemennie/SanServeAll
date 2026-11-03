@@ -453,6 +453,41 @@ class TestResourceManagementDashboardView:
         )
         assert unscoped_other.context["resource_status"]["critical_count"] == 0
 
+    def test_renders_without_error_when_real_material_consumption_exists(self, owner_client, owner):
+        """Regression test (found via a live demo dry-run against the real
+        imported client dataset, task #48): IngredientUsage.quantity_used
+        is a DecimalField (3 places, to hold exact client-imported amounts
+        like 0.019kg -- see that field's own docstring). The dashboard's
+        per-material consumption chart fed Sum("quantity_used") straight
+        into json.dumps() for its Chart.js payload, which raised
+        `TypeError: Object of type Decimal is not JSON serializable` the
+        moment any real consumption existed. Every other test in this
+        class left consumption empty (no IngredientUsage rows), so an
+        empty category_values list masked the bug -- it only surfaced
+        once real data (e.g. the Production_Records/Ingredient_Usage
+        import) was behind the chart, which is exactly what a unit test
+        with synthetic/empty fixtures won't catch."""
+        from apps.inventory.models import Product as InventoryProduct
+        from apps.production.models import IngredientUsage, ProductionRecord
+
+        flour = InventoryProduct.objects.create(
+            name="Flour (kg)", price="55.00", product_type=InventoryProduct.ProductType.MATERIAL
+        )
+        cake = InventoryProduct.objects.create(name="Chocolate Cake", price="450.00")
+        record = ProductionRecord.objects.create(
+            commissary_staff=owner, product=cake, quantity_produced=10
+        )
+        # The exact decimal precision that broke json.dumps() -- a value
+        # that isn't representable as a clean float literal either,
+        # matching the real client data this was found against.
+        IngredientUsage.objects.create(
+            production_record=record, material=flour, quantity_used="2.375"
+        )
+
+        response = owner_client.get(reverse("forecasting:resource_management_dashboard"))
+        assert response.status_code == 200
+        assert b"2.375" in response.content
+
 
 class TestExportResourceReportView:
     """Export Report button (Resource Management topbar): a CSV mirroring

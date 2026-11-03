@@ -90,7 +90,16 @@ def resource_management_dashboard(request):
     selected_branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
 
     category_labels = [m["material__name"] for m in consumption["by_material"]]
-    category_values = [m["total_used"] for m in consumption["by_material"]]
+    # total_used comes from Sum("quantity_used") over IngredientUsage's
+    # DecimalField -- the aggregate returns Decimal, which json.dumps()
+    # can't serialize on its own (TypeError: Object of type Decimal is
+    # not JSON serializable). Unit tests never caught this because their
+    # fixtures left consumption empty; it only surfaces once there's real
+    # material-usage data behind the chart, e.g. after the real
+    # Production_Records/Ingredient_Usage import -- cast to float for the
+    # Chart.js payload (display-only; every other use of this value keeps
+    # the original Decimal precision).
+    category_values = [float(m["total_used"]) for m in consumption["by_material"]]
 
     return render(
         request,
