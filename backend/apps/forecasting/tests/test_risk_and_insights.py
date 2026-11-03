@@ -174,6 +174,45 @@ class TestClassifyInventoryRows:
         assert by_product["Cake"]["risk_level"] == "LOW"
         assert healthy_inv.quantity_on_hand == 500  # sanity: not mutated
 
+    def test_material_with_real_decimal_consumption_does_not_crash(self, branch):
+        # Regression test for the 2026-11-03 live crash: IngredientUsage.
+        # quantity_used is a Decimal field, so compute_average_daily_demand
+        # returned a Decimal (not a float) for any MATERIAL with real
+        # consumption -- compute_features' `float(quantity_on_hand) /
+        # avg_daily_demand` then raised TypeError: float / Decimal. Never
+        # caught before because the only prior material-with-demand test
+        # (TestComputeAverageDailyDemand) called that function directly,
+        # not through classify_inventory_rows/compute_features, and no
+        # Inventory/IngredientUsage with a fractional quantity_used existed
+        # until the real client import.
+        from decimal import Decimal
+
+        from apps.accounts.models import Branch, Role, User
+        from apps.production.models import IngredientUsage, ProductionRecord
+
+        commissary = Branch.objects.create(name="Commissary", code="COMMISSARY", is_commissary=True)
+        role = Role.objects.create(name=Role.COMMISSARY_STAFF)
+        staff = User.objects.create_user(username="commissary1", password="testpass123", role=role)
+        flour = Product.objects.create(
+            name="Flour (kg)", price="55.00", product_type=Product.ProductType.MATERIAL
+        )
+        cake = Product.objects.create(name="Cake", price="140.00")
+        record = ProductionRecord.objects.create(
+            commissary_staff=staff, product=cake, quantity_produced=10
+        )
+        IngredientUsage.objects.create(
+            production_record=record, material=flour, quantity_used=Decimal("30.5")
+        )
+        inv = Inventory.objects.create(
+            branch=commissary, product=flour, quantity_on_hand=Decimal("10.0")
+        )
+
+        results = classify_inventory_rows(Inventory.objects.filter(pk=inv.pk))
+
+        assert len(results) == 1
+        assert isinstance(results[0]["avg_daily_demand"], float)
+        assert isinstance(results[0]["days_of_stock_left"], float)
+
     def test_days_of_stock_left_is_none_when_no_demand(self, branch, latte):
         Inventory.objects.create(branch=branch, product=latte, quantity_on_hand=50)
         results = classify_inventory_rows(Inventory.objects.filter(branch=branch))
