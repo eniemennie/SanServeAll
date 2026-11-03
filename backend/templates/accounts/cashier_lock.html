@@ -3,12 +3,15 @@
 {% block extra_css %}
 <style>
     body { background-color: var(--jc-cream); }
-    .jc-back-link { color: var(--jc-navy); text-decoration: none; font-weight: 500; }
-    .jc-back-link:hover { color: var(--jc-navy); }
     .jc-lock-card {
         background-color: #fff;
         border-radius: var(--jc-radius);
-        box-shadow: 0 4px 16px rgba(30, 42, 58, 0.08);
+        /* Matches .jc-auth-card's shadow (main.css) -- same "elevated
+           card on cream background" treatment as Admin Login/2FA,
+           cross-role consistency pass Nov 3. Width/padding stay
+           page-specific since this card needs room for the avatar +
+           numeric keypad, unlike the slim auth form. */
+        box-shadow: 0 10px 30px rgba(30, 42, 58, 0.08);
         padding: 3rem;
     }
     .jc-avatar-lg {
@@ -21,34 +24,6 @@
         justify-content: center;
         margin: 0 auto 1rem;
     }
-    .jc-pin-dot {
-        width: 56px;
-        height: 56px;
-        border-radius: 10px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background-color: #E9E9E9;
-    }
-    .jc-pin-dot.filled { background-color: var(--jc-orange); }
-    .jc-pin-dot span {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        background-color: #fff;
-        display: none;
-    }
-    .jc-pin-dot.filled span { display: block; }
-    .jc-key {
-        border: 1px solid #E3E6E9;
-        border-radius: 10px;
-        background-color: #fff;
-        font-size: 1.25rem;
-        padding: 1rem;
-        width: 100%;
-    }
-    .jc-key:hover { background-color: var(--jc-canvas); }
-    .jc-key.jc-key-active { border-color: var(--jc-orange); }
 
     /* 3rem of card padding plus the .container's own gutter left very
        little width for the avatar/keypad columns on a phone screen;
@@ -107,11 +82,11 @@
                     <input type="hidden" name="pin" id="pin-value">
                     <div class="row row-cols-3 g-2 mx-auto" style="max-width: 340px;">
                         {% for digit in "123456789" %}
-                        <div class="col"><button type="button" class="jc-key jc-digit-key" data-digit="{{ digit }}">{{ digit }}</button></div>
+                        <div class="col"><button type="button" class="jc-pin-key jc-digit-key" data-digit="{{ digit }}">{{ digit }}</button></div>
                         {% endfor %}
-                        <div class="col"><button type="button" class="jc-key" id="clear-key">Clear</button></div>
-                        <div class="col"><button type="button" class="jc-key jc-digit-key" data-digit="0">0</button></div>
-                        <div class="col"><button type="button" class="jc-key" id="backspace-key">&#9003;</button></div>
+                        <div class="col"><button type="button" class="jc-pin-key" id="clear-key">Clear</button></div>
+                        <div class="col"><button type="button" class="jc-pin-key jc-digit-key" data-digit="0">0</button></div>
+                        <div class="col"><button type="button" class="jc-pin-key" id="backspace-key">&#9003;</button></div>
                     </div>
                 </form>
             </div>
