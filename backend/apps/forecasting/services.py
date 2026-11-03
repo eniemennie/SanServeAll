@@ -215,15 +215,32 @@ def calculate_recommended_reorder_quantity(avg_daily_demand, quantity_on_hand, t
 
 def get_critical_alerts(branch=None):
     """HIGH-risk items with a recommended reorder quantity attached --
-    the core "automated restocking recommendations" (Fig. 3-21)."""
+    the core "automated restocking recommendations" (Fig. 3-21).
+
+    Skips a HIGH-risk score whose recommended_reorder_quantity is 0.
+    Found live on 2026-11-03: a finished good with zero stock AND zero
+    historical demand at a branch (i.e. a real menu item that simply
+    hasn't launched there yet, not a stockout) is classified HIGH risk
+    by the same "zero stock" rule that flags a genuine stockout --
+    calculate_recommended_reorder_quantity correctly returns 0 for it
+    (avg_daily_demand <= 0 short-circuits to "nothing to order"), but
+    the alert was still being listed as "Critical: Restock Needed"
+    anyway. A critical alert that recommends ordering nothing isn't
+    actionable, so it isn't a real alert -- this affected ~150 of ~155
+    rows on the Decision Support page (every branch x every menu item
+    never yet sold there), compared to the handful of genuine
+    low-stock alerts (e.g. White sugar, 1st class Pacific)."""
     alerts = []
     for score in get_latest_risk_scores(branch).filter(risk_level="HIGH"):
+        recommended_reorder_quantity = calculate_recommended_reorder_quantity(
+            score.avg_daily_demand, score.quantity_on_hand
+        )
+        if recommended_reorder_quantity <= 0:
+            continue
         alerts.append(
             {
                 "score": score,
-                "recommended_reorder_quantity": calculate_recommended_reorder_quantity(
-                    score.avg_daily_demand, score.quantity_on_hand
-                ),
+                "recommended_reorder_quantity": recommended_reorder_quantity,
             }
         )
     return alerts
