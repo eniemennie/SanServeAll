@@ -206,6 +206,25 @@ class TestGetCriticalAlerts:
         assert len(alerts) == 1
         assert alerts[0]["recommended_reorder_quantity"] > 0
 
+    def test_excludes_high_risk_with_zero_reorder_quantity(self, branch, latte):
+        """Regression test for the 2026-11-03 finding: a product never
+        sold at this branch (zero stock, zero demand) is classified
+        HIGH risk by the same rule that flags a genuine stockout, but
+        avg_daily_demand<=0 means calculate_recommended_reorder_quantity
+        always returns 0 for it -- a "critical" alert that recommends
+        ordering nothing isn't actionable and shouldn't be listed. This
+        was ~150 of ~155 rows on the live Decision Support page."""
+        InventoryRiskScore.objects.create(
+            branch=branch,
+            product=latte,
+            risk_level="HIGH",
+            quantity_on_hand=0,
+            avg_daily_demand=0,
+            days_of_stock_left=None,
+        )
+        alerts = services.get_critical_alerts(branch)
+        assert alerts == []
+
 
 class TestGetSlowMovingProducts:
     def test_excludes_out_of_stock_items(self, branch, latte):
