@@ -246,7 +246,7 @@
 
                 <div class="list-group mb-3">
                     {% for item in draft.items.all %}
-                    <div class="list-group-item border-0 px-0">
+                    <div class="list-group-item border-0 px-0 py-2 {% if not forloop.last %}border-bottom{% endif %}">
                         <div class="d-flex justify-content-between">
                             <div>
                                 <strong>{{ item.display_name }}</strong>
