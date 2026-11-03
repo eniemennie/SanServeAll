@@ -1,17 +1,33 @@
 # Production Deployment Notes (PythonAnywhere)
 
-**Current status (as of October 2026): intentionally not deployed.**
+**Current status (as of November 2026): this IS what's deployed.**
 PythonAnywhere's free tier allows exactly one web app per account, and
-the team's one app is the staging deployment -- which already serves as
-the live, real system used for verification, demos, and adviser/client
-review. Standing up a genuinely separate production app would require a
-paid plan (e.g. the "Hacker" tier), which the team has decided isn't
-worth it for a capstone project with no real need for two live
-environments. This file is kept as-is (accurate and ready to follow) in
-case that decision changes later -- e.g. if the system goes into real
-use at Jorge's Café beyond the capstone -- but there is currently no
-second PythonAnywhere app to set up, and `staging` is the branch that
-matters for any live deployment question.
+the team's one app (`sanserveall.pythonanywhere.com`) runs
+`config.settings.production` against `sanserveall_production.sqlite3`
+-- confirmed directly from the live WSGI file and `.env` on 2026-11-03.
+It is the one real, live system used for verification, demos, staff
+logins, and adviser/client review, carrying real production/sales/
+transfer history (see the Nov 3 2026 deployment-gap/500-error incident
+notes in the project's task tracker for how this was confirmed).
+
+Earlier versions of this file described this as "not yet deployed,"
+reasoning that the team's one app was running staging settings instead
+-- that was never actually true in practice: the live app's WSGI config
+and `.env` have set `DJANGO_SETTINGS_MODULE=config.settings.production`
+for as long as can be confirmed, independent of whatever `staging`
+branch state existed at the time. `deployment/staging/notes.md` now
+describes a genuinely unused, aspirational second-app setup (not
+currently needed), rather than this live app.
+
+Standing up a real second PythonAnywhere app for actual staging testing
+would require a paid plan (e.g. the "Hacker" tier), which the team has
+decided isn't worth it for a capstone project.
+
+Which git branch this app's working directory tracks (confirmed
+`staging` as of the Nov 3 2026 deploy-catch-up, commit `10b32b2`) is a
+separate question from which Django settings module it runs
+(`production`, confirmed above) -- don't assume these always point the
+same direction without checking both directly.
 
 Promotion flow: only deploy here via a merged `staging -> main` PR (Phase 5),
 verified on staging first, ideally during low-traffic hours (after closing).

@@ -1,4 +1,13 @@
-# Staging Deployment Notes (PythonAnywhere)
+# Staging Deployment Notes (PythonAnywhere) -- currently unused
+
+**As of November 2026: no second PythonAnywhere app exists, and this
+file describes a setup that was never actually built.** The team's one
+real app (`sanserveall.pythonanywhere.com`) runs
+`config.settings.production` against `sanserveall_production.sqlite3`
+-- see `deployment/production/notes.md` for what's actually live. This
+file is kept for if/when a genuinely separate staging app is ever
+needed (would require a paid PythonAnywhere plan); follow it fresh at
+that point rather than assuming anything here already happened.
 
 1. Create a second PythonAnywhere web app dedicated to staging. No separate
    database to create -- the app uses SQLite (see `env.staging.example`'s
