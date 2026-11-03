@@ -125,6 +125,27 @@ class TestGetLatestRiskScores:
         assert len(latest) == 1
         assert latest[0].branch == branch
 
+    def test_excludes_a_discontinued_products_leftover_score(self, branch, latte):
+        """Regression test for the 2026-11-03 finding: a product
+        deactivated AFTER its most recent score was written must not
+        keep showing as that score forever -- run_risk_classification_
+        for_all_inventory already won't write a new one for it, so
+        without this exclusion here too, the stale score would be
+        the "latest" permanently."""
+        InventoryRiskScore.objects.create(
+            branch=branch,
+            product=latte,
+            risk_level="HIGH",
+            quantity_on_hand=0,
+            avg_daily_demand=5.0,
+            days_of_stock_left=0.0,
+        )
+        latte.is_active = False
+        latte.save()
+
+        latest = list(services.get_latest_risk_scores(branch))
+        assert latest == []
+
 
 class TestCalculateRecommendedReorderQuantity:
     def test_zero_demand_recommends_nothing(self):
