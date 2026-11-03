@@ -219,6 +219,19 @@ class InventoryTransaction(models.Model):
         # separately from TRANSFER_OUT/IN so the audit trail shows a
         # cancellation happened, not an ordinary second transfer.
         TRANSFER_CANCELLED = "TRANSFER_CANCELLED", "Transfer Cancelled"
+        # Task #104: the historical client import (Production_Records.xlsx,
+        # Stock_Transfer.xlsx) never touched Inventory at all (see those
+        # import commands' own docstrings), which left every branch's
+        # finished-goods Inventory at zero. backfill_finished_goods_inventory
+        # replays that history through this same Inventory/InventoryTransaction
+        # model, reconstructing real production-output and stock-transfer
+        # movements -- but it is a one-off reconstruction run long after the
+        # fact, not a live event a commissary/branch staffer actually recorded
+        # in real time. Logged under its own type (rather than reusing
+        # PRODUCTION_OUTPUT/TRANSFER_OUT/TRANSFER_IN) so: (1) the audit trail
+        # never misrepresents this as a real-time staff action, and (2) this
+        # command can detect its own prior run and refuse to double-apply.
+        HISTORICAL_BACKFILL = "HISTORICAL_BACKFILL", "Historical Backfill"
 
     branch = models.ForeignKey("accounts.Branch", on_delete=models.PROTECT)
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
