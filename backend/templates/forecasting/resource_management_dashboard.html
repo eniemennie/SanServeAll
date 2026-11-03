@@ -34,42 +34,54 @@
     </div>
 </div>
 
-<div class="row g-3 mb-4">
+<div class="row g-4 mb-4">
     <div class="col-md-3">
-        <div class="jc-card p-3 text-center">
+        <div class="jc-card p-3 p-md-4 text-center">
+            <div class="jc-icon-chip jc-icon-chip-orange mx-auto mb-3">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+            </div>
             <div class="text-muted small">Materials Used (30d)</div>
             <div class="fs-4 fw-bold">{{ consumption.total_units_used }}</div>
         </div>
     </div>
     <div class="col-md-3">
-        <div class="jc-card p-3 text-center">
+        <div class="jc-card p-3 p-md-4 text-center">
+            <div class="jc-icon-chip jc-icon-chip-teal mx-auto mb-3">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+            </div>
             <div class="text-muted small">Total Cost</div>
             <div class="fs-4 fw-bold">&#8369;{{ consumption.total_cost|floatformat:2 }}</div>
         </div>
     </div>
     <div class="col-md-3">
-        <div class="jc-card p-3 text-center">
+        <div class="jc-card p-3 p-md-4 text-center">
+            <div class="jc-icon-chip jc-icon-chip-sage mx-auto mb-3">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+            </div>
             <div class="text-muted small">Units Produced</div>
             <div class="fs-4 fw-bold">{{ consumption.total_produced }}</div>
         </div>
     </div>
     <div class="col-md-3">
-        <div class="jc-card p-3 text-center">
+        <div class="jc-card p-3 p-md-4 text-center">
+            <div class="jc-icon-chip jc-icon-chip-orange mx-auto mb-3">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>
+            </div>
             <div class="text-muted small">Cost per Unit</div>
             <div class="fs-4 fw-bold">&#8369;{{ consumption.cost_per_unit_produced|floatformat:2 }}</div>
         </div>
     </div>
 </div>
 
-<div class="row g-3 mb-4">
+<div class="row g-4 mb-4">
     <div class="col-md-6">
-        <div class="jc-card p-3 h-100">
+        <div class="jc-card p-3 p-md-4 h-100">
             <div class="fw-semibold mb-2">Material Consumption by Category</div>
             <canvas id="materialPieChart" height="200"></canvas>
         </div>
     </div>
     <div class="col-md-6">
-        <div class="jc-card p-3 h-100">
+        <div class="jc-card p-3 p-md-4 h-100">
             <div class="fw-semibold mb-2">AI-Driven Restocking Recommendations (Materials)</div>
             <p class="text-muted small mb-2">
                 Based on trailing 30-day actual usage, not the Holt-Winters demand forecast.
@@ -98,7 +110,7 @@
     </div>
 </div>
 
-<div class="jc-card p-3">
+<div class="jc-card p-3 p-md-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
         <div class="fw-semibold">Finished-Goods Stock Health</div>
         <form method="get" style="min-width: 220px;">
