@@ -264,6 +264,15 @@ def create_product(
     if not name:
         raise InventoryServiceError("Product name is required.")
 
+    # Task #111: Product.name has a DB-level case-insensitive uniqueness
+    # constraint among active products (unique_active_product_name_ci).
+    # Checked here too, ahead of the actual insert, so a duplicate shows up
+    # as this function's own clear InventoryServiceError (same as every
+    # other validation failure in this function) rather than a raw
+    # IntegrityError the view's except clause doesn't catch.
+    if Product.objects.filter(name__iexact=name, is_active=True).exists():
+        raise InventoryServiceError(f"A product named '{name}' already exists.")
+
     if unit_of_measure:
         valid_units = {choice.value for choice in Product.UnitOfMeasure}
         if unit_of_measure not in valid_units:

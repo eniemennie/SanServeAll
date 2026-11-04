@@ -10,6 +10,7 @@ behavior stay valid unchanged.
 
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.db.models.functions import Lower
 
 
 class Product(models.Model):
@@ -86,6 +87,31 @@ class Product(models.Model):
 
     class Meta:
         ordering = ["name"]
+        constraints = [
+            # Task #111 (backend gap assessment): nothing previously stopped
+            # two products sharing a name -- found live as a real duplicate
+            # pair ("Seasalt Latte", ids 3/4), resolved by deactivating the
+            # orphaned one rather than deleting it. Scoped to is_active=True
+            # (a partial unique index, same idiom as
+            # accounts.Branch.is_kahero_branch's own constraint) rather than
+            # a blanket constraint, for two reasons: (1) it must coexist
+            # with exactly that already-resolved live pair -- a blanket
+            # constraint would fail to even apply as a migration against
+            # that real data, since both rows carry the literal identical
+            # name regardless of is_active; (2) discontinuing a product and
+            # later introducing a genuine replacement under the same name
+            # is a legitimate catalog change, not a duplicate. Case-
+            # insensitive (via Lower()) because kahero_integration's own
+            # import matching (_resolve_product) already treats "Flour" and
+            # "flour" as the same product -- two active rows differing only
+            # by case would be exactly the kind of ambiguous pair that
+            # pipeline can't disambiguate.
+            models.UniqueConstraint(
+                Lower("name"),
+                condition=models.Q(is_active=True),
+                name="unique_active_product_name_ci",
+            ),
+        ]
 
     def __str__(self):
         return self.name
