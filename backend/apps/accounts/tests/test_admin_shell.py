@@ -104,6 +104,85 @@ class TestAdminShell:
         assert 'data-expanded="true"' in content
 
 
+class TestIncludeAdditionalSalesToggle:
+    """Task #139 (client review, 2026-11-04): a browser never submits an
+    unchecked checkbox's name/value at all, so unchecking "Include
+    Additional Sales" previously left the "additional" query param
+    entirely absent -- indistinguishable, to the view's own
+    request.GET.get("additional", "1") default, from it being checked.
+    The switch could turn on but never actually turn off. Fixed via a
+    hidden "additional=0" field in the template (see
+    admin_dashboard.html); these tests cover the real end-to-end
+    behavior, not just the view's own param parsing (which was already
+    correct for an explicit "0" -- the bug was that the browser could
+    never produce one)."""
+
+    def test_hidden_fallback_field_present_so_unchecking_can_submit_off(self, authed_client):
+        content = authed_client.get(reverse("accounts:admin_dashboard")).content.decode()
+        assert '<input type="hidden" name="additional" value="0">' in content
+
+    def test_toggling_off_excludes_additional_sales_from_total_revenue(
+        self, authed_client, branches, admin
+    ):
+        from apps.pos.models import SalesItem, SalesTransaction
+
+        branch = branches[0]
+        catalog_product = Product.objects.create(name="Spanish Latte", price="125.00")
+
+        from django.utils import timezone
+
+        catalog_txn = SalesTransaction.objects.create(
+            branch=branch,
+            cashier=admin,
+            status=SalesTransaction.Status.COMPLETED,
+            payment_method=SalesTransaction.PaymentMethod.CASH,
+            amount_tendered="125.00",
+            completed_at=timezone.now(),
+        )
+        SalesItem.objects.create(
+            transaction=catalog_txn, product=catalog_product, unit_price="125.00", quantity=1
+        )
+
+        additional_txn = SalesTransaction.objects.create(
+            branch=branch,
+            cashier=admin,
+            status=SalesTransaction.Status.COMPLETED,
+            payment_method=SalesTransaction.PaymentMethod.CASH,
+            amount_tendered="300.00",
+            completed_at=timezone.now(),
+        )
+        SalesItem.objects.create(
+            transaction=additional_txn,
+            product=None,
+            custom_name="Off-menu item",
+            unit_price="300.00",
+            quantity=1,
+        )
+
+        # Selecting a single branch both isolates the Total Revenue card
+        # from the (un-toggled) Branch Performance Overview section --
+        # which is hidden once a branch is selected -- and matches how
+        # an admin would actually use this toggle in practice.
+
+        # Default (no "additional" param at all, matching a fresh page
+        # load / branch selection): additional sales are included, same
+        # as before this fix.
+        default_content = authed_client.get(
+            reverse("accounts:admin_dashboard"), {"branch": branch.pk}
+        ).content.decode()
+        assert "&#8369;425" in default_content
+
+        # The real bug: submitting the form with the checkbox unchecked.
+        # A browser omits "additional" entirely in that case; the hidden
+        # field now supplies "0" instead, which must actually exclude
+        # the off-menu sale.
+        toggled_off_content = authed_client.get(
+            reverse("accounts:admin_dashboard"), {"branch": branch.pk, "additional": "0"}
+        ).content.decode()
+        assert "&#8369;125" in toggled_off_content
+        assert "&#8369;425" not in toggled_off_content
+
+
 class TestNoTemplateSyntaxLeaksIntoPages:
     """Regression: Django's {# ... #} comment only works on a SINGLE line.
     A multi-line one in admin_base.html was not treated as a comment and
