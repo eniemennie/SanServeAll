@@ -18,8 +18,9 @@ class TestFit:
     def test_returns_expected_keys(self):
         y = np.tile([1.0, 2.0, 3.0, 4.0, 5.0, 4.0, 2.0], 4)  # 4 clean weekly cycles
         result = holt_winters.fit(y, m=7)
-        assert set(result.keys()) == {"level", "trend", "seasonal", "m"}
+        assert set(result.keys()) == {"level", "trend", "seasonal", "m", "n"}
         assert result["m"] == 7
+        assert result["n"] == len(y)
         assert len(result["seasonal"]) == 7
 
     def test_handles_a_perfectly_flat_series_without_crashing(self):
@@ -81,3 +82,46 @@ class TestForecast:
         fit_result = holt_winters.fit(y, m=7)
         forecast = holt_winters.forecast(fit_result, steps=steps)
         assert len(forecast) == steps
+
+    def test_continues_the_seasonal_cycle_from_where_the_data_actually_ended(self):
+        """Regression test for the phase-alignment bug found during the
+        pre-adviser-meeting verification pass (2026-11-04): every prior
+        test here used np.tile(pattern, k) -- always an exact multiple
+        of m=7 -- which hid a bug where forecast() unconditionally
+        restarted the weekly cycle at phase 0 on the first forecast
+        step, no matter which day of the week the fitted series actually
+        ended on. Production always fits a fixed 90-day window
+        (build_daily_sales_series), and 90 % 7 == 6, not 0, so this was
+        live on every real forecast, not just a theoretical edge case.
+
+        Uses a 90-day series (production's real window length) built
+        from a clean, no-trend weekly pattern with one standout day, so
+        the correct forecast is unambiguous: it must continue rotating
+        the same pattern from the day immediately after the last
+        observed one, not jump back to the pattern's first entry.
+        """
+        pattern = [1.0, 1.0, 2.0, 2.0, 2.0, 2.0, 9.0]  # one standout day (index 6)
+        y = np.tile(pattern, 13)[:90]  # 90 days, same as build_daily_sales_series
+        fit_result = holt_winters.fit(y, m=7)
+        forecast = holt_winters.forecast(fit_result, steps=7)
+
+        # len(y) == 90, so the first forecast step continues at phase
+        # 90 % 7 == 6 -- i.e. the standout day should land FIRST in the
+        # forecast, not last (which is what the old, buggy formula would
+        # have produced for this exact series).
+        assert forecast[0] == max(forecast)
+        assert forecast[0] > forecast[1]
+
+    def test_phase_alignment_formula_reduces_to_the_original_when_n_is_a_multiple_of_m(self):
+        """When len(y) IS an exact multiple of m (every pre-existing
+        test's case), the fixed formula must produce exactly the same
+        result as before -- confirming the fix is additive, not a
+        behavior change for the cases that were already passing."""
+        y = np.tile([1.0, 2.0, 3.0, 4.0, 5.0, 4.0, 2.0], 4)  # 28 days, 28 % 7 == 0
+        fit_result = holt_winters.fit(y, m=7)
+        forecast = holt_winters.forecast(fit_result, steps=7)
+        # With n % m == 0, step h=1 must align to seasonal[0], same as
+        # the original (unfixed) formula would have given.
+        assert forecast[0] == pytest.approx(
+            fit_result["level"] + 1 * fit_result["trend"] + fit_result["seasonal"][0]
+        )
