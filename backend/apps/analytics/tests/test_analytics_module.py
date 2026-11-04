@@ -4,7 +4,7 @@ Performance (Row 9.2), Resource Consumption & Operational Performance
 (Row 9.3).
 """
 
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -661,3 +661,197 @@ class TestReportsHubView:
 
         with pytest.raises(NoReverseMatch):
             reverse("analytics:operational_performance")
+
+    def test_custom_date_range_narrows_sales_summary(self, owner_client, branch, cashier, latte):
+        """Task #146 (client review, 2026-11-04): an explicit date_from/
+        date_to range should scope the Sales Summary to exactly that
+        calendar range, independent of `days` and independent of
+        "now" -- a sale outside the requested range must not count,
+        and a sale inside it must."""
+        in_range = _completed_sale(
+            branch,
+            cashier,
+            latte,
+            quantity=1,
+            unit_price="125.00",
+            amount_tendered="125.00",
+            when=timezone.make_aware(datetime(2026, 11, 6, 10, 0)),
+        )
+        _completed_sale(
+            branch,
+            cashier,
+            latte,
+            quantity=5,
+            unit_price="125.00",
+            amount_tendered="625.00",
+            when=timezone.make_aware(datetime(2026, 10, 1, 10, 0)),
+        )
+
+        response = owner_client.get(
+            reverse("analytics:reports_hub"),
+            {"date_from": "2026-11-06", "date_to": "2026-11-07"},
+        )
+        assert response.status_code == 200
+        assert response.context["using_custom_range"] is True
+        assert response.context["sales_summary"]["total_revenue"] == in_range.grand_total
+        assert response.context["sales_summary"]["total_units_sold"] == 1
+
+    def test_invalid_date_format_shows_error_and_falls_back_to_days(
+        self, owner_client, branch, cashier, latte
+    ):
+        _completed_sale(
+            branch, cashier, latte, quantity=1, unit_price="125.00", amount_tendered="125.00"
+        )
+
+        response = owner_client.get(reverse("analytics:reports_hub"), {"date_from": "not-a-date"})
+        assert response.status_code == 200
+        assert "YYYY-MM-DD" in response.context["date_error"]
+        # An invalid range isn't a blank page -- it falls back to the
+        # ordinary `days` preset rather than hiding real data.
+        assert response.context["using_custom_range"] is False
+        assert response.context["sales_summary"]["total_units_sold"] == 1
+
+    def test_from_date_after_to_date_shows_error(self, owner_client):
+        response = owner_client.get(
+            reverse("analytics:reports_hub"),
+            {"date_from": "2026-11-07", "date_to": "2026-11-01"},
+        )
+        assert response.status_code == 200
+        assert "on or before" in response.context["date_error"]
+        assert response.context["using_custom_range"] is False
+
+    def test_no_custom_range_given_uses_days_preset_as_before(
+        self, owner_client, branch, cashier, latte
+    ):
+        response = owner_client.get(reverse("analytics:reports_hub"), {"days": 7})
+        assert response.context["using_custom_range"] is False
+        assert response.context["days"] == 7
+
+    def test_trend_chart_ignores_the_custom_range_by_design(
+        self, owner_client, branch, cashier, latte
+    ):
+        """Documented scope boundary: get_weekly_sales_trend deliberately
+        does not take date_from/date_to, so the chart data shouldn't
+        change based on the custom-range querystring."""
+        without_range = owner_client.get(reverse("analytics:reports_hub"))
+        with_range = owner_client.get(
+            reverse("analytics:reports_hub"),
+            {"date_from": "2026-11-06", "date_to": "2026-11-07"},
+        )
+        assert without_range.context["trend_labels_json"] == with_range.context["trend_labels_json"]
+
+
+class TestResolveReportWindowAndServicesWithExplicitDateRange:
+    """Task #146 (client review, 2026-11-04): service-level coverage for
+    the explicit date_from/date_to range, independent of the view."""
+
+    def test_get_sales_summary_uses_exact_calendar_range(self, branch, cashier, latte):
+        in_range = _completed_sale(
+            branch,
+            cashier,
+            latte,
+            quantity=1,
+            unit_price="125.00",
+            amount_tendered="125.00",
+            when=timezone.make_aware(datetime(2026, 11, 6, 23, 59)),
+        )
+        _completed_sale(
+            branch,
+            cashier,
+            latte,
+            quantity=3,
+            unit_price="125.00",
+            amount_tendered="375.00",
+            when=timezone.make_aware(datetime(2026, 11, 8, 0, 0)),
+        )
+
+        summary = services.get_sales_summary(date_from=date(2026, 11, 6), date_to=date(2026, 11, 7))
+        assert summary["total_revenue"] == in_range.grand_total
+        assert summary["total_units_sold"] == 1
+        # average_daily_revenue divides by the 2 actual days in the
+        # explicit range (Nov 6 + Nov 7), not the unrelated `days` default.
+        assert summary["average_daily_revenue"] == pytest.approx(float(in_range.grand_total) / 2)
+
+    def test_get_sales_summary_date_range_beats_days_when_both_given(self, branch, cashier, latte):
+        """An explicit, valid date range always wins over `days` -- the
+        two are mutually exclusive request shapes, not combined."""
+        in_range = _completed_sale(
+            branch,
+            cashier,
+            latte,
+            quantity=1,
+            unit_price="125.00",
+            amount_tendered="125.00",
+            when=timezone.make_aware(datetime(2026, 11, 6, 10, 0)),
+        )
+        summary = services.get_sales_summary(
+            days=1, date_from=date(2026, 11, 6), date_to=date(2026, 11, 7)
+        )
+        assert summary["total_revenue"] == in_range.grand_total
+
+    def test_get_product_performance_current_and_previous_windows_from_explicit_range(
+        self, branch, cashier
+    ):
+        espresso = Product.objects.create(name="Espresso", price="90.00")
+        current = _completed_sale(
+            branch,
+            cashier,
+            espresso,
+            quantity=4,
+            unit_price="90.00",
+            amount_tendered="360.00",
+            when=timezone.make_aware(datetime(2026, 11, 6, 10, 0)),
+        )
+        # Same-length window immediately before the requested range --
+        # must be picked up as "previous", not ignored.
+        _completed_sale(
+            branch,
+            cashier,
+            espresso,
+            quantity=2,
+            unit_price="90.00",
+            amount_tendered="180.00",
+            when=timezone.make_aware(datetime(2026, 11, 4, 10, 0)),
+        )
+        del current
+
+        rows = services.get_product_performance(
+            date_from=date(2026, 11, 6), date_to=date(2026, 11, 7)
+        )
+        espresso_row = next(r for r in rows if r["product_name"] == "Espresso")
+        assert espresso_row["current_units"] == 4
+        assert espresso_row["previous_units"] == 2
+
+    def test_get_resource_consumption_summary_respects_explicit_range(self):
+        role = Role.objects.create(name=Role.COMMISSARY_STAFF)
+        staff = User.objects.create_user(username="commissary2", password="testpass123", role=role)
+        flour = Product.objects.create(
+            name="Flour (kg)", price="55.00", product_type=Product.ProductType.MATERIAL
+        )
+        cake = Product.objects.create(name="Cake", price="140.00")
+
+        in_range_record = ProductionRecord.objects.create(
+            commissary_staff=staff, product=cake, quantity_produced=10
+        )
+        ProductionRecord.objects.filter(pk=in_range_record.pk).update(
+            created_at=timezone.make_aware(datetime(2026, 11, 6, 10, 0))
+        )
+        IngredientUsage.objects.create(
+            production_record=in_range_record, material=flour, quantity_used=5
+        )
+
+        out_of_range_record = ProductionRecord.objects.create(
+            commissary_staff=staff, product=cake, quantity_produced=99
+        )
+        ProductionRecord.objects.filter(pk=out_of_range_record.pk).update(
+            created_at=timezone.make_aware(datetime(2026, 9, 1, 10, 0))
+        )
+        IngredientUsage.objects.create(
+            production_record=out_of_range_record, material=flour, quantity_used=50
+        )
+
+        summary = services.get_resource_consumption_summary(
+            date_from=date(2026, 11, 6), date_to=date(2026, 11, 7)
+        )
+        assert summary["total_units_used"] == 5
+        assert summary["total_produced"] == 10

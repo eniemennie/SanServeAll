@@ -4,7 +4,7 @@ over data that already exists in pos, inventory, and production -- no new
 models, this module only reports on what other modules already record.
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from django.db.models import F, Max, Sum
@@ -62,7 +62,38 @@ def _trailing_window_anchor(branch=None):
     return min(timezone.now(), latest + timedelta(seconds=1))
 
 
-def get_sales_summary(branch=None, days=30):
+def _resolve_report_window(days=30, date_from=None, date_to=None, branch=None):
+    """Resolves the (since, until) datetime bounds for a report-style
+    query, as an EXCLUSIVE upper bound on `until` (matching every
+    caller's own completed_at__lt / created_at__lt convention).
+
+    Task #146 (client review, 2026-11-04): "Users should be able to
+    select a specific date range... rather than being limited to preset
+    reporting periods." When BOTH date_from and date_to (plain python
+    date objects) are given, the window is exactly that explicit
+    calendar range -- the whole of date_from's day through the whole of
+    date_to's day, inclusive -- regardless of "now" or any branch's own
+    latest activity. This is a genuinely different shape of query than
+    "trailing N days": an admin can ask for a short, arbitrary, past
+    range (the client's own example: "November 6-7") that has nothing
+    to do with today.
+
+    Otherwise falls back to the existing trailing-N-days-from-anchor
+    behavior (see _trailing_window_anchor), unchanged from before this
+    function existed -- every caller that doesn't pass date_from/
+    date_to behaves exactly as it did previously.
+    """
+    if date_from and date_to:
+        since = timezone.make_aware(datetime.combine(date_from, datetime.min.time()))
+        until = timezone.make_aware(datetime.combine(date_to, datetime.min.time())) + timedelta(
+            days=1
+        )
+        return since, until
+    anchor = _trailing_window_anchor(branch)
+    return anchor - timedelta(days=days), anchor
+
+
+def get_sales_summary(branch=None, days=30, date_from=None, date_to=None):
     """Overview numbers for the Sales/Analytics Dashboard (Fig. 3-19,
     3-28): total revenue, transaction count, units sold, average daily
     revenue over the given window.
@@ -84,10 +115,15 @@ def get_sales_summary(branch=None, days=30):
     discount math isn't expressible as a plain SUM() -- a percent
     discount is computed against each transaction's own subtotal, not a
     column that can be summed first and discounted after.
+
+    Accepts an explicit date_from/date_to range (task #146) as an
+    alternative to `days` -- see _resolve_report_window. When given,
+    `average_daily_revenue` divides by the actual number of days in
+    that range rather than the unrelated `days` parameter.
     """
-    since = _trailing_window_anchor(branch) - timedelta(days=days)
+    since, until = _resolve_report_window(days, date_from, date_to, branch)
     transactions = SalesTransaction.objects.filter(
-        status=SalesTransaction.Status.COMPLETED, completed_at__gte=since
+        status=SalesTransaction.Status.COMPLETED, completed_at__gte=since, completed_at__lt=until
     )
     if branch is not None:
         transactions = transactions.filter(branch=branch)
@@ -96,7 +132,8 @@ def get_sales_summary(branch=None, days=30):
     total_revenue = sum((txn.grand_total for txn in transactions), Decimal("0.00"))
     total_transactions = len(transactions)
     total_units_sold = sum((item.quantity for txn in transactions for item in txn.items.all()), 0)
-    average_daily_revenue = (total_revenue / days) if days else Decimal("0")
+    window_days = (date_to - date_from).days + 1 if (date_from and date_to) else days
+    average_daily_revenue = (total_revenue / window_days) if window_days else Decimal("0")
 
     return {
         "total_revenue": total_revenue,
@@ -362,14 +399,18 @@ def get_total_units_sold(branch=None, days=30):
     return items.aggregate(total=Sum("quantity"))["total"] or 0
 
 
-def get_product_performance(days=30):
+def get_product_performance(days=30, date_from=None, date_to=None):
     """Per-product performance and growth rate (Fig. 3-29): units sold in
     the current window vs. the equally-sized window immediately before
     it. Products with no sales in either window are omitted -- a 0-to-0
-    "growth rate" is meaningless noise, not a real signal."""
-    now = timezone.now()
-    current_start = now - timedelta(days=days)
-    previous_start = current_start - timedelta(days=days)
+    "growth rate" is meaningless noise, not a real signal.
+
+    Accepts an explicit date_from/date_to range (task #146) as an
+    alternative to `days` -- the "current" window becomes exactly that
+    range, and "previous" is the immediately-preceding window of the
+    same length, same as the days-based behavior."""
+    current_start, now = _resolve_report_window(days, date_from, date_to)
+    previous_start = current_start - (now - current_start)
 
     def _units_sold_in_range(start, end):
         return (
@@ -412,13 +453,18 @@ def get_product_performance(days=30):
     return sorted(results, key=lambda r: r["current_units"], reverse=True)
 
 
-def get_resource_consumption_summary(days=30):
+def get_resource_consumption_summary(days=30, date_from=None, date_to=None):
     """Resource Consumption Analytics (Fig. 3-30): total materials used,
     total material cost, and cost broken down per finished good produced
     -- all derived from Production's own IngredientUsage records, not a
-    separate tracking system."""
-    since = timezone.now() - timedelta(days=days)
-    usages = IngredientUsage.objects.filter(production_record__created_at__gte=since)
+    separate tracking system.
+
+    Accepts an explicit date_from/date_to range (task #146) as an
+    alternative to `days` -- see _resolve_report_window."""
+    since, until = _resolve_report_window(days, date_from, date_to)
+    usages = IngredientUsage.objects.filter(
+        production_record__created_at__gte=since, production_record__created_at__lt=until
+    )
 
     total_units_used = usages.aggregate(total=Sum("quantity_used"))["total"] or 0
     total_cost = usages.aggregate(total=Sum(F("quantity_used") * F("material__price")))[
@@ -426,7 +472,7 @@ def get_resource_consumption_summary(days=30):
     ] or Decimal("0")
 
     total_produced = (
-        ProductionRecord.objects.filter(created_at__gte=since).aggregate(
+        ProductionRecord.objects.filter(created_at__gte=since, created_at__lt=until).aggregate(
             total=Sum("quantity_produced")
         )["total"]
         or 0
@@ -452,14 +498,17 @@ def get_resource_consumption_summary(days=30):
     }
 
 
-def get_operational_performance_summary(days=30):
+def get_operational_performance_summary(days=30, date_from=None, date_to=None):
     """Operational Performance (Fig. 3-31): batch completion rate and
     quality pass rate over the window. Average production TIME is
     deliberately not reported here -- ProductionRecord doesn't track a
     start/end duration distinct from created_at, so fabricating a number
-    for it would be reporting something we don't actually measure."""
-    since = timezone.now() - timedelta(days=days)
-    records = ProductionRecord.objects.filter(created_at__gte=since)
+    for it would be reporting something we don't actually measure.
+
+    Accepts an explicit date_from/date_to range (task #146) as an
+    alternative to `days` -- see _resolve_report_window."""
+    since, until = _resolve_report_window(days, date_from, date_to)
+    records = ProductionRecord.objects.filter(created_at__gte=since, created_at__lt=until)
 
     total_batches = records.count()
     completed_batches = records.filter(status=ProductionRecord.Status.COMPLETED).count()
