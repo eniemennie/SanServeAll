@@ -45,6 +45,16 @@
             <form method="get" class="small border-top pt-2 mt-2">
                 <input type="hidden" name="branch" value="{{ selected_branch.pk|default:'' }}">
                 <div class="form-check form-switch">
+                    {# A browser never submits an unchecked checkbox's name/value at #}
+                    {# all, so unchecking this previously left "additional" absent from #}
+                    {# the request, and the view's own request.GET.get("additional", "1") #}
+                    {# default of "1" made it look identical to checked -- the switch #}
+                    {# could turn on but never actually turn off. This hidden field #}
+                    {# before the checkbox supplies the real "0" whenever the checkbox #}
+                    {# itself is unchecked (Django's QueryDict.get() returns the LAST #}
+                    {# value for a repeated name, so the checkbox's own "1" still wins #}
+                    {# when it IS checked, since it appears after this in the form). #}
+                    <input type="hidden" name="additional" value="0">
                     <input class="form-check-input" type="checkbox" name="additional" value="1" id="incAdd"
                            {% if include_additional_sales %}checked{% endif %} onchange="this.form.submit()">
                     <label class="form-check-label" for="incAdd">Include Additional Sales</label>
