@@ -140,13 +140,30 @@ class SalesTransaction(models.Model):
     def transaction_discount_value(self):
         """The actual peso value of the transaction-wide discount (Row 3
         redesign, "% Discount"), capped so it can never exceed the
-        subtotal it's being applied to."""
+        subtotal it's being applied to.
+
+        Live-site finding (2026-11-04, caught on a real POS screenshot
+        the night before the adviser meeting): a PERCENT discount's value
+        was never rounded to 2 decimal places -- Decimal division/
+        multiplication preserves extra precision from its operands (e.g.
+        Decimal('20.00') / Decimal('100') = Decimal('0.2000'), 4 decimal
+        places), so a 20% discount on Rs457.60 produced
+        Decimal('91.5200') here, which then carried straight through into
+        grand_total (457.60 - 91.5200 = 366.0800) and on screen as
+        "Grand Total : P366.0800" instead of "P366.08". quantize()d here,
+        at the one place this value is computed, so every caller
+        (grand_total, change_due, vat_breakdown, and every template that
+        renders grand_total without its own floatformat) inherits a
+        clean 2-decimal-place peso amount rather than each needing its
+        own rounding.
+        """
         if not self.transaction_discount_amount or not self.transaction_discount_category:
             return Decimal("0.00")
 
         subtotal = self.total_amount
         if self.transaction_discount_type == "PERCENT":
             value = subtotal * (self.transaction_discount_amount / Decimal("100"))
+            value = value.quantize(Decimal("0.01"))
         else:
             value = self.transaction_discount_amount
         return min(value, subtotal)

@@ -116,6 +116,35 @@ class TestGrandTotalAndDiscountMath:
         services.apply_transaction_discount(draft, "SC2", "PERCENT", "20")
         assert draft.grand_total == Decimal("100.00")  # 125 - 20%
 
+    def test_transaction_discount_percent_value_has_exactly_two_decimal_places(self, draft, item):
+        """Live-site finding (2026-11-04, caught on a real POS screenshot
+        the night before the adviser meeting): the test right above this
+        one (`..._reduces_grand_total`) looked like it already covered
+        this exact math, but `==` on two Decimals compares VALUE, not
+        representation -- Decimal('100.000') == Decimal('100.00') is
+        True in Python, so that test could never have caught a precision
+        regression. The template renders grand_total with str(), which
+        DOES show the extra digits -- that's what actually showed up
+        on screen as "Grand Total : P366.0800" instead of "P366.08" for
+        a real transaction. Checking the exponent directly here is the
+        only way to actually catch this."""
+        services.apply_transaction_discount(draft, "SC2", "PERCENT", "20")
+        assert draft.transaction_discount_value.as_tuple().exponent == -2
+        assert draft.grand_total.as_tuple().exponent == -2
+
+    def test_reproduces_the_exact_live_discount_rounding_bug(self, draft, branch):
+        """The exact real-world numbers from the live-site screenshot
+        that surfaced this bug: a P457.60 subtotal with a 20% whole-
+        order discount (SC2) must show a grand total of exactly
+        P366.08, not P366.0800."""
+        product = Product.objects.create(name="Almond (7in Square)", price=Decimal("457.60"))
+        Inventory.objects.create(branch=branch, product=product)
+        services.add_catalog_item(draft, product.pk, quantity=1)
+
+        services.apply_transaction_discount(draft, "SC2", "PERCENT", "20")
+
+        assert str(draft.grand_total) == "366.08"
+
     def test_transaction_discount_never_pushes_grand_total_negative(self, draft, item):
         # The service now rejects an over-total discount outright (see
         # TestInvalidDiscountInput), so set the fields directly to keep
