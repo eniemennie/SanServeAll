@@ -52,6 +52,20 @@ class Product(models.Model):
         DESSERTS = "DESSERTS", "Desserts"
         CAKES = "CAKES", "Cakes"
         BAKERY = "BAKERY", "Bakery & Pasalubong"
+        # Task #148 (client review, 2026-11-04): the only Category value
+        # that applies to a MATERIAL row, not a sellable FINISHED_GOOD --
+        # every choice above this line is a POS category-tab concept
+        # (Row 3 redesign) and stays finished-goods-only. A raw/food
+        # material (flour, sugar, ice, ...) is deliberately left with a
+        # BLANK category rather than inventing a "Raw Material" value for
+        # it: the only real distinction the client asked for is
+        # "Packaging vs Food", and food materials already read clearly as
+        # "not Packaging" without a second label. See
+        # import_raw_and_packaging_materials.py, which tags this from
+        # Packaging_Materials.xlsx specifically -- it is never guessed
+        # from unit_of_measure (packaging items aren't reliably ROLL; many
+        # are PIECE/PACK/BOX, the same units raw materials also use).
+        PACKAGING = "PACKAGING", "Packaging"
 
     name = models.CharField(max_length=150)
     price = models.DecimalField(max_digits=10, decimal_places=2)
