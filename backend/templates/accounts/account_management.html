@@ -144,7 +144,11 @@
 
         function sync() {
             var role = roleSelect.value;
-            branchWrap.style.display = (role === 'OWNER_ADMIN') ? 'none' : '';
+            // Task #143: Purchasing isn't branch-scoped either (same as
+            // Owner/Admin) -- create_staff_account ignores branch_id for
+            // this role, so the field is hidden rather than looking
+            // required and doing nothing.
+            branchWrap.style.display = (role === 'OWNER_ADMIN' || role === 'PURCHASING') ? 'none' : '';
             passwordWrap.style.display = (role === 'BRANCH_STAFF') ? 'none' : '';
         }
         roleSelect.addEventListener('change', sync);
