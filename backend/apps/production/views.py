@@ -75,8 +75,15 @@ def record_production(request):
         try:
             material_ids = request.POST.getlist("material_id")
             quantities_used = request.POST.getlist("quantity_used")
+            # quantity_used is passed through as the raw submitted string --
+            # not cast to int here -- so the service layer's own Decimal
+            # parsing (matching IngredientUsage.quantity_used's DecimalField)
+            # is the single place that validates it. Raw materials are
+            # commonly measured in fractional kg/L, so an int() cast here
+            # would silently reject/drop any such row before it ever reached
+            # the service.
             ingredient_rows = [
-                {"material_id": int(mid), "quantity_used": int(qty)}
+                {"material_id": int(mid), "quantity_used": qty}
                 for mid, qty in zip(material_ids, quantities_used)
                 if mid and qty
             ]

@@ -237,6 +237,56 @@ class TestRecordProduction:
             movement_type=InventoryTransaction.MovementType.PRODUCTION_OUTPUT
         ).exists()
 
+    def test_fractional_quantity_used_is_accepted_and_deducted_exactly(
+        self, commissary, commissary_staff, cake, flour
+    ):
+        """Regression test: raw materials are commonly measured in
+        fractional kg/L (IngredientUsage.quantity_used is a DecimalField
+        with 3 decimal places for exactly this reason), so a fractional
+        amount -- submitted as a string, the same shape the view passes
+        through from a POST field -- must be accepted, not silently
+        dropped or rejected."""
+        from decimal import Decimal
+
+        record = services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": "0.05"}],
+        )
+        usage = record.ingredient_usages.get(material=flour)
+        assert usage.quantity_used == Decimal("0.05")
+
+        flour_inventory = Inventory.objects.get(branch=commissary, product=flour)
+        assert flour_inventory.quantity_on_hand == Decimal("49.95")  # 50 - 0.05
+
+    def test_quantity_used_exceeding_fractional_stock_is_rejected(
+        self, commissary, commissary_staff, cake, flour
+    ):
+        """Companion to the fractional-acceptance test above: a fractional
+        amount is still subject to the normal stock check, same as any
+        whole-number amount."""
+        Inventory.objects.filter(branch=commissary, product=flour).update(quantity_on_hand="0.900")
+
+        with pytest.raises(services.ProductionError, match="Not enough"):
+            services.record_production(
+                commissary_staff=commissary_staff,
+                product_id=cake.pk,
+                quantity_produced=10,
+                ingredient_rows=[{"material_id": flour.pk, "quantity_used": "1"}],
+            )
+
+    def test_invalid_quantity_used_is_rejected_with_a_clear_message(
+        self, commissary, commissary_staff, cake, flour
+    ):
+        with pytest.raises(services.ProductionError, match="Invalid quantity"):
+            services.record_production(
+                commissary_staff=commissary_staff,
+                product_id=cake.pk,
+                quantity_produced=10,
+                ingredient_rows=[{"material_id": flour.pk, "quantity_used": "not-a-number"}],
+            )
+
     def test_no_commissary_configured_raises_clear_error(self):
         """Tested in isolation -- no commissary, no materials, no
         Inventory rows at all -- since Inventory.branch uses PROTECT and
@@ -285,6 +335,38 @@ class TestRecordProductionView:
         )
         assert response.status_code == 302
         assert ProductionRecord.objects.count() == 1
+
+    def test_fractional_quantity_used_submission_succeeds(
+        self, commissary_client, commissary, cake, flour
+    ):
+        """Regression test for the live bug: the view previously cast the
+        raw quantity_used POST value with int(), which raises on a
+        decimal string like "0.05" -- silently dropping that ingredient
+        row before the service ever saw it, and surfacing as a confusing
+        "At least one ingredient/material is required" error instead of
+        actually recording the fractional usage."""
+        from decimal import Decimal
+
+        from apps.inventory.models import Inventory
+
+        response = commissary_client.post(
+            reverse("production:record"),
+            {
+                "product_id": cake.pk,
+                "quantity_produced": "10",
+                "material_id": [str(flour.pk)],
+                "quantity_used": ["0.05"],
+                "quality": "PASS",
+                "status": "COMPLETED",
+            },
+        )
+        assert response.status_code == 302
+        record = ProductionRecord.objects.get()
+        usage = record.ingredient_usages.get(material=flour)
+        assert usage.quantity_used == Decimal("0.05")
+
+        flour_inventory = Inventory.objects.get(branch=commissary, product=flour)
+        assert flour_inventory.quantity_on_hand == Decimal("49.95")  # 50 - 0.05
 
 
 class TestBatchManagementView:
