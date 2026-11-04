@@ -64,12 +64,22 @@
     </form>
 
     <div class="table-responsive">
-    <table class="table table-sm mb-0">
+    <table class="table table-sm mb-0 align-middle">
+        <colgroup>
+            <col style="width: 7%;">
+            <col style="width: 14%;">
+            <col style="width: 8%;">
+            <col style="width: 32%;">
+            <col style="width: 12%;">
+            <col style="width: 9%;">
+            <col style="width: 10%;">
+            <col style="width: 8%;">
+        </colgroup>
         <thead>
             <tr>
                 <th>Batch</th>
                 <th>Product</th>
-                <th>Qty Produced</th>
+                <th class="text-end">Qty Produced</th>
                 <th>Ingredients Used</th>
                 <th>Supplier</th>
                 <th>Quality</th>
@@ -82,11 +92,21 @@
             <tr>
                 <td>#{{ record.pk }}</td>
                 <td>{{ record.product.name }}</td>
-                <td>{{ record.quantity_produced }}</td>
+                <td class="text-end">{{ record.quantity_produced }}</td>
                 <td>
-                    {% for usage in record.ingredient_usages.all %}
-                    <span class="jc-badge jc-badge-info">{{ usage.material.name }}: {{ usage.quantity_used }} {{ usage.material.get_unit_of_measure_display }}</span>
-                    {% endfor %}
+                    {% with usages=record.ingredient_usages.all %}
+                    <div class="d-flex flex-wrap gap-1">
+                        {% for usage in usages|slice:":4" %}
+                        <span class="jc-badge jc-badge-info">{{ usage.material.name }}: {{ usage.quantity_used }} {{ usage.material.get_unit_of_measure_display }}</span>
+                        {% endfor %}
+                        {% if usages|length > 4 %}
+                        <span class="jc-badge jc-badge-low" title="{% for usage in usages|slice:'4:' %}{{ usage.material.name }}: {{ usage.quantity_used }} {{ usage.material.get_unit_of_measure_display }}{% if not forloop.last %}, {% endif %}{% endfor %}">+{{ usages|length|add:"-4" }} more</span>
+                        {% endif %}
+                        {% if not usages %}
+                        <span class="text-muted small">&mdash;</span>
+                        {% endif %}
+                    </div>
+                    {% endwith %}
                 </td>
                 <td>{{ record.supplier|default:"&mdash;" }}</td>
                 <td>

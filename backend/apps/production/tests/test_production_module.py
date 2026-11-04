@@ -409,6 +409,63 @@ class TestBatchManagementView:
         flour_inventory = Inventory.objects.get(branch=commissary, product=flour)
         assert flour_inventory.quantity_on_hand == 45  # still deducted, not restored
 
+    def test_ingredients_used_shows_all_when_four_or_fewer(
+        self, commissary_client, commissary_staff, cake, flour, sugar
+    ):
+        """Task #140 (client review, 2026-11-04): Batch Management table
+        layout cleanup -- a batch with a normal, short ingredient list
+        should show every ingredient inline, with no truncation."""
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[
+                {"material_id": flour.pk, "quantity_used": 5},
+                {"material_id": sugar.pk, "quantity_used": 3},
+            ],
+        )
+        response = commissary_client.get(reverse("production:batch_management"))
+        content = response.content.decode()
+        assert "Flour (kg): 5" in content
+        assert "Sugar (kg): 3" in content
+        assert "more" not in content
+
+    def test_ingredients_used_truncates_long_lists_without_losing_data(
+        self, commissary_client, commissary_staff, cake, flour, sugar, commissary
+    ):
+        """A batch using many materials shouldn't blow up the row height
+        -- only the first 4 show inline, with the rest folded into a
+        '+N more' badge whose tooltip still carries every remaining
+        ingredient's full detail (nothing is dropped, only visually
+        collapsed)."""
+        extra_materials = [
+            Product.objects.create(
+                name=f"Material {i}", price="10.00", product_type=Product.ProductType.MATERIAL
+            )
+            for i in range(3)
+        ]
+        for material in extra_materials:
+            Inventory.objects.create(branch=commissary, product=material, quantity_on_hand=20)
+
+        ingredient_rows = [
+            {"material_id": flour.pk, "quantity_used": 1},
+            {"material_id": sugar.pk, "quantity_used": 1},
+        ] + [{"material_id": m.pk, "quantity_used": 1} for m in extra_materials]
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=ingredient_rows,
+        )
+
+        response = commissary_client.get(reverse("production:batch_management"))
+        content = response.content.decode()
+        assert "+1 more" in content
+        # The 5th material (folded away from the inline list) must still
+        # be present SOMEWHERE in the markup (the badge's tooltip) --
+        # truncation must never silently drop real data.
+        assert "Material 2" in content
+
 
 class TestGetTotalOutput:
     """Dashboard Home batch: the Production Output KPI card (Fig. 3-19).

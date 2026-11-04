@@ -78,11 +78,20 @@ class Role(TimestampedModel):
     OWNER_ADMIN = "OWNER_ADMIN"
     BRANCH_STAFF = "BRANCH_STAFF"
     COMMISSARY_STAFF = "COMMISSARY_STAFF"
+    # Task #143 (client review, 2026-11-04): a new office role for managing
+    # supplier relationships (apps.purchasing.Supplier). Not scoped to a
+    # single branch -- same convention as OWNER_ADMIN (User.branch stays
+    # null) -- since suppliers are a company-wide, commissary-side concern,
+    # not a per-branch one. Does not require 2FA (see
+    # apps.accounts.permissions._user_requires_otp, which checks only
+    # OWNER_ADMIN by name, not by "is this an office role").
+    PURCHASING = "PURCHASING"
 
     ROLE_CHOICES = [
         (OWNER_ADMIN, "Owner / Admin"),
         (BRANCH_STAFF, "Branch Staff"),
         (COMMISSARY_STAFF, "Commissary Staff"),
+        (PURCHASING, "Purchasing"),
     ]
 
     name = models.CharField(max_length=30, choices=ROLE_CHOICES, unique=True)

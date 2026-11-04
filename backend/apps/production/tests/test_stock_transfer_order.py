@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.accounts.models import Branch, Role, User
 from apps.inventory.models import Inventory, InventoryTransaction, Product
@@ -457,6 +458,41 @@ class TestStockTransfersView:
         assert response.status_code == 200
         assert b"Not enough" in response.content
         assert StockTransferOrder.objects.count() == 0
+
+    def test_undelivered_order_shows_dash_not_a_blank_date(
+        self, commissary_client, commissary_staff, commissary, batangas, cake
+    ):
+        """Task #140 (client review, 2026-11-04): Stock Transfers table
+        layout cleanup -- an order that hasn't been delivered yet must
+        still show an explicit placeholder in the Delivered column, not
+        a blank cell someone could mistake for missing data."""
+        services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+        response = commissary_client.get(reverse("production:stock_transfers"))
+        assert "&mdash;" in response.content.decode()
+
+    def test_delivered_order_shows_its_delivered_date(
+        self, commissary_client, commissary_staff, commissary, batangas, cake
+    ):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+        services.advance_stock_transfer_status(order, "IN_TRANSIT")
+        services.advance_stock_transfer_status(order, "DELIVERED")
+
+        response = commissary_client.get(reverse("production:stock_transfers"))
+        order.refresh_from_db()
+        content = response.content.decode()
+        delivered_local = timezone.localtime(order.delivered_at)
+        assert delivered_local.strftime("%b %d, %Y") in content
+        assert delivered_local.strftime("%H:%M") in content
 
     def test_advance_view_moves_the_order_forward(
         self, commissary_client, commissary, commissary_staff, batangas, cake
