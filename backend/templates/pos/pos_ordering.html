@@ -233,7 +233,7 @@
                                 <strong>{{ item.display_name }}</strong>
                                 {% if item.customizations.size %}<span class="text-muted">({{ item.customizations.size }})</span>{% endif %}
                                 {% if item.customizations.discount_category %}
-                                    <div class="small" style="color: var(--jc-adequate);">Discount: {{ item.customizations.discount_category }}</div>
+                                    <div class="small" style="color: var(--jc-adequate);">Discount: {{ item.customizations.discount_category }}{% if item.customizations.discount_type == "PERCENT" %} ({{ item.customizations.discount_amount|floatformat:0 }}%){% endif %}</div>
                                 {% endif %}
                                 <div class="small text-muted">x {{ item.quantity }}</div>
                             </div>
@@ -273,7 +273,7 @@
                     </div>
                     {% if draft.item_discounts_total or draft.transaction_discount_value %}
                     <div class="d-flex justify-content-between" style="color: var(--jc-adequate);">
-                        <span>Discounts Applied</span>
+                        <span>Discounts Applied{% if draft.transaction_discount_category %} ({{ draft.transaction_discount_category }}{% if draft.transaction_discount_type == "PERCENT" %} - {{ draft.transaction_discount_amount|floatformat:0 }}%{% endif %}){% endif %}</span>
                         <span>-₱{{ draft.item_discounts_total|add:draft.transaction_discount_value }}</span>
                     </div>
                     {% endif %}

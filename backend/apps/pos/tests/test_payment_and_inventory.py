@@ -243,6 +243,33 @@ class TestPaymentView:
         assert response.status_code == 200
         assert b"Spanish Latte" in response.content
 
+    def test_shows_discount_line_when_a_transaction_wide_discount_is_applied(
+        self, unlocked_client, cashier, branch, product
+    ):
+        """Task #144 (client review, 2026-11-04): before this fix, the
+        Payment screen showed only Subtotal and Total with no indication
+        a discount had even been applied, let alone its percentage --
+        unlike the Order Summary and receipt screens. A cashier
+        reviewing the final amount before taking payment had no way to
+        see why Total was lower than Subtotal."""
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 1)
+        services.apply_transaction_discount(draft, "FAMILY", "PERCENT", "10")
+
+        response = unlocked_client.get(reverse("pos:payment"))
+        content = response.content.decode()
+        assert "Discount" in content
+        assert "(FAMILY - 10%)" in content
+
+    def test_no_discount_line_when_no_discount_is_applied(
+        self, unlocked_client, cashier, branch, product
+    ):
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 1)
+
+        response = unlocked_client.get(reverse("pos:payment"))
+        assert "Discount" not in response.content.decode()
+
     def test_shows_all_four_payment_modes(self, unlocked_client, cashier, branch, product):
         """Payment method reorganization: Cash, GCash, Debit/Credit Card,
         and Other Digital Banks are all shown as equal, top-level
@@ -483,7 +510,9 @@ class TestReceiptView:
         response = unlocked_client.get(reverse("pos:receipt", kwargs={"transaction_id": draft.pk}))
         assert response.status_code == 200
         assert b"Discount" in response.content
-        assert b"(FAMILY)" in response.content
+        # Task #144 (client review, 2026-11-04): the percentage must be
+        # shown alongside the category, not just the category code.
+        assert b"(FAMILY - 10%)" in response.content
         # An ordinary discount (not SC2/PWD2) is still subject to VAT.
         assert b"VATable Sales" in response.content
 
@@ -500,7 +529,9 @@ class TestReceiptView:
 
         response = unlocked_client.get(reverse("pos:receipt", kwargs={"transaction_id": draft.pk}))
         assert response.status_code == 200
-        assert b"(SC2)" in response.content
+        # Task #144 (client review, 2026-11-04): the percentage must be
+        # shown alongside the category, not just the category code.
+        assert b"(SC2 - 20%)" in response.content
         assert b"VAT-Exempt Sales" in response.content
         assert b"VATable Sales" not in response.content
         assert b"VAT (12%)" not in response.content

@@ -164,6 +164,21 @@ def add_customized_item(
             else ""
         ),
         "discount_value": str(discount_value) if discount_value else "",
+        # Task #144 (client review, 2026-11-04): "discount_type" and
+        # "discount_amount" (the raw percentage, e.g. "20" for PERCENT)
+        # were computed above but never actually stored -- only the
+        # already-converted peso discount_value survived. That made it
+        # impossible for any later screen (Order Summary, Payment,
+        # receipt) to show the discount AS a percentage, only as a peso
+        # amount. Stored here so templates can display either.
+        "discount_type": (
+            discount_type if discount_category and discount_category != "NO_DISCOUNT" else ""
+        ),
+        "discount_amount": (
+            str(discount_amount)
+            if discount_amount and discount_category and discount_category != "NO_DISCOUNT"
+            else ""
+        ),
         "price_before_discount": str(price_before_discount),
         "note": note,
     }

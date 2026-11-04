@@ -86,6 +86,12 @@
                 <div class="d-flex justify-content-between">
                     <span>Subtotal</span><span>₱{{ draft.total_amount }}</span>
                 </div>
+                {% if draft.transaction_discount_value %}
+                <div class="d-flex justify-content-between" style="color: var(--jc-adequate);">
+                    <span>Discount{% if draft.transaction_discount_category %} ({{ draft.transaction_discount_category }}{% if draft.transaction_discount_type == "PERCENT" %} - {{ draft.transaction_discount_amount|floatformat:0 }}%{% endif %}){% endif %}</span>
+                    <span>-₱{{ draft.transaction_discount_value }}</span>
+                </div>
+                {% endif %}
                 <div class="d-flex justify-content-between fw-bold fs-5" style="color: var(--jc-orange-dark);">
                     <span>Total</span><span>₱{{ draft.grand_total }}</span>
                 </div>

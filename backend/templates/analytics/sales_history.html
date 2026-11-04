@@ -57,6 +57,7 @@
                 <th>Cashier</th>
                 <th>Dining</th>
                 <th>Payment</th>
+                <th>Discount</th>
                 <th class="text-end">Total</th>
             </tr>
         </thead>
@@ -69,11 +70,18 @@
                 <td>{{ txn.cashier.get_full_name|default:txn.cashier.username }}</td>
                 <td>{{ txn.get_dining_option_display }}</td>
                 <td>{{ txn.get_payment_method_display }}</td>
+                <td>
+                    {% if txn.transaction_discount_category %}
+                    {{ txn.transaction_discount_category }}{% if txn.transaction_discount_type == "PERCENT" %} ({{ txn.transaction_discount_amount|floatformat:0 }}%){% endif %}
+                    {% else %}
+                    <span class="text-muted">&mdash;</span>
+                    {% endif %}
+                </td>
                 <td class="text-end">{{ txn.grand_total }}</td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="7" class="text-muted text-center py-4">
+                <td colspan="8" class="text-muted text-center py-4">
                     {% if date_error %}Fix the date filter above to see results.{% else %}No completed sales match these filters.{% endif %}
                 </td>
             </tr>

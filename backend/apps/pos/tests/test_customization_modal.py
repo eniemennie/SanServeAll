@@ -202,6 +202,33 @@ class TestAddCustomizedItemService:
         item = services.add_customized_item(draft, beverage.pk, discount_category="NO_DISCOUNT")
         assert item.customizations["discount_category"] == ""
 
+    def test_discount_type_and_raw_amount_are_stored_for_percentage_display(self, draft, beverage):
+        """Task #144 (client review, 2026-11-04): only the already-
+        converted peso discount_value used to be stored -- the raw
+        discount_type/discount_amount were computed but discarded,
+        making it impossible for any screen to later show the discount
+        AS a percentage rather than just a peso figure."""
+        item = services.add_customized_item(
+            draft,
+            beverage.pk,
+            discount_category="SC2",
+            discount_type="PERCENT",
+            discount_amount="20",
+        )
+        assert item.customizations["discount_type"] == "PERCENT"
+        assert item.customizations["discount_amount"] == "20"
+
+    def test_no_discount_category_stores_no_discount_type_or_amount(self, draft, beverage):
+        item = services.add_customized_item(
+            draft,
+            beverage.pk,
+            discount_category="NO_DISCOUNT",
+            discount_type="PERCENT",
+            discount_amount="20",
+        )
+        assert item.customizations["discount_type"] == ""
+        assert item.customizations["discount_amount"] == ""
+
 
 class TestUpdateItemCustomizationQuantity:
     """QA fix: a negative or zero quantity in Order Customization must

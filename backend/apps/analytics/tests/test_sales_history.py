@@ -144,6 +144,33 @@ class TestSalesHistoryView:
         assert response.status_code == 200
         assert b"Batangas City" in response.content
 
+    def test_discount_column_shows_category_and_percentage(
+        self, owner_client, branches, cashiers, latte
+    ):
+        """Task #144 (client review, 2026-11-04): before this fix, the
+        admin's Sales History table showed only the final grand_total
+        with no indication a discount had been applied at all, let
+        alone its percentage -- an admin reviewing transaction records
+        had no way to see which sales were discounted or by how much."""
+        discounted = _sale(branches["batangas"], cashiers["alex"], latte)
+        discounted.transaction_discount_category = "SC2"
+        discounted.transaction_discount_type = "PERCENT"
+        discounted.transaction_discount_amount = "20"
+        discounted.save()
+        _sale(branches["lipa"], cashiers["bea"], latte)  # undiscounted, for contrast
+
+        response = owner_client.get(reverse("analytics:sales_history"))
+        content = response.content.decode()
+        assert "SC2" in content
+        assert "20%" in content
+
+    def test_discount_column_shows_dash_when_no_discount(
+        self, owner_client, branches, cashiers, latte
+    ):
+        _sale(branches["batangas"], cashiers["alex"], latte)
+        response = owner_client.get(reverse("analytics:sales_history"))
+        assert "&mdash;" in response.content.decode()
+
     def test_non_owner_is_denied(self, client, cashiers):
         client.force_login(cashiers["alex"])
         response = client.get(reverse("analytics:sales_history"))

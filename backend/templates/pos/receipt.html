@@ -24,7 +24,7 @@
             </div>
             {% if discount_total %}
             <div class="d-flex justify-content-between" style="color: var(--jc-adequate);">
-                <span>Discount{% if transaction.transaction_discount_category %} ({{ transaction.transaction_discount_category }}){% endif %}</span>
+                <span>Discount{% if transaction.transaction_discount_category %} ({{ transaction.transaction_discount_category }}{% if transaction.transaction_discount_type == "PERCENT" %} - {{ transaction.transaction_discount_amount|floatformat:0 }}%{% endif %}){% endif %}</span>
                 <span>-&#8369;{{ discount_total }}</span>
             </div>
             {% endif %}
