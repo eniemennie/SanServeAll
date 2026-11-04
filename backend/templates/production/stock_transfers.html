@@ -44,12 +44,23 @@
 
 <div class="jc-card p-3 p-md-4">
     <div class="table-responsive">
-    <table class="table table-sm mb-0">
+    <table class="table table-sm mb-0 align-middle">
+        <colgroup>
+            <col style="width: 6%;">
+            <col style="width: 14%;">
+            <col style="width: 6%;">
+            <col style="width: 12%;">
+            <col style="width: 12%;">
+            <col style="width: 10%;">
+            <col style="width: 13%;">
+            <col style="width: 13%;">
+            <col style="width: 14%;">
+        </colgroup>
         <thead>
             <tr>
                 <th>Order</th>
                 <th>Product</th>
-                <th>Qty</th>
+                <th class="text-end">Qty</th>
                 <th>From</th>
                 <th>To</th>
                 <th>Status</th>
@@ -63,7 +74,7 @@
             <tr>
                 <td>#{{ order.pk }}</td>
                 <td>{{ order.product.name }}</td>
-                <td>{{ order.quantity }}</td>
+                <td class="text-end">{{ order.quantity }}</td>
                 <td>{{ order.source_branch.name }}</td>
                 <td>{{ order.destination_branch.name }}</td>
                 <td>
@@ -71,9 +82,16 @@
                         {{ order.get_status_display }}
                     </span>
                 </td>
-                <td>{{ order.created_at|date:"M d, Y H:i" }}</td>
-                <td>{{ order.delivered_at|date:"M d, Y H:i"|default:"&mdash;" }}</td>
-                <td class="d-flex gap-1">
+                <td class="small text-nowrap">{{ order.created_at|date:"M d, Y" }}<br>{{ order.created_at|date:"H:i" }}</td>
+                <td class="small text-nowrap">
+                    {% if order.delivered_at %}
+                    {{ order.delivered_at|date:"M d, Y" }}<br>{{ order.delivered_at|date:"H:i" }}
+                    {% else %}
+                    &mdash;
+                    {% endif %}
+                </td>
+                <td>
+                    <div class="d-flex flex-wrap gap-1">
                     {% if order.status == "PROCESSING" %}
                     <form method="post" action="{% url 'production:advance_stock_transfer' order.pk %}">
                         {% csrf_token %}
@@ -94,6 +112,7 @@
                         <button type="submit" class="btn btn-outline-danger btn-sm">Cancel</button>
                     </form>
                     {% endif %}
+                    </div>
                 </td>
             </tr>
             {% empty %}
