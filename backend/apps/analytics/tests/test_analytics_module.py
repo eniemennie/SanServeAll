@@ -123,7 +123,42 @@ class TestSalesSummary:
         summary = services.get_sales_summary(branch=branch)
         assert summary["total_transactions"] == 0
 
-    def test_old_sales_outside_the_window_are_excluded(self, branch, cashier, latte):
+    def test_old_sales_outside_the_branchs_own_window_are_excluded(self, branch, cashier, latte):
+        """The window is anchored to the branch's own latest activity
+        (see _trailing_window_anchor), not a sale being "old" in
+        isolation -- so this needs a RECENT sale establishing that
+        anchor, with a separate sale old enough to fall outside the
+        30-day window measured back from it."""
+        now = timezone.now()
+        _completed_sale(
+            branch,
+            cashier,
+            latte,
+            quantity=1,
+            unit_price="125.00",
+            amount_tendered="125.00",
+            when=now,
+        )
+        _completed_sale(
+            branch,
+            cashier,
+            latte,
+            quantity=1,
+            unit_price="999.00",
+            amount_tendered="999.00",
+            when=now - timedelta(days=60),
+        )
+        summary = services.get_sales_summary(branch=branch, days=30)
+        assert summary["total_revenue"] == pytest.approx(125.00)
+
+    def test_a_branchs_only_sale_is_not_hidden_just_for_being_old(self, branch, cashier, latte):
+        """Task #136 (client review, 2026-11-04): a branch whose only
+        data comes from periodic batch uploads (not live POS) must still
+        show its real most recent activity even when wall-clock "now"
+        has drifted more than `days` past it -- it must never go blank
+        just because nothing new has been uploaded recently. See
+        _trailing_window_anchor's docstring for the full reasoning
+        (this is the Alangilan branch's exact real-world scenario)."""
         old_date = timezone.now() - timedelta(days=60)
         _completed_sale(
             branch,
@@ -135,7 +170,7 @@ class TestSalesSummary:
             when=old_date,
         )
         summary = services.get_sales_summary(branch=branch, days=30)
-        assert summary["total_revenue"] == 0
+        assert summary["total_revenue"] == pytest.approx(125.00)
 
     def test_branch_filter_only_counts_that_branch(self, branch, cashier, latte):
         other_branch = Branch.objects.create(name="Batangas City", code="BATANGAS")
@@ -190,6 +225,25 @@ class TestWeeklySalesTrend:
     def test_returns_requested_number_of_weeks(self, branch, cashier, latte):
         trend = services.get_weekly_sales_trend(branch=branch, weeks=8)
         assert len(trend) == 8
+
+    def test_old_batch_only_data_still_appears_in_the_chart(self, branch, cashier, latte):
+        """Task #136: a branch whose only data is older than the chart's
+        window (same Alangilan scenario as get_branch_performance) must
+        still show its real last weeks of activity on the Sales
+        Analytics trend chart, anchored to its own latest transaction
+        rather than going entirely blank."""
+        old_date = timezone.now() - timedelta(days=60)
+        _completed_sale(
+            branch,
+            cashier,
+            latte,
+            quantity=2,
+            unit_price="125.00",
+            amount_tendered="250.00",
+            when=old_date,
+        )
+        trend = services.get_weekly_sales_trend(branch=branch, weeks=8)
+        assert sum(week["revenue"] for week in trend) == pytest.approx(250.00)
 
     def test_trend_also_uses_sale_total_not_amount_tendered(self, branch, cashier, latte):
         _completed_sale(
@@ -392,6 +446,46 @@ class TestBranchPerformance:
         assert rows[0]["revenue"] == 0
         assert rows[0]["units_sold"] == 0
         assert rows[0]["orders"] == 0
+
+    def test_branch_with_only_old_batch_data_still_shows_its_real_numbers(
+        self, branch, cashier, latte
+    ):
+        """Task #136 (client review, 2026-11-04): Alangilan's real
+        scenario -- a branch updated only via periodic batch upload, not
+        live POS, whose last upload is now more than 30 days in the
+        past. It must show that branch's own real last period of
+        activity on the Branch Performance Overview card, not zeros, and
+        must not affect a sibling branch that DOES have recent activity
+        (each branch's window is anchored independently -- see
+        _trailing_window_anchor)."""
+        other_branch = Branch.objects.create(name="Batangas City", code="BATANGAS")
+        other_cashier = User.objects.create_user(
+            username="cashier2", password="testpass123", role=cashier.role, branch=other_branch
+        )
+        old_date = timezone.now() - timedelta(days=60)
+        _completed_sale(
+            branch,
+            cashier,
+            latte,
+            quantity=1,
+            unit_price="125.00",
+            amount_tendered="125.00",
+            when=old_date,
+        )
+        _completed_sale(
+            other_branch,
+            other_cashier,
+            latte,
+            quantity=3,
+            unit_price="125.00",
+            amount_tendered="375.00",
+        )
+
+        rows = {r["branch"].pk: r for r in services.get_branch_performance()}
+
+        assert rows[branch.pk]["revenue"] == pytest.approx(125.00)
+        assert rows[branch.pk]["units_sold"] == 1
+        assert rows[other_branch.pk]["revenue"] == pytest.approx(375.00)
 
     def test_revenue_reflects_transaction_wide_discount(self, branch, cashier, latte):
         _completed_sale_with_discount(
