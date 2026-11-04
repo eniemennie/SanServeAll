@@ -826,6 +826,79 @@ class TestProductAvailabilityEnhancements:
         product_names = {i.product.name for i in response.context["items"]}
         assert product_names == {"Flour"}
 
+    def test_category_filter_narrows_to_packaging_materials(self, owner_client, branch):
+        """Task #148 (client review, 2026-11-04): 'Packaging vs Food'
+        filtering -- a packaging-tagged material shows up under the
+        Packaging filter, and a plain (blank-category) material does
+        not."""
+        cling_wrap = Product.objects.create(
+            name="Cling Wrap",
+            price="40.00",
+            product_type=Product.ProductType.MATERIAL,
+            category=Product.Category.PACKAGING,
+        )
+        flour = Product.objects.create(
+            name="Flour", price="45.00", product_type=Product.ProductType.MATERIAL
+        )
+        Inventory.objects.create(branch=branch, product=cling_wrap, quantity_on_hand=100)
+        Inventory.objects.create(branch=branch, product=flour, quantity_on_hand=20)
+
+        response = owner_client.get(
+            reverse("inventory:product_management"),
+            {"type": "MATERIAL", "category": "PACKAGING"},
+        )
+        product_names = {i.product.name for i in response.context["items"]}
+        assert product_names == {"Cling Wrap"}
+
+    def test_category_filter_narrows_to_raw_materials_food(self, owner_client, branch):
+        """The 'Raw Materials (Food)' option is the complement of
+        Packaging -- a MATERIAL row with no category tagged -- not a
+        real stored category value (see
+        services.RAW_MATERIAL_CATEGORY_FILTER)."""
+        cling_wrap = Product.objects.create(
+            name="Cling Wrap",
+            price="40.00",
+            product_type=Product.ProductType.MATERIAL,
+            category=Product.Category.PACKAGING,
+        )
+        flour = Product.objects.create(
+            name="Flour", price="45.00", product_type=Product.ProductType.MATERIAL
+        )
+        Inventory.objects.create(branch=branch, product=cling_wrap, quantity_on_hand=100)
+        Inventory.objects.create(branch=branch, product=flour, quantity_on_hand=20)
+
+        response = owner_client.get(
+            reverse("inventory:product_management"),
+            {"type": "MATERIAL", "category": "RAW_MATERIAL"},
+        )
+        product_names = {i.product.name for i in response.context["items"]}
+        assert product_names == {"Flour"}
+
+    def test_category_filter_narrows_finished_goods_by_category(self, owner_client, branch):
+        latte = Product.objects.create(
+            name="Spanish Latte", price="125.00", category=Product.Category.COFFEE
+        )
+        lasagna = Product.objects.create(
+            name="Lasagna", price="150.00", category=Product.Category.PASTA
+        )
+        Inventory.objects.create(branch=branch, product=latte, quantity_on_hand=10)
+        Inventory.objects.create(branch=branch, product=lasagna, quantity_on_hand=10)
+
+        response = owner_client.get(reverse("inventory:product_management"), {"category": "COFFEE"})
+        product_names = {i.product.name for i in response.context["items"]}
+        assert product_names == {"Spanish Latte"}
+
+    def test_category_choices_exclude_packaging_on_the_finished_products_tab(self, owner_client):
+        response = owner_client.get(reverse("inventory:product_management"))
+        values = [value for value, _ in response.context["category_choices"]]
+        assert "PACKAGING" not in values
+        assert "COFFEE" in values
+
+    def test_category_choices_are_packaging_vs_raw_on_the_materials_tab(self, owner_client):
+        response = owner_client.get(reverse("inventory:product_management"), {"type": "MATERIAL"})
+        values = [value for value, _ in response.context["category_choices"]]
+        assert values == ["PACKAGING", "RAW_MATERIAL"]
+
     def test_search_filters_by_product_name(self, owner_client, branch):
         latte = Product.objects.create(name="Spanish Latte", price="125.00")
         muffin = Product.objects.create(name="Blueberry Muffin", price="60.00")
