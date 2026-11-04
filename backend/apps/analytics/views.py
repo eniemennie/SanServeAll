@@ -36,17 +36,60 @@ def reports_hub(request):
     this; rather than build a real export feature under today's time
     constraints, the label was corrected to match what the screen
     actually does). This view covers viewing/reporting only.
+
+    Task #146 (client review, 2026-11-04): "Users should be able to
+    select a specific date range... rather than being limited to preset
+    reporting periods." A real date_from/date_to range (same
+    YYYY-MM-DD parsing/validation pattern already proven on
+    analytics:sales_history) now takes priority over the preset `days`
+    dropdown whenever both dates are given and valid. All of Sales
+    Summary, Product Performance, Resource Consumption, and Operational
+    Performance respect it. The weekly trend CHART is a deliberate
+    exception -- it's a fixed "last 8 weeks" line chart by design, and
+    bucketing an arbitrary short range (the client's own example,
+    "November 6-7") into meaningful weekly points isn't a sensible
+    reshape of that visual; the template labels it accordingly rather
+    than silently implying it also follows the custom range.
     """
     days = int(request.GET.get("days", 30))
 
     branch_id = request.GET.get("branch")
     selected_branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
 
-    sales_summary = services.get_sales_summary(branch=selected_branch, days=days)
+    date_from_raw = request.GET.get("date_from") or ""
+    date_to_raw = request.GET.get("date_to") or ""
+    date_error = None
+    date_from = date_to = None
+    try:
+        if date_from_raw:
+            date_from = datetime.strptime(date_from_raw, "%Y-%m-%d").date()
+        if date_to_raw:
+            date_to = datetime.strptime(date_to_raw, "%Y-%m-%d").date()
+    except ValueError:
+        date_error = "Enter dates as YYYY-MM-DD."
+
+    if date_from and date_to and date_from > date_to:
+        date_error = "'From' date must be on or before 'To' date."
+
+    # An incomplete or invalid custom range falls back to the preset
+    # `days` window rather than silently showing nothing -- only a
+    # genuine error (bad format, or From after To) blocks the query.
+    effective_from = date_from if not date_error else None
+    effective_to = date_to if not date_error else None
+
+    sales_summary = services.get_sales_summary(
+        branch=selected_branch, days=days, date_from=effective_from, date_to=effective_to
+    )
     trend = services.get_weekly_sales_trend(branch=selected_branch)
-    product_performance_rows = services.get_product_performance(days=days)
-    consumption = services.get_resource_consumption_summary(days=days)
-    operational = services.get_operational_performance_summary(days=days)
+    product_performance_rows = services.get_product_performance(
+        days=days, date_from=effective_from, date_to=effective_to
+    )
+    consumption = services.get_resource_consumption_summary(
+        days=days, date_from=effective_from, date_to=effective_to
+    )
+    operational = services.get_operational_performance_summary(
+        days=days, date_from=effective_from, date_to=effective_to
+    )
 
     return render(
         request,
@@ -56,6 +99,10 @@ def reports_hub(request):
             "branches": Branch.objects.filter(is_active=True, is_commissary=False),
             "selected_branch": selected_branch,
             "days": days,
+            "date_from": date_from_raw,
+            "date_to": date_to_raw,
+            "date_error": date_error,
+            "using_custom_range": bool(effective_from and effective_to),
             "sales_summary": sales_summary,
             "product_performance": product_performance_rows,
             "consumption": consumption,

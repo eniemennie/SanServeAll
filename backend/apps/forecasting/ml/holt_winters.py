@@ -107,7 +107,11 @@ def fit(y, m=7):
                     best = (sse, level, trend, seasonal)
 
     _, level, trend, seasonal = best
-    return {"level": level, "trend": trend, "seasonal": seasonal, "m": m}
+    # `n` (how many observations were actually fitted) has to travel with
+    # the fitted state -- see forecast()'s docstring below for why: without
+    # it, forecasting has no way to know which phase of the 7-day cycle
+    # the series actually ended on.
+    return {"level": level, "trend": trend, "seasonal": seasonal, "m": m, "n": len(y)}
 
 
 def forecast(fit_result, steps):
@@ -115,10 +119,29 @@ def forecast(fit_result, steps):
     linearly by `trend` each step (the additive-trend assumption), with
     the appropriate seasonal index for how far into the next cycle each
     step falls added on top.
+
+    Bug fixed here (verification pass, 2026-11-04): this used to index
+    the seasonal array as `seasonal[(h - 1) % m]`, which always restarts
+    the cycle at phase 0 on the FIRST forecast step, regardless of which
+    phase the fitted series actually ended on. That's silently correct
+    only when `len(y)` happens to be an exact multiple of `m` (every
+    existing test used `np.tile(pattern, k)`, which is always a multiple
+    of m -- the bug had no test that could have caught it). In
+    production, build_daily_sales_series always fits a fixed 90-day
+    window, and 90 % 7 == 6, not 0 -- every real forecast was shifting
+    the weekly pattern (e.g. the weekend spike) onto the wrong days.
+
+    Fit's recurrence updates `seasonal[t % m]` for t in range(n) (see
+    _fit_with_params), so the phase immediately after the last fitted
+    point (absolute time index n) is `n % m`, not 0 -- `seasonal[(n + h
+    - 1) % m]` below continues the cycle from exactly there. When n is a
+    multiple of m this reduces to the old formula exactly, so every
+    passing test is unaffected.
     """
     level = fit_result["level"]
     trend = fit_result["trend"]
     seasonal = fit_result["seasonal"]
     m = fit_result["m"]
+    n = fit_result["n"]
 
-    return [level + h * trend + seasonal[(h - 1) % m] for h in range(1, steps + 1)]
+    return [level + h * trend + seasonal[(n + h - 1) % m] for h in range(1, steps + 1)]

@@ -25,10 +25,18 @@ Packaging_Materials.xlsx happens to be all whole numbers, but is imported
 through the same Decimal-safe path for one consistent importer.
 
 Idempotency:
-  - Product fields (price=Unit Cost, supplier, unit_of_measure, is_active)
-    are always kept in sync via update_or_create keyed by name -- safe to
-    re-run, same convention as scripts/seed_menu_catalog.py, since these
-    are catalog metadata the client's file is the source of truth for.
+  - Product fields (price=Unit Cost, supplier, unit_of_measure, is_active,
+    category) are always kept in sync via update_or_create keyed by name
+    -- safe to re-run, same convention as scripts/seed_menu_catalog.py,
+    since these are catalog metadata the client's file is the source of
+    truth for. `category` is set to Product.Category.PACKAGING for every
+    row from Packaging_Materials.xlsx (task #148, client review,
+    2026-11-04 -- "Packaging vs Food" filtering) and left blank for
+    Raw_Materials.xlsx rows. Re-running this command against both files
+    after upgrading is the supported way to backfill `category` onto
+    products that were already imported before this field existed here --
+    it only touches catalog metadata, never quantity_on_hand/
+    reorder_threshold on an existing Inventory row (see below).
   - Inventory rows are get_or_create'd per (branch, product): a row's
     quantity_on_hand/reorder_threshold is set ONLY the first time that
     row is created. A second run (accidental re-import, or run again
@@ -144,8 +152,15 @@ class Command(BaseCommand):
 
         with transaction.atomic():
             for label, rows in all_rows.items():
+                # Task #148 (client review, 2026-11-04): the client's two
+                # files ARE the one honest signal for "Packaging vs Food"
+                # -- every row from Packaging_Materials.xlsx is tagged
+                # Product.Category.PACKAGING; Raw_Materials.xlsx rows are
+                # left with a blank category (see Product.Category's own
+                # docstring for why no "Raw Material" value is invented).
+                category = Product.Category.PACKAGING if label == "Packaging Materials" else ""
                 for row in rows:
-                    product, created = self._upsert_product(row)
+                    product, created = self._upsert_product(row, category)
                     products_created += created
                     products_updated += not created
 
@@ -238,7 +253,7 @@ class Command(BaseCommand):
 
     # -- import ---------------------------------------------------------
 
-    def _upsert_product(self, row):
+    def _upsert_product(self, row, category):
         product, created = Product.objects.update_or_create(
             name=row["name"],
             defaults={
@@ -247,6 +262,7 @@ class Command(BaseCommand):
                 "unit_of_measure": row["unit"],
                 "supplier": row["supplier"],
                 "is_active": row["is_active"],
+                "category": category,
             },
         )
         return product, created

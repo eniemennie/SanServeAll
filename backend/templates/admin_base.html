@@ -150,6 +150,14 @@ Usage in a screen template:
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
         <span class="jc-nav-label">Stock Transfers</span>
       </a>
+      {% elif user.role.name == "PURCHASING" %}
+      {% comment %} Task #143: Purchasing's only screen (role_required
+      403s everything else) -- same "don't advertise a link that would
+      403" reasoning as the Commissary Staff branch above. {% endcomment %}
+      <a href="{% url 'purchasing:supplier_management' %}" class="jc-nav-item {% if active_nav == 'suppliers' %}active{% endif %}">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
+        <span class="jc-nav-label">Suppliers</span>
+      </a>
       {% else %}
       <a href="{% url 'accounts:admin_dashboard' %}" class="jc-nav-item {% if active_nav == 'dashboard' %}active{% endif %}">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
@@ -179,10 +187,19 @@ Usage in a screen template:
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2.5 12.5V2.5h10l8.09 8.09a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
         <span class="jc-nav-label">Product Availability</span>
       </a>
+      <a href="{% url 'purchasing:supplier_management' %}" class="jc-nav-item {% if active_nav == 'suppliers' %}active{% endif %}">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
+        <span class="jc-nav-label">Suppliers</span>
+      </a>
       {% endif %}
     </div>
 
-    {% if user.role.name != "COMMISSARY_STAFF" %}
+    {% if user.role.name == "OWNER_ADMIN" %}
+    {% comment %} Task #143: tightened from "!= COMMISSARY_STAFF" to an
+    explicit Owner/Admin check now that a third non-Commissary role
+    (PURCHASING) exists -- Accounts/Settings are Owner/Admin-only
+    (role_required(Role.OWNER_ADMIN)) and must not be advertised to
+    Purchasing either. {% endcomment %}
     <div class="px-2 py-2" style="border-top: 1px solid #EEF0F2;">
       <a href="{% url 'accounts:account_management' %}" class="jc-nav-item {% if active_nav == 'accounts' %}active{% endif %}">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>

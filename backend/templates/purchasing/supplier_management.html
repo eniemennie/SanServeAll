@@ -1,0 +1,107 @@
+{% extends "admin_base.html" %}
+{% block admin_title %}Suppliers{% endblock %}
+{% block admin_content %}
+
+<div class="mb-3">
+    <h1 class="h5 mb-1">Suppliers</h1>
+    <p class="text-muted small mb-0">
+        Manage who the business buys raw materials, packaging, and other goods from.
+        Visible only to Purchasing and Owner/Admin.
+    </p>
+</div>
+
+{% if error %}
+<div class="alert alert-danger py-2">{{ error }}</div>
+{% endif %}
+
+{% if created_name %}
+<div class="alert alert-success py-2">Supplier <strong>{{ created_name }}</strong> added.</div>
+{% endif %}
+
+<div class="row g-4">
+    <div class="col-lg-5">
+        <div class="jc-card p-4">
+            <h2 class="h6 mb-3">New Supplier</h2>
+            <form method="post">
+                {% csrf_token %}
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Name</label>
+                    <input type="text" name="name" class="form-control" required autofocus>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Contact Person</label>
+                    <input type="text" name="contact_person" class="form-control">
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <label class="form-label small fw-semibold">Phone Number</label>
+                        <input type="text" name="phone_number" class="form-control">
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label small fw-semibold">Email</label>
+                        <input type="email" name="email" class="form-control">
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Address</label>
+                    <input type="text" name="address" class="form-control">
+                </div>
+                <div class="mb-4">
+                    <label class="form-label small fw-semibold">Notes</label>
+                    <textarea name="notes" class="form-control" rows="2" placeholder="Payment terms, lead times, etc."></textarea>
+                </div>
+                <button type="submit" class="btn" style="background: var(--jc-orange); color: #fff;">
+                    Add Supplier
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div class="col-lg-7">
+        <div class="jc-card p-0">
+            <table class="table mb-0">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Contact</th>
+                        <th>Phone</th>
+                        <th>Email</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for supplier in suppliers %}
+                    <tr>
+                        <td>{{ supplier.name }}</td>
+                        <td>{{ supplier.contact_person|default:"&mdash;" }}</td>
+                        <td>{{ supplier.phone_number|default:"&mdash;" }}</td>
+                        <td>{{ supplier.email|default:"&mdash;" }}</td>
+                        <td>
+                            {% if supplier.is_active %}
+                            <span class="jc-badge jc-badge-adequate">Active</span>
+                            {% else %}
+                            <span class="jc-badge jc-badge-critical">Inactive</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end">
+                            <form method="post" action="{% url 'purchasing:supplier_toggle_active' supplier.pk %}">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm btn-outline-secondary">
+                                    {% if supplier.is_active %}Deactivate{% else %}Reactivate{% endif %}
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="6" class="text-muted text-center py-4">No suppliers yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+{% endblock %}

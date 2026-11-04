@@ -148,6 +148,16 @@ class BranchSelectionView(LoginRequiredMixin, View):
     template_name = "accounts/branch_selection.html"
 
     def get(self, request):
+        # Task #143: Purchasing isn't branch-scoped and Supplier screens
+        # don't read request.selected_branch at all (same reasoning as
+        # Owner/Admin skipping straight to admin_dashboard, above) -- so
+        # there's nothing for this picker to do for that role. Checked
+        # before get_selectable_branches, which has no Purchasing case of
+        # its own and would otherwise return an empty queryset for a
+        # branch-less Purchasing account.
+        if request.user.role and request.user.role.name == Role.PURCHASING:
+            return redirect("purchasing:supplier_management")
+
         branches = get_selectable_branches(request.user)
 
         if branches.count() == 1:
