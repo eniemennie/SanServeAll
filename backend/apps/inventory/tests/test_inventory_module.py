@@ -465,6 +465,49 @@ class TestCreateProduct:
                 unit_of_measure="BOGUS",
             )
 
+    def test_rejects_a_duplicate_name_among_active_products(self):
+        """Task #111: a real duplicate pair ("Seasalt Latte") was found
+        live, with nothing stopping it. create_product's own pre-check
+        should catch this before it ever reaches the DB constraint, with a
+        clear, catchable error message."""
+        services.create_product("Spanish Latte", "125.00", Product.ProductType.FINISHED_GOOD)
+        with pytest.raises(services.InventoryServiceError, match="already exists"):
+            services.create_product("Spanish Latte", "130.00", Product.ProductType.FINISHED_GOOD)
+
+    def test_rejects_a_duplicate_name_case_insensitively(self):
+        """kahero_integration's own import matching (_resolve_product)
+        already treats names case-insensitively, so two active products
+        differing only by case would be exactly the kind of pair that
+        pipeline can't disambiguate -- must be rejected too."""
+        services.create_product("Flour", "45.00", Product.ProductType.MATERIAL)
+        with pytest.raises(services.InventoryServiceError, match="already exists"):
+            services.create_product("flour", "45.00", Product.ProductType.MATERIAL)
+
+    def test_allows_reusing_the_name_of_a_discontinued_product(self):
+        """A discontinued product's name is free to reuse -- discontinuing
+        something and later introducing a genuine replacement under the
+        same name is a legitimate catalog change, not a duplicate. This is
+        also what lets the constraint coexist with the real, already-
+        resolved live data (ids 3/4, both literally "Seasalt Latte", one
+        deactivated rather than deleted)."""
+        old = services.create_product("Seasalt Latte", "112.00", Product.ProductType.FINISHED_GOOD)
+        old.is_active = False
+        old.save()
+
+        new = services.create_product("Seasalt Latte", "120.00", Product.ProductType.FINISHED_GOOD)
+        assert new.pk != old.pk
+
+    def test_db_constraint_is_the_backstop_even_bypassing_the_service(self):
+        """The service-level pre-check above isn't the only thing
+        enforcing this -- the DB constraint itself (unique_active_product_name_ci)
+        must reject a duplicate created directly through the model, the
+        same way Django admin's own product creation form would hit it."""
+        from django.db import IntegrityError, transaction
+
+        Product.objects.create(name="Americano", price="150.00")
+        with pytest.raises(IntegrityError), transaction.atomic():
+            Product.objects.create(name="americano", price="150.00")
+
 
 class TestInventoryMonitoringView:
     def test_branch_staff_can_view_monitoring_for_their_own_branch(self, staff_client, branch):
