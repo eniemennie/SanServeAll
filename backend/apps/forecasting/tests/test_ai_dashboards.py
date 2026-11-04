@@ -429,6 +429,101 @@ class TestForecastingDashboardView:
         response = owner_client.get(reverse("forecasting:forecasting_dashboard"))
         assert response.context["active_nav"] == "forecast"
 
+    def test_naive_forecast_shows_plain_language_simple_average_badge(
+        self, owner_client, branch, latte
+    ):
+        """Task #141 (client review, 2026-11-04): confirmed the forecast
+        pipeline never fabricates data -- NAIVE_AVERAGE is an honest
+        fallback for a product without enough recorded sales history.
+        The gap was that the page only showed that as a bare
+        'NAIVE_AVERAGE' badge with no plain-language explanation. It
+        should now read "Simple Average", never the raw model string."""
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=timezone.now().date(),
+            predicted_quantity=0.5,
+            model_used="NAIVE_AVERAGE",
+        )
+
+        response = owner_client.get(
+            reverse("forecasting:forecasting_dashboard"), {"branch": branch.pk}
+        )
+        content = response.content.decode()
+        assert "Simple Average" in content
+        assert "NAIVE_AVERAGE" not in content
+
+    def test_holtwinters_forecast_shows_plain_language_statistical_model_badge(
+        self, owner_client, branch, latte
+    ):
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=timezone.now().date(),
+            predicted_quantity=8.0,
+            model_used="HoltWinters(seasonal=7)",
+        )
+
+        response = owner_client.get(
+            reverse("forecasting:forecasting_dashboard"), {"branch": branch.pk}
+        )
+        content = response.content.decode()
+        assert "Statistical Model" in content
+
+    def test_naive_fallback_note_shown_when_any_prediction_is_naive(
+        self, owner_client, branch, latte
+    ):
+        cake = Product.objects.create(name="Cake", price="140.00")
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=timezone.now().date(),
+            predicted_quantity=8.0,
+            model_used="HoltWinters(seasonal=7)",
+        )
+        Forecast.objects.create(
+            branch=branch,
+            product=cake,
+            forecast_date=timezone.now().date(),
+            predicted_quantity=0.2,
+            model_used="NAIVE_AVERAGE",
+        )
+
+        response = owner_client.get(
+            reverse("forecasting:forecasting_dashboard"), {"branch": branch.pk}
+        )
+        content = response.content.decode()
+        assert "1 of 2" in content
+        assert "enough recorded sales history" in content
+
+    def test_no_fallback_note_when_all_predictions_use_the_real_model(
+        self, owner_client, branch, latte
+    ):
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=timezone.now().date(),
+            predicted_quantity=8.0,
+            model_used="HoltWinters(seasonal=7)",
+        )
+
+        response = owner_client.get(
+            reverse("forecasting:forecasting_dashboard"), {"branch": branch.pk}
+        )
+        content = response.content.decode()
+        assert "enough recorded sales history" not in content
+
+    def test_no_forecasts_shows_explicit_plain_language_empty_state(self, owner_client, branch):
+        """Confirms the page says explicitly why nothing is forecasted
+        yet, rather than leaving a bare empty table that could be
+        mistaken for a loading state or a bug."""
+        response = owner_client.get(
+            reverse("forecasting:forecasting_dashboard"), {"branch": branch.pk}
+        )
+        content = response.content.decode()
+        assert "No forecasts yet for this selection" in content
+        assert "per-product sales history" in content
+
 
 class TestResourceManagementDashboardView:
     def test_owner_can_view(self, owner_client):

@@ -46,6 +46,23 @@
 </div>
 <p class="text-muted small mb-4">*Confidence is a simple heuristic (1 - error/predicted demand), not a formal statistical confidence interval.</p>
 
+{% if summary.naive_count > 0 %}
+<div class="jc-card p-3 p-md-4 mb-4" style="border-left: 4px solid var(--jc-teal);">
+    <p class="small mb-0">
+        {% if summary.model_count > 0 %}
+        <strong>{{ summary.naive_count }} of {{ summary.predictions_made }}</strong> predictions below use a simple
+        average instead of the full Holt-Winters model &mdash;
+        {% else %}
+        All predictions below use a simple average instead of the full Holt-Winters model &mdash;
+        {% endif %}
+        those products don't yet have enough recorded sales history (at least 14 days, with sales on at
+        least 3 of them) for the statistical model to fit meaningfully. This isn't invented data: it's a
+        plain trailing average of what little real history exists, clearly marked "Simple Average" below.
+        It will switch to the full model automatically once that product has more history.
+    </p>
+</div>
+{% endif %}
+
 <div class="jc-card p-3 p-md-4 mb-4">
     <div class="fw-semibold mb-2">7-Day Demand Pattern (all products combined)</div>
     <canvas id="demandPatternChart" height="80"></canvas>
@@ -68,11 +85,21 @@
                 <td>{{ f.branch.name }}</td>
                 <td>{{ f.forecast_date }}</td>
                 <td>{{ f.predicted_quantity|floatformat:1 }}</td>
-                <td><span class="jc-badge jc-badge-info">{{ f.model_used }}</span></td>
+                <td>
+                    {% if f.model_used == "NAIVE_AVERAGE" %}
+                    <span class="jc-badge jc-badge-low" title="Not enough sales history yet for the full model -- this is a plain average of recent days.">Simple Average</span>
+                    {% else %}
+                    <span class="jc-badge jc-badge-info" title="{{ f.model_used }}">Statistical Model</span>
+                    {% endif %}
+                </td>
                 <td>{% if f.mae is not None %}{{ f.mae }}{% else %}&mdash;{% endif %}</td>
             </tr>
             {% empty %}
-            <tr><td colspan="6" class="text-center text-muted py-3">No forecasts generated yet.</td></tr>
+            <tr><td colspan="6" class="text-center text-muted py-3">
+                No forecasts yet for this selection. Forecasting needs recorded, per-product sales history
+                (not just a daily revenue total) -- check back once more itemized transactions have come
+                in through the point of sale.
+            </td></tr>
             {% endfor %}
         </tbody>
     </table>
