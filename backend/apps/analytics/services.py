@@ -7,13 +7,59 @@ models, this module only reports on what other modules already record.
 from datetime import timedelta
 from decimal import Decimal
 
-from django.db.models import F, Sum
+from django.db.models import F, Max, Sum
 from django.utils import timezone
 
 from apps.inventory.services import get_branch_inventory
 from apps.pos.models import SalesItem, SalesTransaction
 from apps.production.models import IngredientUsage, ProductionRecord
 from apps.system_config.models import BusinessSettings
+
+
+def _trailing_window_anchor(branch=None):
+    """The end-of-window anchor for every trailing-N-days/weeks query
+    below. Defaults to "now" -- unchanged behavior for a branch with an
+    ongoing live POS stream (Batangas/Lipa), since its latest
+    transaction is always close to now anyway.
+
+    For a branch that only gets new data via periodic batch upload, not
+    live POS (Alangilan, via KaHero), anchoring to "now" means that once
+    more than `days`/`weeks` have passed since the last upload, every
+    trailing window lands entirely after that branch's last real
+    transaction -- the dashboard then honestly has nothing to show, even
+    though real, correctly-attributed data exists for that branch.
+
+    Anchoring instead to whichever is EARLIER -- now, or that branch's
+    own latest completed transaction -- keeps the window covering that
+    branch's actual most recent period of real data. That's what
+    "display actual results" means for a branch that isn't continuously
+    updated, without fabricating anything: it's still a real `days`-day
+    (or `weeks`-week) slice of real transactions, just not one ending
+    today.
+
+    Scoped to a single branch only (branch=None keeps the previous,
+    now-anchored behavior) -- there's no single sensible anchor across
+    branches with different update cadences, and the "All Branches"
+    views aggregate branches with live data anyway.
+
+    Nudged 1 second past the latest transaction itself (when that's the
+    chosen anchor) rather than sitting exactly on it: every caller below
+    filters with a strict upper bound (completed_at__lt=week_end, or an
+    exclusive-window pattern via gte on the start side), matching the
+    old behavior where "now" was always safely after any existing
+    completed_at. Anchoring exactly on the latest transaction's own
+    timestamp would make that transaction fail its own window's
+    strict-less-than check and get excluded -- the opposite of this
+    fix's purpose.
+    """
+    if branch is None:
+        return timezone.now()
+    latest = SalesTransaction.objects.filter(
+        branch=branch, status=SalesTransaction.Status.COMPLETED
+    ).aggregate(latest=Max("completed_at"))["latest"]
+    if latest is None:
+        return timezone.now()
+    return min(timezone.now(), latest + timedelta(seconds=1))
 
 
 def get_sales_summary(branch=None, days=30):
@@ -39,7 +85,7 @@ def get_sales_summary(branch=None, days=30):
     discount is computed against each transaction's own subtotal, not a
     column that can be summed first and discounted after.
     """
-    since = timezone.now() - timedelta(days=days)
+    since = _trailing_window_anchor(branch) - timedelta(days=days)
     transactions = SalesTransaction.objects.filter(
         status=SalesTransaction.Status.COMPLETED, completed_at__gte=since
     )
@@ -67,8 +113,14 @@ def get_weekly_sales_trend(branch=None, weeks=8):
     week first, so it plots left-to-right chronologically. Same
     discount-aware grand_total revenue calculation as get_sales_summary,
     for the same reason (a raw SalesItem SUM() is the pre-discount
-    subtotal, not what was actually collected)."""
-    now = timezone.now()
+    subtotal, not what was actually collected).
+
+    Anchored via _trailing_window_anchor rather than straight
+    timezone.now() -- see that helper's docstring. Without this, a
+    batch-only branch (Alangilan) whose last upload is more than `weeks`
+    old would show a chart of entirely-empty weeks even though it has
+    real recent (for that branch) weekly data to plot."""
+    now = _trailing_window_anchor(branch)
     trend = []
     for week_offset in range(weeks - 1, -1, -1):
         week_end = now - timedelta(weeks=week_offset)
@@ -145,9 +197,13 @@ def get_branch_performance(days=30):
     """
     from apps.accounts.models import Branch
 
-    since = timezone.now() - timedelta(days=days)
     results = []
     for branch in Branch.objects.filter(is_active=True, is_commissary=False):
+        # Anchored per-branch (see _trailing_window_anchor) rather than
+        # once outside the loop -- a batch-only branch (Alangilan) needs
+        # its own window anchored to its own latest data, not to
+        # whichever branch happens to have live activity right now.
+        since = _trailing_window_anchor(branch) - timedelta(days=days)
         transactions = list(
             SalesTransaction.objects.filter(
                 branch=branch, status=SalesTransaction.Status.COMPLETED, completed_at__gte=since
@@ -198,7 +254,7 @@ def get_sales_summary_with_toggles(
     changing its behavior would be a real regression risk for no benefit
     to that screen, which doesn't have these toggles.
     """
-    since = timezone.now() - timedelta(days=days)
+    since = _trailing_window_anchor(branch) - timedelta(days=days)
     transactions = SalesTransaction.objects.filter(
         status=SalesTransaction.Status.COMPLETED, completed_at__gte=since
     ).prefetch_related("items")
@@ -268,7 +324,7 @@ def get_top_products(branch=None, days=30, limit=5):
     allocation rule. Ranking by units_sold (what this panel is actually
     for) is unaffected either way; only the displayed revenue figure per
     product should be read as pre-discount."""
-    since = timezone.now() - timedelta(days=days)
+    since = _trailing_window_anchor(branch) - timedelta(days=days)
     items = SalesItem.objects.filter(
         transaction__status=SalesTransaction.Status.COMPLETED,
         transaction__completed_at__gte=since,
@@ -295,7 +351,7 @@ def get_total_units_sold(branch=None, days=30):
     its own small query rather than summing get_top_products' own
     (limited, ranked) results, since the percentages need to reflect
     every product sold, not just the top N shown."""
-    since = timezone.now() - timedelta(days=days)
+    since = _trailing_window_anchor(branch) - timedelta(days=days)
     items = SalesItem.objects.filter(
         transaction__status=SalesTransaction.Status.COMPLETED,
         transaction__completed_at__gte=since,
