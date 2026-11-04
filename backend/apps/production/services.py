@@ -6,6 +6,7 @@ built (branch=commissary), rather than a separate stock-tracking system.
 """
 
 from datetime import timedelta
+from decimal import Decimal, InvalidOperation
 
 from django.db import transaction as db_transaction
 from django.db.models import Sum
@@ -53,8 +54,13 @@ def get_total_output(days=30):
 def record_production(commissary_staff, product_id, quantity_produced, ingredient_rows, **extra):
     """Records one production run (Fig. 3-24's Batch Management entry).
 
-    `ingredient_rows` is a list of {"material_id": int, "quantity_used": int}
-    dicts. Every material must have sufficient stock at the commissary --
+    `ingredient_rows` is a list of {"material_id": int, "quantity_used": Decimal}
+    dicts -- quantity_used accepts a Decimal, or anything Decimal() can parse
+    (an int, or a numeric string such as "0.05"), matching
+    IngredientUsage.quantity_used's own DecimalField(decimal_places=3): raw
+    materials are commonly measured in fractional kg/L, so a whole-number-only
+    type here would make it impossible to log a perfectly normal usage amount.
+    Every material must have sufficient stock at the commissary --
     if any one doesn't, the ENTIRE run is rejected (nothing partially
     deducted), since a production run that used only some of its planned
     ingredients isn't a real, meaningful state to record.
@@ -84,7 +90,10 @@ def record_production(commissary_staff, product_id, quantity_produced, ingredien
         except (Product.DoesNotExist, KeyError):
             raise ProductionError(f"Material with id {row.get('material_id')} not found.")
 
-        quantity_used = int(row.get("quantity_used", 0))
+        try:
+            quantity_used = Decimal(str(row.get("quantity_used", 0)))
+        except InvalidOperation:
+            raise ProductionError(f"Invalid quantity for {material.name}.")
         if quantity_used <= 0:
             raise ProductionError(f"Quantity used for {material.name} must be greater than zero.")
 
