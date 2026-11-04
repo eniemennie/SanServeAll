@@ -270,34 +270,51 @@ def cancel_stock_transfer_order(order):
     (a return/correction), not a cancellation of this transfer, so it's
     deliberately not allowed here. No separate approval step is required
     (same scope decision as the rest of this stock-transfer workflow).
-    """
-    if order.status not in (
-        StockTransferOrder.Status.PROCESSING,
-        StockTransferOrder.Status.IN_TRANSIT,
-    ):
-        raise StockTransferError(
-            f"Order is {order.get_status_display()} -- only a Processing or "
-            "In Transit order can be cancelled."
-        )
 
+    Verification pass finding (2026-11-04), same risk class as backend
+    gap assessment item 26 (create_stock_transfer_order's own
+    double-submission fix, above): the original version checked and
+    mutated the caller's already-loaded `order` object directly, with no
+    row lock. Two near-simultaneous cancel requests for the same order
+    (double-click, or a network retry) each fetch their OWN separate
+    `order` instance via the view's plain get_object_or_404 -- both could
+    read status=PROCESSING, both pass this function's status check, and
+    both add `quantity` back to the commissary's Inventory, crediting it
+    twice for one real cancellation. Fixed the same way as item 26: the
+    order itself is re-fetched with select_for_update() inside the
+    atomic block and re-checked there, so the second request blocks
+    until the first commits, then sees CANCELLED and is correctly
+    rejected -- the caller's passed-in `order` is only used for its pk.
+    """
     with db_transaction.atomic():
-        order.status = StockTransferOrder.Status.CANCELLED
-        order.cancelled_at = timezone.now()
-        order.save()
+        locked_order = StockTransferOrder.objects.select_for_update().get(pk=order.pk)
+        if locked_order.status not in (
+            StockTransferOrder.Status.PROCESSING,
+            StockTransferOrder.Status.IN_TRANSIT,
+        ):
+            raise StockTransferError(
+                f"Order is {locked_order.get_status_display()} -- only a Processing or "
+                "In Transit order can be cancelled."
+            )
+
+        locked_order.status = StockTransferOrder.Status.CANCELLED
+        locked_order.cancelled_at = timezone.now()
+        locked_order.save()
 
         source_inventory, _ = Inventory.objects.get_or_create(
-            branch=order.source_branch, product=order.product
+            branch=locked_order.source_branch, product=locked_order.product
         )
-        source_inventory.quantity_on_hand += order.quantity
+        source_inventory = Inventory.objects.select_for_update().get(pk=source_inventory.pk)
+        source_inventory.quantity_on_hand += locked_order.quantity
         source_inventory.save()
         InventoryTransaction.objects.create(
-            branch=order.source_branch,
-            product=order.product,
+            branch=locked_order.source_branch,
+            product=locked_order.product,
             movement_type=InventoryTransaction.MovementType.TRANSFER_CANCELLED,
-            quantity_change=order.quantity,
+            quantity_change=locked_order.quantity,
         )
 
-    return order
+    return locked_order
 
 
 def advance_stock_transfer_status(order, new_status):
@@ -315,41 +332,59 @@ def advance_stock_transfer_status(order, new_status):
     input, or simply a missing/None POST field), which previously
     surfaced as an uncaught 500 instead of the StockTransferError the
     view already knows how to handle gracefully.
+
+    Verification pass finding (2026-11-04), same risk class as backend
+    gap assessment item 26: the original version checked and mutated
+    the caller's already-loaded `order` object directly, with no row
+    lock -- two near-simultaneous "mark Delivered" requests for the same
+    order could each pass the status check against their own stale copy
+    and each credit the destination branch's Inventory once, doubling
+    real stock that only actually arrived once. The order is now
+    re-fetched with select_for_update() inside the atomic block and
+    every check re-run against that locked row, same fix shape as
+    cancel_stock_transfer_order above -- the caller's passed-in `order`
+    is only used for its pk.
     """
-    allowed_next = _NEXT_TRANSFER_STATUS.get(order.status)
-    if allowed_next is None:
-        raise StockTransferError(
-            f"Order is already {order.get_status_display()} -- "
-            "no further status change is possible."
-        )
     valid_statuses = {choice.value for choice in StockTransferOrder.Status}
     if new_status not in valid_statuses:
         raise StockTransferError(f"'{new_status}' is not a recognized stock transfer status.")
-    if new_status != allowed_next:
-        raise StockTransferError(
-            f"Cannot move from {order.get_status_display()} directly to "
-            f"{StockTransferOrder.Status(new_status).label} -- the next step must be "
-            f"{allowed_next.label}."
-        )
 
     with db_transaction.atomic():
-        order.status = new_status
+        locked_order = StockTransferOrder.objects.select_for_update().get(pk=order.pk)
+
+        allowed_next = _NEXT_TRANSFER_STATUS.get(locked_order.status)
+        if allowed_next is None:
+            raise StockTransferError(
+                f"Order is already {locked_order.get_status_display()} -- "
+                "no further status change is possible."
+            )
+        if new_status != allowed_next:
+            raise StockTransferError(
+                f"Cannot move from {locked_order.get_status_display()} directly to "
+                f"{StockTransferOrder.Status(new_status).label} -- the next step must be "
+                f"{allowed_next.label}."
+            )
+
+        locked_order.status = new_status
         if new_status == StockTransferOrder.Status.DELIVERED:
-            order.delivered_at = timezone.now()
-            order.save()
+            locked_order.delivered_at = timezone.now()
+            locked_order.save()
 
             destination_inventory, _ = Inventory.objects.get_or_create(
-                branch=order.destination_branch, product=order.product
+                branch=locked_order.destination_branch, product=locked_order.product
             )
-            destination_inventory.quantity_on_hand += order.quantity
+            destination_inventory = Inventory.objects.select_for_update().get(
+                pk=destination_inventory.pk
+            )
+            destination_inventory.quantity_on_hand += locked_order.quantity
             destination_inventory.save()
             InventoryTransaction.objects.create(
-                branch=order.destination_branch,
-                product=order.product,
+                branch=locked_order.destination_branch,
+                product=locked_order.product,
                 movement_type=InventoryTransaction.MovementType.TRANSFER_IN,
-                quantity_change=order.quantity,
+                quantity_change=locked_order.quantity,
             )
         else:
-            order.save()
+            locked_order.save()
 
-    return order
+    return locked_order
