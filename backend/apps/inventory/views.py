@@ -87,11 +87,34 @@ def product_management(request):
     branch_id = request.GET.get("branch")
     selected_branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
     product_type = request.GET.get("type", "")
+    category = request.GET.get("category", "")
     search = request.GET.get("search", "")
 
     availability = services.get_product_availability(
-        branch=selected_branch, product_type=product_type or None, search=search
+        branch=selected_branch,
+        product_type=product_type or None,
+        category=category or None,
+        search=search,
     )
+
+    # Task #148 (client review, 2026-11-04): category options depend on
+    # which type tab is active -- a finished-goods category (Coffee,
+    # Pasta, ...) means nothing on the Raw Materials tab, and the
+    # Packaging/Raw Materials split means nothing on the Finished
+    # Products tab. Materials' own "Raw Materials (Food)" option maps to
+    # services.RAW_MATERIAL_CATEGORY_FILTER, not a real stored category
+    # (see that constant's docstring).
+    if product_type == Product.ProductType.MATERIAL:
+        category_choices = [
+            (Product.Category.PACKAGING, Product.Category.PACKAGING.label),
+            (services.RAW_MATERIAL_CATEGORY_FILTER, "Raw Materials (Food)"),
+        ]
+    else:
+        category_choices = [
+            (value, label)
+            for value, label in Product.Category.choices
+            if value != Product.Category.PACKAGING
+        ]
 
     return render(
         request,
@@ -101,6 +124,8 @@ def product_management(request):
             "branches": Branch.objects.filter(is_active=True, is_commissary=False),
             "selected_branch": selected_branch,
             "selected_type": product_type,
+            "selected_category": category,
+            "category_choices": category_choices,
             "search": search,
             "items": availability["items"],
             "stats": availability["stats"],

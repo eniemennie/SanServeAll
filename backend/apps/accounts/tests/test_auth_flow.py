@@ -30,6 +30,7 @@ def roles():
         "owner_admin": Role.objects.create(name=Role.OWNER_ADMIN),
         "branch_staff": Role.objects.create(name=Role.BRANCH_STAFF),
         "commissary_staff": Role.objects.create(name=Role.COMMISSARY_STAFF),
+        "purchasing": Role.objects.create(name=Role.PURCHASING),
     }
 
 
@@ -61,6 +62,14 @@ def commissary_worker(roles, branches):
         password="testpass123",
         role=roles["commissary_staff"],
         branch=branches["batangas"],
+    )
+
+
+@pytest.fixture
+def purchasing_staff(roles):
+    # Task #143: not branch-scoped, same convention as OWNER_ADMIN.
+    return User.objects.create_user(
+        username="purchasing1", password="testpass123", role=roles["purchasing"]
     )
 
 
@@ -136,6 +145,26 @@ class TestBranchSelection:
         response = client.get(reverse("accounts:select_branch"))
         assert response.status_code == 302
         assert "/accounts/login/" in response.url
+
+    def test_purchasing_staff_skips_the_picker_and_goes_straight_to_suppliers(
+        self, client, purchasing_staff
+    ):
+        """Task #143: Purchasing isn't branch-scoped and Supplier screens
+        don't use request.selected_branch, so there's nothing for the
+        branch picker to do for this role -- it should never even be
+        shown, same as Owner/Admin skipping straight to admin_dashboard
+        after 2FA."""
+        client.force_login(purchasing_staff)
+        response = client.get(reverse("accounts:select_branch"))
+        assert response.status_code == 302
+        assert response.url == reverse("purchasing:supplier_management")
+
+    def test_purchasing_staff_is_not_left_with_a_selected_branch_in_session(
+        self, client, purchasing_staff
+    ):
+        client.force_login(purchasing_staff)
+        client.get(reverse("accounts:select_branch"))
+        assert "selected_branch_id" not in client.session
 
 
 class TestCashierPin:
