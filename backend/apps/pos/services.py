@@ -77,7 +77,24 @@ def compute_customized_price(product, size, addon_ids, discount_type, discount_a
     After Discount).
 
     Never lets a discount push the price below zero -- caps at the
-    pre-discount subtotal regardless of what was entered."""
+    pre-discount subtotal regardless of what was entered.
+
+    Same Decimal-precision bug as the transaction-wide discount
+    (apps/pos/models.py's transaction_discount_value, fixed 2026-11-04
+    after a live-site finding): a PERCENT discount's value is never
+    rounded to 2 decimal places by Decimal division/multiplication on
+    its own (e.g. Decimal('12') / Decimal('100') = Decimal('0.12'), but
+    price_before_discount * that preserves extra places from the
+    multiplication, e.g. Decimal('520.00') * Decimal('0.12') =
+    Decimal('62.4000')). unit_price is stored on a DecimalField(2) and
+    gets quantized on save, but discount_value is also stored verbatim
+    (via str()) into the item's `customizations` JSONField --  a field
+    type with no precision enforcement at all -- and from there feeds
+    SalesTransaction.item_discounts_total's running total, which is a
+    plain Python property with nothing to round it either. quantize()d
+    here, at the one place this value is computed, so both the stored
+    JSON value and every aggregate built from it inherit a clean
+    2-decimal-place peso amount."""
     from apps.pos.models import AddOn
 
     base_price = product.price
@@ -103,6 +120,7 @@ def compute_customized_price(product, size, addon_ids, discount_type, discount_a
         if discount_amount > 0:
             if discount_type == "PERCENT":
                 discount_value = price_before_discount * (discount_amount / Decimal("100"))
+                discount_value = discount_value.quantize(Decimal("0.01"))
             else:
                 discount_value = discount_amount
             # Never let a discount push the price negative
