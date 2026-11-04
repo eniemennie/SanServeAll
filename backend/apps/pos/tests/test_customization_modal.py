@@ -158,6 +158,42 @@ class TestComputeCustomizedPrice:
         assert discount_value == Decimal("0.00")
         assert final_price == Decimal("95.00")
 
+    def test_percent_discount_value_has_exactly_two_decimal_places(self, beverage):
+        """Same Decimal-precision bug as the transaction-wide discount
+        (apps/pos/models.py's transaction_discount_value, live-site
+        finding 2026-11-04): Decimal division/multiplication preserves
+        extra precision from its operands unless explicitly quantized.
+        The existing test_percent_discount_computes_correctly above uses
+        95.00/20% -- a combination that happens to divide evenly -- so
+        it can't catch this; a price that does NOT divide evenly (large
+        beverage, P105.00) exposes it. Checking the exponent rather than
+        just equality matters because Decimal('X.00') == Decimal('X.0000')
+        is True in Python -- only the exponent (or str() rendering, as
+        used by Django templates) reveals the extra digits."""
+        final_price, discount_value, before = services.compute_customized_price(
+            beverage, "LARGE", [], "PERCENT", "12"
+        )
+        assert before == Decimal("105.00")
+        assert discount_value.as_tuple().exponent == -2
+        assert final_price.as_tuple().exponent == -2
+
+    def test_reproduces_the_customization_modal_precision_pattern(self, beverage):
+        """Realistic numbers matching the live-site discount screenshot
+        pattern (12% discount, non-exact-dividing base price): without
+        quantize(), Decimal('520.00') * (Decimal('12') / Decimal('100'))
+        = Decimal('62.4000') (4 decimal places), which previously
+        propagated into `final_price` and, worse, straight into the
+        item's `customizations["discount_value"]` JSON string with no
+        field-level rounding to catch it there either."""
+        oat_milk = AddOn.objects.create(name="Oat Milk", price=Decimal("30.00"))
+        another = AddOn.objects.create(name="Vanilla Syrup", price=Decimal("395.00"))
+        final_price, discount_value, before = services.compute_customized_price(
+            beverage, "LARGE", [oat_milk.pk, another.pk], "PERCENT", "12"
+        )
+        assert before == Decimal("530.00")
+        assert str(discount_value) == "63.60"
+        assert str(final_price) == "466.40"
+
 
 class TestAddCustomizedItemService:
     def test_creates_item_with_computed_price(self, draft, beverage):
