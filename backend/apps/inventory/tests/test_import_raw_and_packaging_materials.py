@@ -218,6 +218,52 @@ class TestImportRawAndPackagingMaterials:
         pack_product = Product.objects.get(name__icontains="Packaging hot")
         assert pack_product.unit_of_measure == Product.UnitOfMeasure.PIECE
 
+    def test_packaging_file_rows_are_tagged_with_the_packaging_category(self, branches, tmp_path):
+        """Task #148 (client review, 2026-11-04): 'Packaging vs Food'
+        filtering needs a real, persisted signal -- the source file
+        itself (never unit_of_measure, which packaging and raw-material
+        rows both use e.g. PIECE/PACK/BOX)."""
+        pack_path = tmp_path / "packaging.xlsx"
+        _write_workbook(
+            pack_path, [("Cling wrap", "Shopee", "roll", 50.0, 12, 3, "COMMISSARY", True)]
+        )
+        call_command("import_raw_and_packaging_materials", packaging_materials=str(pack_path))
+
+        product = Product.objects.get(name="Cling wrap")
+        assert product.category == Product.Category.PACKAGING
+
+    def test_raw_materials_file_rows_are_left_with_a_blank_category(self, branches, tmp_path):
+        raw_path = tmp_path / "raw.xlsx"
+        _write_workbook(
+            raw_path, [("White sugar", "Juan Store", "kg", 82.0, 113.9, 37.3, "COMMISSARY", True)]
+        )
+        call_command("import_raw_and_packaging_materials", raw_materials=str(raw_path))
+
+        assert Product.objects.get(name="White sugar").category == ""
+
+    def test_rerun_backfills_category_onto_an_already_imported_product(self, branches, tmp_path):
+        """A product imported before `category` was tracked here (or
+        before this task existed at all) gets the right category the
+        next time this command runs against the same file -- category
+        is catalog metadata, kept in sync on every run just like price/
+        supplier/unit, unrelated to the --force/Inventory-quantity rule."""
+        pack_path = tmp_path / "packaging.xlsx"
+        _write_workbook(
+            pack_path, [("Cling wrap", "Shopee", "roll", 50.0, 12, 3, "COMMISSARY", True)]
+        )
+        product = Product.objects.create(
+            name="Cling wrap",
+            price="40.00",
+            product_type=Product.ProductType.MATERIAL,
+            unit_of_measure=Product.UnitOfMeasure.ROLL,
+            category="",  # simulates a pre-task-#148 import
+        )
+
+        call_command("import_raw_and_packaging_materials", packaging_materials=str(pack_path))
+
+        product.refresh_from_db()
+        assert product.category == Product.Category.PACKAGING
+
     def test_missing_file_raises_a_clear_error(self, branches):
         with pytest.raises(CommandError, match="File not found"):
             call_command(

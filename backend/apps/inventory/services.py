@@ -7,8 +7,19 @@ from decimal import Decimal, InvalidOperation
 
 from apps.inventory.models import Inventory, InventoryTransaction, Product
 
+# Task #148 (client review, 2026-11-04): "Packaging vs Food" is the one
+# real distinction the client asked for among MATERIAL rows, but a raw/
+# food material's Product.category is deliberately left blank (see
+# Product.Category's own docstring) rather than given an invented "Raw
+# Material" value. This sentinel is a UI-only filter choice -- never a
+# stored category value -- meaning "MATERIAL rows that are NOT tagged
+# Packaging," so the Product Availability filter can still offer a real
+# "Raw Materials (Food)" option without the database ever claiming that
+# label is an actual category.
+RAW_MATERIAL_CATEGORY_FILTER = "RAW_MATERIAL"
 
-def get_product_availability(branch=None, product_type=None, search=""):
+
+def get_product_availability(branch=None, product_type=None, category=None, search=""):
     """Product Availability screen (Fig. 3-34), enhanced beyond the bare
     catalog list product_management previously showed: real per-branch
     stock across all branches (or one, via the shared shell's branch
@@ -22,6 +33,12 @@ def get_product_availability(branch=None, product_type=None, search=""):
     Excludes discontinued products (Product.is_active=False) -- backend
     gap assessment: a discontinued product with leftover stock was
     still showing up here as if it were a normal, orderable item.
+
+    `category` filters by Product.category (e.g. a finished-goods
+    category like COFFEE, or Product.Category.PACKAGING for materials).
+    Passing RAW_MATERIAL_CATEGORY_FILTER is the one special case: it
+    means "a MATERIAL row with no category tagged at all" (see that
+    constant's own docstring for why this isn't a real stored value).
     """
     from apps.accounts.models import Branch
 
@@ -34,6 +51,12 @@ def get_product_availability(branch=None, product_type=None, search=""):
         )
     if product_type:
         queryset = queryset.filter(product__product_type=product_type)
+    if category == RAW_MATERIAL_CATEGORY_FILTER:
+        queryset = queryset.filter(
+            product__product_type=Product.ProductType.MATERIAL, product__category=""
+        )
+    elif category:
+        queryset = queryset.filter(product__category=category)
     if search:
         queryset = queryset.filter(product__name__icontains=search)
 
