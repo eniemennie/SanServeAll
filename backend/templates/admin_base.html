@@ -163,6 +163,15 @@ Usage in a screen template:
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
         <span class="jc-nav-label">Dashboard</span>
       </a>
+
+      {% comment %} Task (adviser UX review, 2026-11-05): grouped into
+      labeled sections rather than one flat list -- same set of screens as
+      before, same URLs, same active-state logic; only the grouping and
+      labels are new. Decision Support is added here for the first time --
+      the view/URL (forecasting:decision_support) already existed but had
+      no sidebar link anywhere, so it was unreachable except by typing the
+      URL directly. {% endcomment %}
+      <div class="jc-nav-group-label">Operations</div>
       <a href="{% url 'production:batch_management' %}" class="jc-nav-item {% if active_nav == 'batch' %}active{% endif %}">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4"></path></svg>
         <span class="jc-nav-label">Batch Logs</span>
@@ -171,6 +180,12 @@ Usage in a screen template:
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
         <span class="jc-nav-label">Stock Transfers</span>
       </a>
+      <a href="{% url 'inventory:product_management' %}" class="jc-nav-item {% if active_nav == 'availability' %}active{% endif %}">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2.5 12.5V2.5h10l8.09 8.09a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
+        <span class="jc-nav-label">Product Availability</span>
+      </a>
+
+      <div class="jc-nav-group-label">Business Intelligence</div>
       <a href="{% url 'forecasting:forecasting_dashboard' %}" class="jc-nav-item {% if active_nav == 'forecast' %}active{% endif %}">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
         <span class="jc-nav-label">Demand Forecasting</span>
@@ -179,14 +194,16 @@ Usage in a screen template:
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
         <span class="jc-nav-label">Resource Management</span>
       </a>
+      <a href="{% url 'forecasting:decision_support' %}" class="jc-nav-item {% if active_nav == 'decision_support' %}active{% endif %}">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+        <span class="jc-nav-label">Decision Support</span>
+      </a>
       <a href="{% url 'analytics:reports_hub' %}" class="jc-nav-item {% if active_nav == 'reports' %}active{% endif %}">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
         <span class="jc-nav-label">Reports</span>
       </a>
-      <a href="{% url 'inventory:product_management' %}" class="jc-nav-item {% if active_nav == 'availability' %}active{% endif %}">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2.5 12.5V2.5h10l8.09 8.09a2 2 0 0 1 0 2.82z"></path><line x1="7" y1="7" x2="7.01" y2="7"></line></svg>
-        <span class="jc-nav-label">Product Availability</span>
-      </a>
+
+      <div class="jc-nav-group-label">System</div>
       <a href="{% url 'purchasing:supplier_management' %}" class="jc-nav-item {% if active_nav == 'suppliers' %}active{% endif %}">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
         <span class="jc-nav-label">Suppliers</span>

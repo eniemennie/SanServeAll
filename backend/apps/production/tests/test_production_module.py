@@ -608,6 +608,46 @@ class TestCommissaryDashboardView:
         assert response.context["total_output_30d"] == 10
         assert len(response.context["recent_records"]) == 1
 
+    def test_low_stock_without_any_out_of_stock_items_still_shows_the_warning_card(
+        self, commissary_client, commissary, sugar
+    ):
+        """UI/UX review (2026-11-05) regression test: this card used to
+        be gated on critical_items alone, so a commissary with real
+        low-stock materials but nothing fully out of stock saw no
+        warning at all. Also confirms a single low-stock item renders
+        without the expand control (nothing to disclose yet)."""
+        inv = Inventory.objects.get(branch=commissary, product=sugar)
+        inv.reorder_threshold = 50  # 30 on hand <= 50 and > 0 -> low stock, not out
+        inv.save(update_fields=["reorder_threshold"])
+
+        response = commissary_client.get(reverse("production:dashboard"))
+        content = response.content.decode()
+        assert "Materials Needing Attention" in content
+        assert "Sugar (kg)" in content
+        assert "jc-expand-toggle" not in content
+
+    def test_more_than_two_low_stock_items_are_progressively_disclosed(
+        self, commissary_client, commissary, flour, sugar
+    ):
+        """Matches the Owner/Admin dashboard's Resource Monitoring card:
+        the first two items show directly, the rest sit behind a 'Show
+        N more' toggle rather than an unbounded list."""
+        butter = Product.objects.create(
+            name="Butter (kg)", price="80.00", product_type=Product.ProductType.MATERIAL
+        )
+        Inventory.objects.create(
+            branch=commissary, product=butter, quantity_on_hand=5, reorder_threshold=20
+        )
+        for material in (flour, sugar):
+            inv = Inventory.objects.get(branch=commissary, product=material)
+            inv.reorder_threshold = inv.quantity_on_hand + 10
+            inv.save(update_fields=["reorder_threshold"])
+
+        response = commissary_client.get(reverse("production:dashboard"))
+        content = response.content.decode()
+        assert "jc-expand-toggle" in content
+        assert "Show 1 more" in content
+
 
 class TestRoleAwareAdminShell:
     """admin_base.html's sidebar/topbar is role-aware (Row 18 follow-up):

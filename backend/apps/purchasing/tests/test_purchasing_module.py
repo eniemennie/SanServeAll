@@ -160,3 +160,46 @@ class TestSupplierToggleActive:
         client.force_login(branch_staff)
         response = client.post(reverse("purchasing:supplier_toggle_active", args=[supplier.pk]))
         assert response.status_code == 403
+
+
+class TestSupplierManagementUIUXReview:
+    """UI/UX review (2026-11-05): the New Supplier form now opens from a
+    button instead of always occupying half the screen, and a
+    client-side Active/Inactive filter sits above the table. The
+    underlying `suppliers` queryset and create/toggle logic are
+    untouched -- these tests cover the presentation only."""
+
+    def test_form_is_collapsed_by_default_when_suppliers_already_exist(
+        self, client, purchasing_staff
+    ):
+        Supplier.objects.create(name="Acme Food Supply")
+        client.force_login(purchasing_staff)
+        response = client.get(reverse("purchasing:supplier_management"))
+        content = response.content.decode()
+        assert 'class="collapse mb-4" id="newSupplierForm"' in content
+        assert 'class="collapse mb-4 show" id="newSupplierForm"' not in content
+
+    def test_form_auto_expands_when_there_are_no_suppliers_yet(self, client, purchasing_staff):
+        client.force_login(purchasing_staff)
+        response = client.get(reverse("purchasing:supplier_management"))
+        content = response.content.decode()
+        assert 'class="collapse mb-4 show" id="newSupplierForm"' in content
+
+    def test_form_auto_expands_after_a_validation_error(self, client, purchasing_staff):
+        client.force_login(purchasing_staff)
+        response = client.post(reverse("purchasing:supplier_management"), {"name": "  "})
+        content = response.content.decode()
+        assert 'class="collapse mb-4 show" id="newSupplierForm"' in content
+
+    def test_status_filter_buttons_and_row_markers_are_present(self, client, purchasing_staff):
+        active = Supplier.objects.create(name="Acme Food Supply")
+        inactive = Supplier.objects.create(name="Old Vendor Co.", is_active=False)
+        client.force_login(purchasing_staff)
+        response = client.get(reverse("purchasing:supplier_management"))
+        content = response.content.decode()
+        assert 'data-filter="active"' in content
+        assert 'data-filter="inactive"' in content
+        assert 'data-status="active"' in content
+        assert 'data-status="inactive"' in content
+        assert active.name in content
+        assert inactive.name in content

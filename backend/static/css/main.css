@@ -103,6 +103,51 @@ body {
   box-shadow: 0 1px 2px rgba(30, 42, 58, 0.04);
 }
 
+/* UI/UX review (2026-11-05): subtle hover feedback for a card that's
+   actually interactive (has a "Show more"/"View all" affordance) -- NOT
+   applied to .jc-card generally, since most cards (Branch Performance,
+   the KPI tiles) aren't clickable and shouldn't look like they are. */
+.jc-card-interactive {
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.jc-card-interactive:hover {
+  box-shadow: 0 4px 14px rgba(30, 42, 58, 0.08);
+  border-color: #E2E6EA;
+}
+
+/* A dashboard summary card's "Show N more" toggle -- chevron rotates on
+   expand so the control's own state is visible, not just the content
+   that appears under it. */
+.jc-expand-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 2px 0;
+  color: var(--jc-teal);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.jc-expand-toggle svg {
+  transition: transform 0.18s ease;
+}
+.jc-expand-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+/* Small inline count pill for a summarized list header (e.g. "2 Critical
+   · 3 Low") -- reuses the existing .jc-badge color tokens rather than
+   inventing a new palette. */
+.jc-count-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: var(--jc-radius-pill);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
 /* --- Icon chips (Figma-mockup stat pattern: a colored icon tile that
    anchors each stat so it doesn't read as a flat row of numbers competing
    equally for attention -- Figma-alignment pass, Nov 3) --- */
@@ -252,6 +297,34 @@ body {
 .jc-nav-item.active:hover {
   background-color: var(--jc-orange);
   color: #fff;
+}
+
+/* UI/UX review (2026-11-05): section labels grouping the Owner/Admin
+   sidebar's flat list into Operations / Business Intelligence / System --
+   same links as before, just organized, per the adviser's "consistent
+   navigation across all modules" request. Collapses to a thin divider
+   (no text) when the sidebar itself is collapsed, same opacity/max-width
+   transition idiom .jc-nav-label already uses, so the two stay visually
+   consistent at every sidebar width. */
+.jc-nav-group-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--jc-text-muted);
+  opacity: 0.75;
+  padding: 14px 13px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: 220px;
+  transition: opacity 0.12s ease, max-width 0.12s ease, padding 0.12s ease;
+}
+.jc-sidebar:not([data-expanded="true"]) .jc-nav-group-label {
+  max-width: 0;
+  padding: 10px 0 2px;
+  opacity: 0;
+  border-top: 1px solid #EEF0F2;
+  margin: 2px 8px 0;
 }
 
 /* Legacy alias -- .jc-sidebar-icon predates the expand/collapse shell and

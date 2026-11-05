@@ -744,12 +744,21 @@ class TestExportResourceReportView:
 
 
 class TestDecisionSupportShellContext:
-    """Batch 2: decision_support now extends admin_base.html too."""
+    """Batch 2: decision_support now extends admin_base.html too.
 
-    def test_active_nav_highlights_demand_forecasting(self, owner_client):
-        """decision_support is reached as a cross-link from Demand
-        Forecasting, not its own top-level sidebar item (see the Admin
-        Shell batch's routing note) -- active_nav is 'forecast', not
-        some 'insights' key that doesn't exist in the sidebar."""
+    UI/UX review (2026-11-05): Decision Support previously had NO sidebar
+    link anywhere -- it was reachable only by typing the URL directly,
+    confirmed by grepping admin_base.html for "decision_support" and
+    finding nothing. It now has its own item under "Business
+    Intelligence," so it highlights its own active_nav key instead of
+    borrowing Demand Forecasting's."""
+
+    def test_active_nav_highlights_decision_support_itself(self, owner_client):
         response = owner_client.get(reverse("forecasting:decision_support"))
-        assert response.context["active_nav"] == "forecast"
+        assert response.context["active_nav"] == "decision_support"
+
+    def test_sidebar_links_to_decision_support(self, owner_client):
+        """Regression test for the "unreachable except by URL" gap --
+        fails before the fix (no such link existed), passes after."""
+        response = owner_client.get(reverse("accounts:admin_dashboard"))
+        assert reverse("forecasting:decision_support") in response.content.decode()
