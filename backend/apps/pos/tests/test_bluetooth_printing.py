@@ -150,3 +150,55 @@ class TestReceiptViewIncludesRawbtUrl:
         assert response.status_code == 200
         assert b"Print via Bluetooth Printer" in response.content
         assert b"intent:base64," in response.content
+
+
+class TestReceiptPrintFontSize:
+    """Task #145 (client review): the printed/RawBT-thermal receipt was
+    too small to read. receipt.html had no explicit font-size styling
+    at all, relying entirely on Bootstrap's defaults (including the
+    0.875em `.small`/`.text-muted small` classes used on most line
+    items). A @media print block now bumps those sizes back up,
+    scoped to print only so the on-screen view is unaffected."""
+
+    def test_receipt_page_has_a_print_only_font_size_boost(
+        self, client, cashier, branch, completed_transaction
+    ):
+        from django.urls import reverse
+
+        client.force_login(cashier)
+        session = client.session
+        session["selected_branch_id"] = branch.pk
+        session["pos_unlocked"] = True
+        session.save()
+
+        response = client.get(reverse("pos:receipt", args=[completed_transaction.pk]))
+        content = response.content.decode()
+
+        assert "@media print" in content
+        # Scoped to print, not applied unconditionally to the page --
+        # the raw font-size override must appear inside the @media
+        # print block, not as a bare top-level rule.
+        print_block = content.split("@media print", 1)[1]
+        assert "font-size: 1.15rem" in print_block
+        assert "font-size: 1rem" in print_block
+
+    def test_receipt_still_renders_correctly_with_the_new_styling(
+        self, client, cashier, branch, completed_transaction
+    ):
+        """The styling change must not disturb the actual receipt
+        content/data -- transaction info, items, and totals still
+        render exactly as before."""
+        from django.urls import reverse
+
+        client.force_login(cashier)
+        session = client.session
+        session["selected_branch_id"] = branch.pk
+        session["pos_unlocked"] = True
+        session.save()
+
+        response = client.get(reverse("pos:receipt", args=[completed_transaction.pk]))
+        content = response.content.decode()
+
+        assert response.status_code == 200
+        assert "Spanish Latte" in content
+        assert f"Transaction #{completed_transaction.pk}" in content
