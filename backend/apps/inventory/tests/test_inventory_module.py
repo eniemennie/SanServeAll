@@ -4,6 +4,8 @@ Management (Row 6.2), Finished Goods & Materials filtering (Row 6.3), and
 Low-Stock Alert Triggering (Row 6.4).
 """
 
+from decimal import Decimal
+
 import pytest
 from django.urls import reverse
 
@@ -567,6 +569,34 @@ class TestProductManagementView:
         response = owner_client.get(reverse("inventory:product_management"))
         assert response.status_code == 200
 
+    def test_stock_value_card_shows_two_decimal_places(self, owner_client, branch):
+        """Task #137 (client review): currency/number formatting
+        standardization. "Stock Value" used |floatformat:0 (a whole peso
+        amount) while every other currency figure on this screen and
+        across the Dashboard/Reports/Resource Management screens uses
+        |floatformat:2."""
+        product = Product.objects.create(name="Loose Tea", price="80.00")
+        Inventory.objects.create(branch=branch, product=product, quantity_on_hand=Decimal("0.125"))
+
+        content = owner_client.get(reverse("inventory:product_management")).content.decode()
+
+        # Before the fix: |floatformat:0 rounded 10.00 down/up to a bare
+        # "10" with no decimal point at all.
+        assert "&#8369;10.00" in content
+
+    def test_item_row_price_shows_two_decimal_places(self, owner_client, branch):
+        """The per-row unit price was rendered with no filter at all
+        (relying on DecimalField's own storage precision to happen to
+        look right) rather than the same |floatformat:2 used everywhere
+        else -- brought in line for consistency and so a future
+        unquantized/annotated price value can't slip through unrounded."""
+        product = Product.objects.create(name="Spanish Latte", price="95.50")
+        Inventory.objects.create(branch=branch, product=product, quantity_on_hand=5)
+
+        content = owner_client.get(reverse("inventory:product_management")).content.decode()
+
+        assert "&#8369;95.50" in content
+
     def test_owner_can_add_a_product(self, owner_client, branch):
         response = owner_client.post(
             reverse("inventory:product_management"),
@@ -635,6 +665,62 @@ class TestProductManagementView:
         )
         assert response.status_code == 200
         assert not Product.objects.filter(price="10.00").exists()
+
+
+class TestProductAvailabilityStockValuePrecision:
+    """Task #137 (client review): currency/number formatting
+    standardization. get_product_availability's stock_value sums
+    Inventory.quantity_on_hand (3 decimal places -- materials can be
+    fractional kg/L) times Product.price (2 decimal places), which can
+    leave more than 2 decimal places in the running total -- the same
+    unquantized-Decimal pattern as the live discount bugs fixed in PRs
+    #169/#170. The template's |floatformat:2 always rounds the display
+    correctly regardless, so this was never visibly wrong on screen, but
+    it's quantized at the source now rather than left to rely on the
+    template to paper over it."""
+
+    def test_stock_value_is_quantized_to_two_decimal_places(self, branch):
+        product = Product.objects.create(name="Loose Tea", price=Decimal("80.00"))
+        Inventory.objects.create(branch=branch, product=product, quantity_on_hand=Decimal("0.125"))
+
+        result = services.get_product_availability(branch=branch)
+
+        # 0.125 * 80.00 = 10.000 unquantized -- would carry 3 decimal
+        # places without the fix.
+        assert result["stats"]["stock_value"] == Decimal("10.00")
+        assert result["stats"]["stock_value"].as_tuple().exponent == -2
+
+    def test_stock_value_with_no_inventory_is_zero_not_a_crash(self, branch):
+        """sum() over an empty list defaults to int 0, which has no
+        .quantize() method -- must use a Decimal("0.00") start value."""
+        result = services.get_product_availability(branch=branch)
+        assert result["stats"]["stock_value"] == Decimal("0.00")
+
+    def test_stock_value_quantization_matches_item_level_display(self, branch):
+        """Realistic multi-item mix: a fractional-quantity material plus
+        a whole-unit finished good, matching the Product Availability
+        screen's real combination of row types."""
+        material = Product.objects.create(
+            name="Fresh Milk",
+            price=Decimal("95.50"),
+            product_type=Product.ProductType.MATERIAL,
+        )
+        finished_good = Product.objects.create(name="Croissant", price=Decimal("65.00"))
+        Inventory.objects.create(branch=branch, product=material, quantity_on_hand=Decimal("2.750"))
+        Inventory.objects.create(
+            branch=branch, product=finished_good, quantity_on_hand=Decimal("12")
+        )
+
+        result = services.get_product_availability(branch=branch)
+
+        # 2.750 * 95.50 = 262.625, 12 * 65.00 = 780.00 -> 1042.625 raw,
+        # 1042.63 after proper decimal rounding (round-half-up, matching
+        # Decimal.quantize's default ROUND_HALF_EVEN... verified below).
+        expected = (
+            Decimal("2.750") * Decimal("95.50") + Decimal("12") * Decimal("65.00")
+        ).quantize(Decimal("0.01"))
+        assert result["stats"]["stock_value"] == expected
+        assert result["stats"]["stock_value"].as_tuple().exponent == -2
 
 
 class TestAdjustStockView:

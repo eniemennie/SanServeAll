@@ -183,6 +183,43 @@ class TestIncludeAdditionalSalesToggle:
         assert "&#8369;425" not in toggled_off_content
 
 
+class TestBranchPerformanceRevenueFormatting:
+    """Task #137 (client review): currency/number formatting
+    standardization. The per-branch Revenue figure in the Branch
+    Performance Overview cards used |floatformat:0 while the Total
+    Revenue KPI card directly below it on the same page used
+    |floatformat:2 -- the same peso amount shown two different ways on
+    one screen. Aligned to 2 decimal places, matching every other
+    currency figure on this page and across the Reports/Resource
+    Management screens."""
+
+    def test_branch_revenue_shows_two_decimal_places(self, authed_client, branches, admin):
+        from django.utils import timezone
+
+        from apps.pos.models import SalesItem, SalesTransaction
+
+        branch = branches[0]
+        product = Product.objects.create(name="Spanish Latte", price="95.50")
+        txn = SalesTransaction.objects.create(
+            branch=branch,
+            cashier=admin,
+            status=SalesTransaction.Status.COMPLETED,
+            payment_method=SalesTransaction.PaymentMethod.CASH,
+            amount_tendered="95.50",
+            completed_at=timezone.now(),
+        )
+        SalesItem.objects.create(transaction=txn, product=product, unit_price="95.50", quantity=1)
+
+        # No "branch" param -- Branch Performance Overview only renders
+        # when no single branch is selected.
+        content = authed_client.get(reverse("accounts:admin_dashboard")).content.decode()
+
+        # Before the fix, |floatformat:0 rendered this as "&#8369;96"
+        # (rounded to a whole peso) rather than the real "&#8369;95.50".
+        assert "&#8369;95.50" in content
+        assert "&#8369;96<" not in content
+
+
 class TestNoTemplateSyntaxLeaksIntoPages:
     """Regression: Django's {# ... #} comment only works on a SINGLE line.
     A multi-line one in admin_base.html was not treated as a comment and
