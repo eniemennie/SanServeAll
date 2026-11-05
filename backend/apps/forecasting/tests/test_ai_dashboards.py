@@ -695,6 +695,19 @@ class TestResourceManagementDashboardView:
         assert response.status_code == 200
         assert b"2.375" in response.content
 
+    def test_restocking_recommendations_are_not_mislabeled_as_ai(self, owner_client):
+        """Labeling accuracy fix (2026-11-05, pre-defense review):
+        calculate_recommended_reorder_quantity() is a plain threshold
+        formula on trailing 30-day actual usage (see its own docstring),
+        not AI/ML -- the card used to say "AI-Driven Restocking
+        Recommendations" directly above a line explaining it's NOT the
+        AI/Holt-Winters forecast. Matches decision_support.html's own
+        wording for the same underlying data."""
+        response = owner_client.get(reverse("forecasting:resource_management_dashboard"))
+        content = response.content.decode()
+        assert "Restocking Recommendations (Materials)" in content
+        assert "AI-Driven Restocking" not in content
+
 
 class TestExportResourceReportView:
     """Export Report button (Resource Management topbar): a CSV mirroring
@@ -741,6 +754,15 @@ class TestExportResourceReportView:
         )
         assert branch.name.encode() in response.content
         assert b"Cashew Nuts" in response.content
+
+    def test_restocking_recommendations_header_is_not_mislabeled_as_ai(self, owner_client):
+        """Same labeling accuracy fix as the dashboard template -- the
+        CSV export mirrors what's on screen, so its section header needed
+        the same correction."""
+        response = owner_client.get(reverse("forecasting:export_resource_report"))
+        content = response.content.decode()
+        assert "Restocking Recommendations (Materials)" in content
+        assert "AI-Driven Restocking" not in content
 
 
 class TestDecisionSupportShellContext:

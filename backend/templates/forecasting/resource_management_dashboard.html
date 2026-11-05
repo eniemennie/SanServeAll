@@ -90,7 +90,18 @@
     </div>
     <div class="col-md-6">
         <div class="jc-card p-3 p-md-4 h-100">
-            <div class="fw-semibold mb-2">AI-Driven Restocking Recommendations (Materials)</div>
+            {% comment %}
+              Labeling accuracy fix (2026-11-05, pre-defense review): this
+              was "AI-Driven Restocking Recommendations", directly
+              contradicting its own next line -- calculate_recommended_
+              reorder_quantity() in services.py is a plain threshold
+              formula (avg_daily_demand * target_days - quantity_on_hand),
+              not AI/ML, by deliberate design (see that function's own
+              docstring). Matches the wording decision_support.html
+              already uses for the same underlying data ("Critical Alerts
+              & Restocking Recommendations", no "AI").
+            {% endcomment %}
+            <div class="fw-semibold mb-2">Restocking Recommendations (Materials)</div>
             <p class="text-muted small mb-2">
                 Based on trailing 30-day actual usage, not the Holt-Winters demand forecast.
             </p>

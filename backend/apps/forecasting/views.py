@@ -203,7 +203,11 @@ def export_resource_report(request):
         writer.writerow([row["material__name"], row["unit_display"], row["total_used"]])
     writer.writerow([])
 
-    writer.writerow(["AI-Driven Restocking Recommendations (Materials)"])
+    # Labeling accuracy fix (2026-11-05): matches the dashboard template --
+    # this is a plain threshold formula (see
+    # services.calculate_recommended_reorder_quantity's own docstring),
+    # not AI/ML.
+    writer.writerow(["Restocking Recommendations (Materials)"])
     writer.writerow(["Material", "Stock on Hand", "Risk Level", "Recommended Reorder Qty"])
     for alert in data["material_alerts"]:
         writer.writerow(
