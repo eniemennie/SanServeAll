@@ -41,9 +41,13 @@
             <div class="jc-icon-chip jc-icon-chip-orange mx-auto mb-3">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
             </div>
-            <div class="text-muted small">Material Transactions (30d)</div>
-            <div class="fs-4 fw-bold">{{ consumption.total_units_used|floatformat:2 }}</div>
-            <div class="text-muted small">Combined usage across kg, L, and pc materials &mdash; see breakdown below</div>
+            <div class="text-muted small">Total Units Used (30d)</div>
+            {% for u in consumption.units_used_by_unit %}
+            <div class="fs-5 fw-bold">{{ u.total|qty:u.unit }} {{ u.unit_display }}</div>
+            {% empty %}
+            <div class="fs-4 fw-bold">&mdash;</div>
+            {% endfor %}
+            <div class="text-muted small">See per-material breakdown below</div>
         </div>
     </div>
     <div class="col-md-3">

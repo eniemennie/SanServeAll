@@ -392,10 +392,51 @@ class TestResourceConsumption:
         IngredientUsage.objects.create(production_record=record, material=flour, quantity_used=5)
 
         summary = services.get_resource_consumption_summary(days=30)
-        assert summary["total_units_used"] == 5
+        assert summary["units_used_by_unit"] == [
+            {"unit": "PIECE", "unit_display": "pc", "total": 5}
+        ]
         assert summary["total_cost"] == pytest.approx(275.00)  # 5 * 55.00
         assert summary["total_produced"] == 10
         assert summary["cost_per_unit_produced"] == pytest.approx(27.50)  # 275 / 10
+
+    def test_units_used_are_broken_out_per_unit_not_summed_together(self, branch):
+        """Task #163 (adviser dry-run, 2026-11-05): "Do not combine kg,
+        L, and pc quantities into one total." Mixing a material measured
+        in kg with one measured in pc into a single number produces a
+        figure that doesn't represent any real quantity of anything."""
+        role = Role.objects.create(name=Role.COMMISSARY_STAFF)
+        staff = User.objects.create_user(username="commissary1", password="testpass123", role=role)
+        flour = Product.objects.create(
+            name="Flour",
+            price="55.00",
+            product_type=Product.ProductType.MATERIAL,
+            unit_of_measure=Product.UnitOfMeasure.KILOGRAM,
+        )
+        cup_lids = Product.objects.create(
+            name="Cup Lids",
+            price="1.00",
+            product_type=Product.ProductType.MATERIAL,
+            unit_of_measure=Product.UnitOfMeasure.PIECE,
+        )
+        cake = Product.objects.create(name="Cake", price="140.00")
+        record = ProductionRecord.objects.create(
+            commissary_staff=staff, product=cake, quantity_produced=10
+        )
+        IngredientUsage.objects.create(production_record=record, material=flour, quantity_used=5)
+        IngredientUsage.objects.create(
+            production_record=record, material=cup_lids, quantity_used=300
+        )
+
+        summary = services.get_resource_consumption_summary(days=30)
+
+        by_unit = {row["unit"]: row["total"] for row in summary["units_used_by_unit"]}
+        assert by_unit == {"KILOGRAM": 5, "PIECE": 300}
+
+        by_material = {row["material__name"]: row for row in summary["by_material"]}
+        assert by_material["Flour"]["unit"] == "KILOGRAM"
+        assert by_material["Flour"]["unit_display"] == "kg"
+        assert by_material["Cup Lids"]["unit"] == "PIECE"
+        assert by_material["Cup Lids"]["unit_display"] == "pc"
 
 
 class TestOperationalPerformance:
@@ -464,20 +505,22 @@ class TestResourceConsumptionView:
         response = owner_client.get(reverse("analytics:resource_consumption"))
         assert response.status_code == 200
 
-    def test_total_units_used_shows_two_decimal_places(self, owner_client):
+    def test_kilogram_quantity_shows_two_decimal_places(self, owner_client):
         """Task #137 (client review): currency/number formatting
-        standardization. This page's "Total Units Used" card rendered
-        the raw Decimal with no |floatformat at all, while the identical
-        metric on forecasting/resource_management_dashboard.html and
-        analytics/reports_hub.html both used |floatformat:2 -- the same
-        number, shown with a different precision depending on which
-        screen you were on. quantity_used is a DecimalField(3dp), so an
-        un-rounded total like 5.500 would show as "5.500" here but
-        "5.50" on the other two screens."""
+        standardization. This page's materials figures rendered the raw
+        Decimal with no formatting at all. quantity_used is a
+        DecimalField(3dp), so an un-rounded total like 5.500 would show
+        as "5.500" without the `qty` filter. For a continuous unit like
+        kg, two decimal places is the standard (see task #163, which
+        later specified pc-counted items should show as whole numbers
+        instead -- see test_piece_quantity_shows_as_whole_number below)."""
         role = Role.objects.create(name=Role.COMMISSARY_STAFF)
         staff = User.objects.create_user(username="commissary1", password="testpass123", role=role)
         flour = Product.objects.create(
-            name="Flour (kg)", price="55.00", product_type=Product.ProductType.MATERIAL
+            name="Flour",
+            price="55.00",
+            product_type=Product.ProductType.MATERIAL,
+            unit_of_measure=Product.UnitOfMeasure.KILOGRAM,
         )
         cake = Product.objects.create(name="Cake", price="140.00")
         record = ProductionRecord.objects.create(
@@ -489,8 +532,54 @@ class TestResourceConsumptionView:
 
         content = owner_client.get(reverse("analytics:resource_consumption")).content.decode()
 
-        assert "5.50<" in content
-        assert "5.500<" not in content
+        assert "5.50" in content
+        assert "5.500" not in content
+
+    def test_piece_quantity_shows_as_whole_number(self, owner_client):
+        """Task #163 (adviser dry-run, 2026-11-05): "Display piece-based
+        quantities as whole numbers." A pc-counted material's total
+        shouldn't render with a meaningless ".000" decimal tail."""
+        role = Role.objects.create(name=Role.COMMISSARY_STAFF)
+        staff = User.objects.create_user(username="commissary1", password="testpass123", role=role)
+        cup_lids = Product.objects.create(
+            name="Cup Lids",
+            price="1.00",
+            product_type=Product.ProductType.MATERIAL,
+            unit_of_measure=Product.UnitOfMeasure.PIECE,
+        )
+        cake = Product.objects.create(name="Cake", price="140.00")
+        record = ProductionRecord.objects.create(
+            commissary_staff=staff, product=cake, quantity_produced=10
+        )
+        IngredientUsage.objects.create(
+            production_record=record, material=cup_lids, quantity_used="300.000"
+        )
+
+        content = owner_client.get(reverse("analytics:resource_consumption")).content.decode()
+
+        assert "300" in content
+        assert "300.000" not in content
+        assert "pc" in content
+
+    def test_unit_column_shown_in_materials_table(self, owner_client):
+        """Task #163: "Add a Unit column to the materials table.\" """
+        role = Role.objects.create(name=Role.COMMISSARY_STAFF)
+        staff = User.objects.create_user(username="commissary1", password="testpass123", role=role)
+        flour = Product.objects.create(
+            name="Flour",
+            price="55.00",
+            product_type=Product.ProductType.MATERIAL,
+            unit_of_measure=Product.UnitOfMeasure.KILOGRAM,
+        )
+        cake = Product.objects.create(name="Cake", price="140.00")
+        record = ProductionRecord.objects.create(
+            commissary_staff=staff, product=cake, quantity_produced=10
+        )
+        IngredientUsage.objects.create(production_record=record, material=flour, quantity_used=5)
+
+        response = owner_client.get(reverse("analytics:resource_consumption"))
+
+        assert "<th>Unit</th>" in response.content.decode()
 
     def test_non_owner_cannot_view(self, client, cashier):
         client.force_login(cashier)
@@ -1043,5 +1132,7 @@ class TestResolveReportWindowAndServicesWithExplicitDateRange:
         summary = services.get_resource_consumption_summary(
             date_from=date(2026, 11, 6), date_to=date(2026, 11, 7)
         )
-        assert summary["total_units_used"] == 5
+        assert summary["units_used_by_unit"] == [
+            {"unit": "PIECE", "unit_display": "pc", "total": 5}
+        ]
         assert summary["total_produced"] == 10
