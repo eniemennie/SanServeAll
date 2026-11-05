@@ -46,15 +46,15 @@
     <div class="table-responsive">
     <table class="table table-sm mb-0 align-middle">
         <colgroup>
-            <col style="width: 6%;">
-            <col style="width: 14%;">
-            <col style="width: 6%;">
-            <col style="width: 12%;">
-            <col style="width: 12%;">
+            <col style="width: 5%;">
+            <col style="width: 13%;">
+            <col style="width: 5%;">
             <col style="width: 10%;">
-            <col style="width: 13%;">
-            <col style="width: 13%;">
-            <col style="width: 14%;">
+            <col style="width: 10%;">
+            <col style="width: 10%;">
+            <col style="width: 11%;">
+            <col style="width: 18%;">
+            <col style="width: 18%;">
         </colgroup>
         <thead>
             <tr>
@@ -65,7 +65,7 @@
                 <th>To</th>
                 <th>Status</th>
                 <th>Dispatched</th>
-                <th>Delivered</th>
+                <th>Delivered / Cancelled</th>
                 <th></th>
             </tr>
         </thead>
@@ -81,11 +81,18 @@
                     <span class="jc-badge {% if order.status == 'DELIVERED' %}jc-badge-adequate{% elif order.status == 'IN_TRANSIT' %}jc-badge-info{% elif order.status == 'CANCELLED' %}jc-badge-critical{% else %}jc-badge-low{% endif %}">
                         {{ order.get_status_display }}
                     </span>
+                    {% if order.is_stale_in_processing %}
+                    <span class="jc-badge jc-badge-critical" title="Created {{ order.created_at|date:'M d, Y' }} -- still Processing more than 2 days later.">Stalled</span>
+                    {% endif %}
                 </td>
                 <td class="small text-nowrap">{{ order.created_at|date:"M d, Y" }}<br>{{ order.created_at|date:"H:i" }}</td>
                 <td class="small text-nowrap">
-                    {% if order.delivered_at %}
+                    {% if order.status == "DELIVERED" %}
                     {{ order.delivered_at|date:"M d, Y" }}<br>{{ order.delivered_at|date:"H:i" }}
+                    <div class="text-muted">by {% if order.delivered_by %}{{ order.delivered_by }}{% else %}&mdash;{% endif %}</div>
+                    {% elif order.status == "CANCELLED" %}
+                    {{ order.cancelled_at|date:"M d, Y" }}<br>{{ order.cancelled_at|date:"H:i" }}
+                    <div class="text-muted">by {% if order.cancelled_by %}{{ order.cancelled_by }}{% else %}&mdash;{% endif %}</div>
                     {% else %}
                     &mdash;
                     {% endif %}

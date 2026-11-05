@@ -257,10 +257,16 @@ def create_stock_transfer_order(commissary_staff, destination_branch_id, product
     return order
 
 
-def cancel_stock_transfer_order(order):
+def cancel_stock_transfer_order(order, cancelled_by=None):
     """Cancels a StockTransferOrder (backend gap assessment item 24),
     returning its quantity to the commissary's own Inventory -- a
     reversal of the deduction create_stock_transfer_order made up front.
+
+    `cancelled_by` (task #166, adviser dry-run 2026-11-05) records WHO
+    performed the cancellation -- optional and defaults to None so
+    existing callers (and the management command / backfill paths that
+    cancel orders without a real acting user) keep working unchanged;
+    the view below always passes request.user.
 
     Only legal from PROCESSING or IN_TRANSIT: in both states the stock
     already left the commissary and hasn't yet reached the destination
@@ -299,6 +305,7 @@ def cancel_stock_transfer_order(order):
 
         locked_order.status = StockTransferOrder.Status.CANCELLED
         locked_order.cancelled_at = timezone.now()
+        locked_order.cancelled_by = cancelled_by
         locked_order.save()
 
         source_inventory, _ = Inventory.objects.get_or_create(
@@ -317,13 +324,21 @@ def cancel_stock_transfer_order(order):
     return locked_order
 
 
-def advance_stock_transfer_status(order, new_status):
+def advance_stock_transfer_status(order, new_status, acted_by=None):
     """Moves a StockTransferOrder forward one step
     (PROCESSING -> IN_TRANSIT -> DELIVERED only -- no skipping, no going
     backward). Reaching DELIVERED is the one moment the destination
     branch's own Inventory actually receives the stock; while IN_TRANSIT,
     the quantity is accounted for by this order alone, not counted as
     available at either branch.
+
+    `acted_by` (task #166, adviser dry-run 2026-11-05) records WHO
+    advanced the order, but is only ever stored as `delivered_by` --
+    there's no "who marked it In Transit" field, since the ticket only
+    asked to track who delivered or cancelled an order, not every
+    intermediate step. Optional and defaults to None so existing
+    callers keep working unchanged; the view below always passes
+    request.user.
 
     Backend gap assessment item 25: `new_status` is validated against the
     real set of status values before it's used anywhere, including in an
@@ -368,6 +383,7 @@ def advance_stock_transfer_status(order, new_status):
         locked_order.status = new_status
         if new_status == StockTransferOrder.Status.DELIVERED:
             locked_order.delivered_at = timezone.now()
+            locked_order.delivered_by = acted_by
             locked_order.save()
 
             destination_inventory, _ = Inventory.objects.get_or_create(
