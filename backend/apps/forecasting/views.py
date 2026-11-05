@@ -174,10 +174,9 @@ def export_resource_report(request):
     writer.writerow([])
 
     writer.writerow(["Materials Summary (commissary-wide, last 30 days)"])
-    writer.writerow(["Materials Used", "Total Cost", "Units Produced", "Cost per Unit"])
+    writer.writerow(["Total Cost", "Units Produced", "Cost per Unit"])
     writer.writerow(
         [
-            consumption["total_units_used"],
             consumption["total_cost"],
             consumption["total_produced"],
             consumption["cost_per_unit_produced"],
@@ -185,10 +184,19 @@ def export_resource_report(request):
     )
     writer.writerow([])
 
+    # Task #163: materials used is reported per unit of measurement, not
+    # as one combined figure -- kg, L, and pc quantities are not the same
+    # kind of thing and summing them together is meaningless.
+    writer.writerow(["Total Units Used by Unit of Measurement"])
+    writer.writerow(["Unit", "Total Used"])
+    for row in consumption["units_used_by_unit"]:
+        writer.writerow([row["unit_display"], row["total"]])
+    writer.writerow([])
+
     writer.writerow(["Material Consumption by Category"])
-    writer.writerow(["Material", "Total Used"])
+    writer.writerow(["Material", "Unit", "Total Used"])
     for row in consumption["by_material"]:
-        writer.writerow([row["material__name"], row["total_used"]])
+        writer.writerow([row["material__name"], row["unit_display"], row["total_used"]])
     writer.writerow([])
 
     writer.writerow(["AI-Driven Restocking Recommendations (Materials)"])

@@ -10,6 +10,7 @@ from decimal import Decimal
 from django.db.models import F, Max, Sum
 from django.utils import timezone
 
+from apps.inventory.models import Product
 from apps.inventory.services import get_branch_inventory
 from apps.pos.models import SalesItem, SalesTransaction
 from apps.production.models import IngredientUsage, ProductionRecord
@@ -533,13 +534,42 @@ def get_resource_consumption_summary(days=30, date_from=None, date_to=None):
     separate tracking system.
 
     Accepts an explicit date_from/date_to range (task #146) as an
-    alternative to `days` -- see _resolve_report_window."""
+    alternative to `days` -- see _resolve_report_window.
+
+    Task #163 (adviser dry-run, 2026-11-05): `total_units_used` used to
+    be a single Sum("quantity_used") across every material, regardless
+    of unit -- adding 5kg of flour, 2L of milk, and 300 pieces of cup
+    lids into one "307" figure, which is meaningless (not a real
+    quantity of anything). Replaced with `units_used_by_unit`, a list
+    of {unit, unit_display, total} broken out per unit_of_measure, so
+    nothing with a different unit is ever summed together. For the
+    same reason, `by_material` now also carries each material's own
+    unit (`unit`/`unit_display`), both for display (the ticket's "Add a
+    Unit column") and so a future consumer of this data can't
+    accidentally sum across units either.
+    """
     since, until = _resolve_report_window(days, date_from, date_to)
     usages = IngredientUsage.objects.filter(
         production_record__created_at__gte=since, production_record__created_at__lt=until
     )
 
-    total_units_used = usages.aggregate(total=Sum("quantity_used"))["total"] or 0
+    unit_display_map = dict(Product.UnitOfMeasure.choices)
+
+    units_used_by_unit = [
+        {
+            "unit": row["material__unit_of_measure"],
+            "unit_display": unit_display_map.get(
+                row["material__unit_of_measure"], row["material__unit_of_measure"]
+            ),
+            "total": row["total"],
+        }
+        for row in (
+            usages.values("material__unit_of_measure")
+            .annotate(total=Sum("quantity_used"))
+            .order_by("material__unit_of_measure")
+        )
+    ]
+
     total_cost = usages.aggregate(total=Sum(F("quantity_used") * F("material__price")))[
         "total"
     ] or Decimal("0")
@@ -552,21 +582,32 @@ def get_resource_consumption_summary(days=30, date_from=None, date_to=None):
     )
     cost_per_unit_produced = (total_cost / total_produced) if total_produced else Decimal("0")
 
-    by_material = (
-        usages.values("material__name")
-        .annotate(
-            total_used=Sum("quantity_used"),
-            total_material_cost=Sum(F("quantity_used") * F("material__price")),
+    by_material = [
+        {
+            "material__name": row["material__name"],
+            "unit": row["material__unit_of_measure"],
+            "unit_display": unit_display_map.get(
+                row["material__unit_of_measure"], row["material__unit_of_measure"]
+            ),
+            "total_used": row["total_used"],
+            "total_material_cost": row["total_material_cost"],
+        }
+        for row in (
+            usages.values("material__name", "material__unit_of_measure")
+            .annotate(
+                total_used=Sum("quantity_used"),
+                total_material_cost=Sum(F("quantity_used") * F("material__price")),
+            )
+            .order_by("-total_used")
         )
-        .order_by("-total_used")
-    )
+    ]
 
     return {
-        "total_units_used": total_units_used,
+        "units_used_by_unit": units_used_by_unit,
         "total_cost": total_cost,
         "total_produced": total_produced,
         "cost_per_unit_produced": cost_per_unit_produced,
-        "by_material": list(by_material),
+        "by_material": by_material,
         "days": days,
     }
 
