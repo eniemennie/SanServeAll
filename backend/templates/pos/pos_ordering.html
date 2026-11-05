@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load sanserveall_filters %}
 {% block title %}POS - SanServeAll{% endblock %}
 {% block extra_css %}
 <style>
@@ -178,7 +179,7 @@
                             <span class="jc-best-seller-badge">Best Seller</span>
                             {% endif %}
                             <div class="fw-semibold mb-1">{{ product.name }}</div>
-                            <div class="jc-price mb-2">₱{{ product.price }}+</div>
+                            <div class="jc-price mb-2">₱{{ product.price|peso }}+</div>
                             <button type="button" class="btn btn-jc-teal btn-sm js-open-customize"
                                     data-product-id="{{ product.pk }}"
                                     data-name="{{ product.name }}"
@@ -239,7 +240,7 @@
                             </div>
                             <div class="text-end">
                                 <div class="d-flex align-items-center justify-content-end gap-2 mb-1">
-                                    <span>₱{{ item.subtotal }}</span>
+                                    <span>₱{{ item.subtotal|peso }}</span>
                                     <form method="post" action="{% url 'pos:remove_item' item.pk %}" class="d-inline">
                                         {% csrf_token %}
                                         <button type="submit" class="btn btn-link btn-sm p-0 text-danger" title="Remove">&#128465;</button>
@@ -269,24 +270,24 @@
                 {% if draft.items.exists %}
                 <div class="small mb-3">
                     <div class="d-flex justify-content-between">
-                        <span>Subtotal</span><span>₱{{ draft.total_amount }}</span>
+                        <span>Subtotal</span><span>₱{{ draft.total_amount|peso }}</span>
                     </div>
                     {% if draft.item_discounts_total or draft.transaction_discount_value %}
                     <div class="d-flex justify-content-between" style="color: var(--jc-adequate);">
                         <span>Discounts Applied{% if draft.transaction_discount_category %} ({{ draft.transaction_discount_category }}{% if draft.transaction_discount_type == "PERCENT" %} - {{ draft.transaction_discount_amount|floatformat:0 }}%{% endif %}){% endif %}</span>
-                        <span>-₱{{ draft.item_discounts_total|add:draft.transaction_discount_value }}</span>
+                        <span>-₱{{ draft.item_discounts_total|dadd:draft.transaction_discount_value|peso }}</span>
                     </div>
                     {% endif %}
                     <div class="d-flex justify-content-between">
-                        <span>Less VAT ({{ tax_rate_percent|floatformat:0 }}%)</span><span>₱{{ vat_amount }}</span>
+                        <span>Less VAT ({{ tax_rate_percent|floatformat:0 }}%)</span><span>₱{{ vat_amount|peso }}</span>
                     </div>
                     <div class="d-flex justify-content-between">
-                        <span>VAT Exempt Sales</span><span>₱{{ vat_exclusive }}</span>
+                        <span>VAT Exempt Sales</span><span>₱{{ vat_exclusive|peso }}</span>
                     </div>
                 </div>
                 <div class="d-flex justify-content-between fw-bold fs-5 mb-3">
                     <span>Grand Total :</span>
-                    <span style="color: var(--jc-orange-dark);">₱{{ draft.grand_total }}</span>
+                    <span style="color: var(--jc-orange-dark);">₱{{ draft.grand_total|peso }}</span>
                 </div>
                 {% endif %}
 
@@ -398,7 +399,7 @@
                                 <input type="checkbox" class="btn-check addon-check" name="addon_ids"
                                        id="addon-{{ addon.pk }}" value="{{ addon.pk }}" data-price="{{ addon.price }}">
                                 <label class="btn btn-jc-outline w-100 text-start py-2" for="addon-{{ addon.pk }}">
-                                    {{ addon.name }}<br><span class="jc-price">+₱{{ addon.price }}</span>
+                                    {{ addon.name }}<br><span class="jc-price">+₱{{ addon.price|peso }}</span>
                                 </label>
                             </div>
                             {% endfor %}
@@ -604,25 +605,25 @@
                                         {{ item.display_name }}{% if item.customizations.size %} ({{ item.customizations.size }}){% endif %}
                                     </div>
                                     <div class="small text-muted">
-                                        {{ business_settings.currency_symbol }}{{ item.unit_price }} x {{ item.quantity }}
+                                        {{ business_settings.currency_symbol }}{{ item.unit_price|peso }} x {{ item.quantity }}
                                         {% if item.customizations.add_ons %}<br>Add-ons: {{ item.customizations.add_ons|join:", " }}{% endif %}
                                     </div>
                                 </div>
-                                <div>{{ business_settings.currency_symbol }}{{ item.subtotal }}</div>
+                                <div>{{ business_settings.currency_symbol }}{{ item.subtotal|peso }}</div>
                             </div>
                             {% endfor %}
                             <hr>
                             <div class="d-flex justify-content-between">
-                                <span>Subtotal</span><span>{{ business_settings.currency_symbol }}{{ completed_transaction.total_amount }}</span>
+                                <span>Subtotal</span><span>{{ business_settings.currency_symbol }}{{ completed_transaction.total_amount|peso }}</span>
                             </div>
                             <div class="d-flex justify-content-between fw-bold fs-5 mb-2" style="color: var(--jc-orange-dark);">
-                                <span>Total</span><span>{{ business_settings.currency_symbol }}{{ completed_transaction.grand_total }}</span>
+                                <span>Total</span><span>{{ business_settings.currency_symbol }}{{ completed_transaction.grand_total|peso }}</span>
                             </div>
                             <div class="d-flex justify-content-between small text-muted">
                                 <span>Payment Method</span><span>{{ completed_transaction.get_payment_method_display }}</span>
                             </div>
                             <div class="d-flex justify-content-between small text-muted">
-                                <span>Amount Paid</span><span>{{ business_settings.currency_symbol }}{{ completed_transaction.amount_tendered }}</span>
+                                <span>Amount Paid</span><span>{{ business_settings.currency_symbol }}{{ completed_transaction.amount_tendered|peso }}</span>
                             </div>
                             <div class="d-flex justify-content-between small text-muted mb-3">
                                 <span>Change</span><span>{{ business_settings.currency_symbol }}{{ completed_transaction.change_due }}</span>

@@ -1,4 +1,5 @@
 {% extends "admin_base.html" %}
+{% load sanserveall_filters %}
 {% block admin_title %}Dashboard{% endblock %}
 {% block admin_content %}
 
@@ -16,7 +17,7 @@
             </div>
             <div class="d-flex flex-column gap-1">
                 <div class="d-flex justify-content-between text-muted small">
-                    <span>Revenue</span><span class="text-dark fw-semibold">&#8369;{{ row.revenue|floatformat:2 }}</span>
+                    <span>Revenue</span><span class="text-dark fw-semibold">&#8369;{{ row.revenue|peso }}</span>
                 </div>
                 <div class="d-flex justify-content-between text-muted small">
                     <span>Units Sold</span><span class="text-dark fw-semibold">{{ row.units_sold }} units</span>
@@ -40,7 +41,7 @@
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
             </div>
             <div class="text-muted small mb-1">Total Revenue</div>
-            <div class="fs-4 fw-bold">&#8369;{{ summary.total_revenue|floatformat:2 }}</div>
+            <div class="fs-4 fw-bold">&#8369;{{ summary.total_revenue|peso }}</div>
             <div class="text-muted small mb-2">This month</div>
             <form method="get" class="small border-top pt-2 mt-2">
                 <input type="hidden" name="branch" value="{{ selected_branch.pk|default:'' }}">

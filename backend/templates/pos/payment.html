@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load sanserveall_filters %}
 {% block title %}Payment - SanServeAll{% endblock %}
 {% block extra_css %}
 <style>
@@ -78,22 +79,22 @@
                             {% if item.customizations.add_ons %}<div class="small text-muted">+{{ item.customizations.add_ons|join:", +"|lower }}</div>{% endif %}
                             <div class="small text-muted">x{{ item.quantity }}</div>
                         </div>
-                        <div class="text-end">₱{{ item.subtotal }}</div>
+                        <div class="text-end">₱{{ item.subtotal|peso }}</div>
                     </div>
                     {% endfor %}
                 </div>
                 <hr>
                 <div class="d-flex justify-content-between">
-                    <span>Subtotal</span><span>₱{{ draft.total_amount }}</span>
+                    <span>Subtotal</span><span>₱{{ draft.total_amount|peso }}</span>
                 </div>
                 {% if draft.transaction_discount_value %}
                 <div class="d-flex justify-content-between" style="color: var(--jc-adequate);">
                     <span>Discount{% if draft.transaction_discount_category %} ({{ draft.transaction_discount_category }}{% if draft.transaction_discount_type == "PERCENT" %} - {{ draft.transaction_discount_amount|floatformat:0 }}%{% endif %}){% endif %}</span>
-                    <span>-₱{{ draft.transaction_discount_value }}</span>
+                    <span>-₱{{ draft.transaction_discount_value|peso }}</span>
                 </div>
                 {% endif %}
                 <div class="d-flex justify-content-between fw-bold fs-5" style="color: var(--jc-orange-dark);">
-                    <span>Total</span><span>₱{{ draft.grand_total }}</span>
+                    <span>Total</span><span>₱{{ draft.grand_total|peso }}</span>
                 </div>
             </div>
 
