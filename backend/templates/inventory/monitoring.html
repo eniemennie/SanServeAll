@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load sanserveall_filters %}
 {% block title %}Inventory Monitoring - SanServeAll{% endblock %}
 {% block content %}
 <div class="container py-4">
@@ -42,8 +43,8 @@
             <tr class="{% if item.is_out_of_stock %}table-danger{% elif item.is_low_stock %}table-warning{% endif %}">
                 <td>{{ item.product.name }}</td>
                 <td><span class="badge bg-secondary">{{ item.product.get_product_type_display }}</span></td>
-                <td>&#8369;{{ item.product.price }}</td>
-                <td>{{ item.display_quantity }}</td>
+                <td>&#8369;{{ item.product.price|peso }}</td>
+                <td>{{ item.display_quantity|qty:item.product.unit_of_measure }} {{ item.product.get_unit_of_measure_display }}</td>
                 <td>{{ item.status_label }}</td>
                 <td>
                     <a href="{% url 'inventory:adjust_stock' item.pk %}" class="btn btn-outline-secondary btn-sm">Adjust</a>

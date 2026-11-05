@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load sanserveall_filters %}
 {% block title %}Receipt - SanServeAll{% endblock %}
 {% block extra_css %}
 <style>
@@ -34,39 +35,39 @@
                 {% for item in transaction.items.all %}
                 <div class="list-group-item d-flex justify-content-between">
                     <span>{{ item.display_name }} &times; {{ item.quantity }}</span>
-                    <span>&#8369;{{ item.subtotal }}</span>
+                    <span>&#8369;{{ item.subtotal|peso }}</span>
                 </div>
                 {% endfor %}
             </div>
 
             <div class="d-flex justify-content-between">
                 <span>Subtotal</span>
-                <span>&#8369;{{ transaction.total_amount }}</span>
+                <span>&#8369;{{ transaction.total_amount|peso }}</span>
             </div>
             {% if discount_total %}
             <div class="d-flex justify-content-between" style="color: var(--jc-adequate);">
                 <span>Discount{% if transaction.transaction_discount_category %} ({{ transaction.transaction_discount_category }}{% if transaction.transaction_discount_type == "PERCENT" %} - {{ transaction.transaction_discount_amount|floatformat:0 }}%{% endif %}){% endif %}</span>
-                <span>-&#8369;{{ discount_total }}</span>
+                <span>-&#8369;{{ discount_total|peso }}</span>
             </div>
             {% endif %}
             {% if vat_amount %}
             <div class="d-flex justify-content-between small text-muted">
                 <span>VATable Sales</span>
-                <span>&#8369;{{ vat_exclusive }}</span>
+                <span>&#8369;{{ vat_exclusive|peso }}</span>
             </div>
             <div class="d-flex justify-content-between small text-muted">
                 <span>VAT ({{ tax_rate_percent|floatformat:0 }}%)</span>
-                <span>&#8369;{{ vat_amount }}</span>
+                <span>&#8369;{{ vat_amount|peso }}</span>
             </div>
             {% else %}
             <div class="d-flex justify-content-between small text-muted">
                 <span>VAT-Exempt Sales</span>
-                <span>&#8369;{{ vat_exclusive }}</span>
+                <span>&#8369;{{ vat_exclusive|peso }}</span>
             </div>
             {% endif %}
             <div class="d-flex justify-content-between fw-bold fs-5 mb-2">
                 <span>Total</span>
-                <span>&#8369;{{ transaction.grand_total }}</span>
+                <span>&#8369;{{ transaction.grand_total|peso }}</span>
             </div>
             <div class="d-flex justify-content-between small text-muted">
                 <span>Payment Method</span>
@@ -74,11 +75,11 @@
             </div>
             <div class="d-flex justify-content-between small text-muted">
                 <span>Amount Paid</span>
-                <span>&#8369;{{ transaction.amount_tendered }}</span>
+                <span>&#8369;{{ transaction.amount_tendered|peso }}</span>
             </div>
             <div class="d-flex justify-content-between small text-muted mb-4">
                 <span>Change</span>
-                <span>&#8369;{{ transaction.change_due }}</span>
+                <span>&#8369;{{ transaction.change_due|peso }}</span>
             </div>
 
             <div class="d-flex gap-2 mb-2">
