@@ -1,5 +1,26 @@
 {% extends "base.html" %}
 {% block title %}Receipt - SanServeAll{% endblock %}
+{% block extra_css %}
+<style>
+    /* Task #145 (client review): the printed/RawBT-thermal receipt was
+       too small to read -- this page had no explicit font-size styling
+       at all, so it fell through to Bootstrap's defaults, including
+       `.small`/`.text-muted small` (0.875em) on most of the line
+       items. Scoped to @media print only -- the on-screen browser view
+       (window.print()'s preview and the page itself) isn't the
+       complaint here, and leaving screen styling untouched keeps this
+       a low-risk, isolated change as scoped in the task. RawBT prints
+       the page's own rendered output, so this also governs what comes
+       out of the Bluetooth thermal printer, not just a literal paper
+       printout from a desktop printer. */
+    @media print {
+        body, .list-group-item, .d-flex { font-size: 1.15rem !important; }
+        .small, .text-muted.small, .text-muted.small * { font-size: 1rem !important; }
+        .fs-5 { font-size: 1.5rem !important; }
+        h1.h4 { font-size: 1.6rem !important; }
+    }
+</style>
+{% endblock %}
 {% block content %}
 <div class="container d-flex align-items-center justify-content-center" style="min-height: 100vh;">
     <div class="jc-card shadow-sm p-4" style="max-width: 380px; width: 100%;">
