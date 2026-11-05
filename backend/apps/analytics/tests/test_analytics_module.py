@@ -401,6 +401,34 @@ class TestResourceConsumptionView:
         response = owner_client.get(reverse("analytics:resource_consumption"))
         assert response.status_code == 200
 
+    def test_total_units_used_shows_two_decimal_places(self, owner_client):
+        """Task #137 (client review): currency/number formatting
+        standardization. This page's "Total Units Used" card rendered
+        the raw Decimal with no |floatformat at all, while the identical
+        metric on forecasting/resource_management_dashboard.html and
+        analytics/reports_hub.html both used |floatformat:2 -- the same
+        number, shown with a different precision depending on which
+        screen you were on. quantity_used is a DecimalField(3dp), so an
+        un-rounded total like 5.500 would show as "5.500" here but
+        "5.50" on the other two screens."""
+        role = Role.objects.create(name=Role.COMMISSARY_STAFF)
+        staff = User.objects.create_user(username="commissary1", password="testpass123", role=role)
+        flour = Product.objects.create(
+            name="Flour (kg)", price="55.00", product_type=Product.ProductType.MATERIAL
+        )
+        cake = Product.objects.create(name="Cake", price="140.00")
+        record = ProductionRecord.objects.create(
+            commissary_staff=staff, product=cake, quantity_produced=10
+        )
+        IngredientUsage.objects.create(
+            production_record=record, material=flour, quantity_used="5.500"
+        )
+
+        content = owner_client.get(reverse("analytics:resource_consumption")).content.decode()
+
+        assert "5.50<" in content
+        assert "5.500<" not in content
+
     def test_non_owner_cannot_view(self, client, cashier):
         client.force_login(cashier)
         response = client.get(reverse("analytics:resource_consumption"))

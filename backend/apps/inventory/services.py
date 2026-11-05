@@ -73,7 +73,18 @@ def get_product_availability(branch=None, product_type=None, category=None, sear
     # here would make the displayed total drift below what the
     # individually-displayed (already-clamped) item rows add up to.
     total_stock = sum(i.display_quantity for i in items)
-    stock_value = sum(i.display_quantity * i.product.price for i in items)
+    # Task #137 (client review): quantity_on_hand carries 3 decimal
+    # places (apps/inventory/models.py -- materials can be fractional
+    # kg/L), so multiplying it by a 2-decimal-place price can leave more
+    # than 2 decimal places in the running total (e.g. a 0.125 kg row at
+    # P80.00 contributes Decimal('10.000'), not a clean 2dp amount).
+    # Django's |floatformat template filter always rounds correctly
+    # regardless, so this was never a visibly wrong number on screen --
+    # but it's the same unquantized-Decimal pattern as the live
+    # transaction/item discount bugs (PRs #169/#170), so it's quantized
+    # here too rather than left to rely on the template to paper over it.
+    stock_value = sum((i.display_quantity * i.product.price for i in items), Decimal("0.00"))
+    stock_value = stock_value.quantize(Decimal("0.01"))
 
     return {
         "items": items,

@@ -22,7 +22,7 @@
     <div class="col-md-3">
         <div class="jc-card p-3 h-100 text-center">
             <div class="text-muted small mb-1">Total Materials Used</div>
-            <div class="fs-4 fw-bold">{{ consumption.total_units_used }}</div>
+            <div class="fs-4 fw-bold">{{ consumption.total_units_used|floatformat:2 }}</div>
         </div>
     </div>
     <div class="col-md-3">
