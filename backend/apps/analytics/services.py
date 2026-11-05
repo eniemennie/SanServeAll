@@ -399,7 +399,7 @@ def get_total_units_sold(branch=None, days=30):
     return items.aggregate(total=Sum("quantity"))["total"] or 0
 
 
-def get_product_performance(days=30, date_from=None, date_to=None):
+def get_product_performance(branch=None, days=30, date_from=None, date_to=None):
     """Per-product performance and growth rate (Fig. 3-29): units sold in
     the current window vs. the equally-sized window immediately before
     it. Products with no sales in either window are omitted -- a 0-to-0
@@ -408,20 +408,49 @@ def get_product_performance(days=30, date_from=None, date_to=None):
     Accepts an explicit date_from/date_to range (task #146) as an
     alternative to `days` -- the "current" window becomes exactly that
     range, and "previous" is the immediately-preceding window of the
-    same length, same as the days-based behavior."""
-    current_start, now = _resolve_report_window(days, date_from, date_to)
+    same length, same as the days-based behavior.
+
+    Task #142 (client review): two bugs found while auditing the
+    Reports module for branch misaggregation.
+
+    1. product__isnull=True rows are now excluded. The real client
+       historical-sales backfill (import_branch_sales_history) creates
+       SalesItem rows with product=None and a custom_name like
+       "Store Sales (Imported)" -- one per revenue stream per day, not
+       one per actual product. Before this filter, Django's
+       .values("product__id", ...) grouped every single one of those
+       rows together under one product_id=None bucket, producing a
+       single phantom row with product_name=None whose "units_sold"
+       silently summed the *count of imported transactions* across
+       ALL THREE BRANCHES and ALL FOUR revenue streams (Store/Cafe AM/
+       Cafe PM/Cafe Total) combined -- a textbook misaggregation.
+       Reproduced directly: three transactions across two branches and
+       two streams collapsed into one {"product_name": None,
+       "current_units": 3, ...} row. A None product was never a real
+       product to report "performance" on in the first place.
+
+    2. Added branch filtering, matching get_sales_summary's/
+       get_weekly_sales_trend's own branch=None pattern. The Reports
+       Hub view passes `branch=selected_branch` to those two but never
+       to this one, so selecting a branch on that page silently left
+       Product Performance showing every branch's data regardless --
+       not reachable through the current in-app navigation (nothing
+       yet links to reports_hub with ?branch=, confirmed via grep), but
+       live, URL-reachable, and inconsistent with its sibling
+       functions on the exact same page."""
+    current_start, now = _resolve_report_window(days, date_from, date_to, branch)
     previous_start = current_start - (now - current_start)
 
     def _units_sold_in_range(start, end):
-        return (
-            SalesItem.objects.filter(
-                transaction__status=SalesTransaction.Status.COMPLETED,
-                transaction__completed_at__gte=start,
-                transaction__completed_at__lt=end,
-            )
-            .values("product__id", "product__name")
-            .annotate(units_sold=Sum("quantity"))
+        items = SalesItem.objects.filter(
+            product__isnull=False,
+            transaction__status=SalesTransaction.Status.COMPLETED,
+            transaction__completed_at__gte=start,
+            transaction__completed_at__lt=end,
         )
+        if branch is not None:
+            items = items.filter(transaction__branch=branch)
+        return items.values("product__id", "product__name").annotate(units_sold=Sum("quantity"))
 
     current = {row["product__id"]: row for row in _units_sold_in_range(current_start, now)}
     previous = {

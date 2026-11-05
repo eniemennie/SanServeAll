@@ -82,7 +82,7 @@ def reports_hub(request):
     )
     trend = services.get_weekly_sales_trend(branch=selected_branch)
     product_performance_rows = services.get_product_performance(
-        days=days, date_from=effective_from, date_to=effective_to
+        branch=selected_branch, days=days, date_from=effective_from, date_to=effective_to
     )
     consumption = services.get_resource_consumption_summary(
         days=days, date_from=effective_from, date_to=effective_to

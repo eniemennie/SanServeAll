@@ -312,6 +312,69 @@ class TestProductPerformance:
         names = [r["product_name"] for r in performance]
         assert "Unsold Item" not in names
 
+    def test_imported_historical_rows_with_no_product_do_not_collapse_into_one_phantom_row(
+        self, branch, cashier, latte
+    ):
+        """Task #142 (client review): import_branch_sales_history
+        creates SalesItem rows with product=None and a custom_name like
+        "Store Sales (Imported)" -- one per revenue stream per day, not
+        per actual product. Before excluding product__isnull=True,
+        Django's .values("product__id", ...) grouped every single one
+        of those rows into one product_id=None bucket, so this
+        screen's "units_sold" for that phantom row silently summed the
+        *count of imported transactions* across every branch and every
+        revenue stream combined -- not a real product's performance at
+        all."""
+        other_branch = Branch.objects.create(name="Batangas City", code="BATANGAS")
+        for imported_branch, stream in [
+            (branch, "Store Sales"),
+            (branch, "Cafe AM Sales"),
+            (other_branch, "Store Sales"),
+        ]:
+            tx = SalesTransaction.objects.create(
+                branch=imported_branch,
+                cashier=cashier,
+                status=SalesTransaction.Status.COMPLETED,
+                payment_method="CASH",
+                amount_tendered="100.00",
+                completed_at=timezone.now(),
+            )
+            SalesItem.objects.create(
+                transaction=tx,
+                product=None,
+                custom_name=f"{stream} (Imported)",
+                unit_price="100.00",
+                quantity=1,
+            )
+        # A real catalog sale too, to confirm it's unaffected.
+        _completed_sale(branch, cashier, latte, 3, "125.00", "375.00")
+
+        performance = services.get_product_performance(days=30)
+
+        assert None not in [r["product_name"] for r in performance]
+        latte_row = next(r for r in performance if r["product_name"] == "Spanish Latte")
+        assert latte_row["current_units"] == 3
+
+    def test_branch_filter_excludes_other_branches(self, branch, cashier, latte):
+        """Task #142: Reports Hub passes branch=selected_branch to
+        get_sales_summary and get_weekly_sales_trend but was never
+        wired through to this function -- so selecting a branch on
+        that page silently left Product Performance showing every
+        branch's sales regardless."""
+        other_branch = Branch.objects.create(name="Batangas City", code="BATANGAS")
+        other_cashier = User.objects.create_user(
+            username="cashier2", password="testpass123", role=cashier.role, branch=other_branch
+        )
+        other_product = Product.objects.create(name="Batangas Special", price="110.00")
+        _completed_sale(branch, cashier, latte, 5, "125.00", "625.00")
+        _completed_sale(other_branch, other_cashier, other_product, 7, "110.00", "770.00")
+
+        performance = services.get_product_performance(branch=branch, days=30)
+
+        names = [r["product_name"] for r in performance]
+        assert "Spanish Latte" in names
+        assert "Batangas Special" not in names
+
 
 class TestResourceConsumption:
     def test_totals_material_usage_and_cost(self, branch):
@@ -674,6 +737,26 @@ class TestReportsHubView:
         }
         assert isinstance(response.context["product_performance"], list)
         assert "total_cost" in response.context["consumption"]
+
+    def test_selected_branch_filters_product_performance(
+        self, owner_client, branch, cashier, latte
+    ):
+        """Task #142: selecting a branch on the Reports Hub page must
+        filter Product Performance the same way it already filters
+        Sales Summary -- previously it was silently ignored here."""
+        other_branch = Branch.objects.create(name="Batangas City", code="BATANGAS")
+        other_cashier = User.objects.create_user(
+            username="cashier2", password="testpass123", role=cashier.role, branch=other_branch
+        )
+        other_product = Product.objects.create(name="Batangas Special", price="110.00")
+        _completed_sale(branch, cashier, latte, 5, "125.00", "625.00")
+        _completed_sale(other_branch, other_cashier, other_product, 7, "110.00", "770.00")
+
+        response = owner_client.get(reverse("analytics:reports_hub"), {"branch": branch.pk})
+
+        names = [r["product_name"] for r in response.context["product_performance"]]
+        assert "Spanish Latte" in names
+        assert "Batangas Special" not in names
         assert "completion_rate" in response.context["operational"]
 
     def test_days_filter_is_honored(self, owner_client, branch, cashier, latte):
