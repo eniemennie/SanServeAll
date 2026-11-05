@@ -34,13 +34,23 @@
     <div class="col-md-3">
         <div class="jc-card p-3 p-md-4 text-center">
             <div class="text-muted small">Avg. MAE</div>
-            <div class="fs-4 fw-bold">{% if summary.avg_mae is not None %}{{ summary.avg_mae }}{% else %}&mdash;{% endif %}</div>
+            {% if summary.avg_mae is not None %}
+            <div class="fs-4 fw-bold">{{ summary.avg_mae }}</div>
+            {% else %}
+            <div class="fs-4 fw-bold">&mdash;</div>
+            <div class="text-muted small">Available once actual sales are recorded.</div>
+            {% endif %}
         </div>
     </div>
     <div class="col-md-3">
         <div class="jc-card p-3 p-md-4 text-center">
             <div class="text-muted small">Avg. Confidence*</div>
-            <div class="fs-4 fw-bold">{% if summary.avg_confidence_pct is not None %}{{ summary.avg_confidence_pct }}%{% else %}&mdash;{% endif %}</div>
+            {% if summary.avg_confidence_pct is not None %}
+            <div class="fs-4 fw-bold">{{ summary.avg_confidence_pct }}%</div>
+            {% else %}
+            <div class="fs-4 fw-bold">&mdash;</div>
+            <div class="text-muted small">Available once actual sales are recorded.</div>
+            {% endif %}
         </div>
     </div>
 </div>
@@ -71,7 +81,17 @@
 <div class="jc-card p-3 p-md-4">
     <div class="fw-semibold mb-2">Latest Forecast Detail</div>
     <p class="text-muted small mb-2">
-        This is the Holt-Winters model's own demand prediction. Restocking recommendations on the
+        {% if summary.model_count > 0 and summary.naive_count == 0 %}
+        These are the Holt-Winters model's own demand predictions.
+        {% elif summary.model_count > 0 %}
+        Each row below is either the Holt-Winters model's own demand prediction or a Simple Average
+        fallback &mdash; see the Model column.
+        {% elif summary.naive_count > 0 %}
+        None of the predictions below come from the Holt-Winters model yet &mdash; see the note above.
+        {% else %}
+        No forecasts to show yet.
+        {% endif %}
+        Restocking recommendations on the
         <a href="{% url 'forecasting:decision_support' %}">AI Insights &amp; Decision Support</a> page
         use a separate trailing 30-day actual-sales average instead.
     </p>
@@ -84,7 +104,13 @@
                 <td>{{ f.product.name }}</td>
                 <td>{{ f.branch.name }}</td>
                 <td>{{ f.forecast_date }}</td>
-                <td>{{ f.predicted_quantity|floatformat:1 }}</td>
+                <td>
+                    {% if f.predicted_quantity == 0 %}
+                    <span class="text-muted" title="The model genuinely predicts zero demand for this day, not a missing value.">No demand expected</span>
+                    {% else %}
+                    {{ f.predicted_quantity|floatformat:1 }}
+                    {% endif %}
+                </td>
                 <td>
                     {% if f.model_used == "NAIVE_AVERAGE" %}
                     <span class="jc-badge jc-badge-low" title="Not enough sales history yet for the full model -- this is a plain average of recent days.">Simple Average</span>
@@ -124,7 +150,12 @@ new Chart(document.getElementById("demandPatternChart"), {
     options: {
         responsive: true,
         plugins: { legend: { display: false } },
-        scales: { y: { beginAtZero: true } }
+        scales: {
+            y: {
+                beginAtZero: true,
+                title: { display: true, text: "Units/day" }
+            }
+        }
     }
 });
 </script>
