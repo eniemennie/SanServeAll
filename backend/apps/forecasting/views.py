@@ -32,7 +32,11 @@ def decision_support(request):
         request,
         "forecasting/decision_support.html",
         {
-            "active_nav": "forecast",
+            # UI/UX review (2026-11-05): this page now has its own sidebar
+            # link (previously it had none at all -- unreachable except by
+            # typing the URL directly), so it highlights its own item
+            # rather than borrowing Demand Forecasting's.
+            "active_nav": "decision_support",
             "critical_alerts": services.get_critical_alerts(branch),
             "slow_moving_products": services.get_slow_moving_products(branch),
             "peak_hour": services.get_peak_hour(branch),

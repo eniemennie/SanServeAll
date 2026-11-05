@@ -37,40 +37,61 @@
 <div class="row g-4 mb-4">
     <div class="col-md-3">
         <div class="jc-card p-3 p-md-4 h-100">
-            <div class="jc-icon-chip jc-icon-chip-orange mb-3">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+            <div class="d-flex align-items-start justify-content-between mb-3">
+                <div class="jc-icon-chip jc-icon-chip-orange">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                </div>
+                {# UI/UX review (2026-11-05): the 3 revenue toggles used to #}
+                {# sit directly on the card's face at all times -- moved #}
+                {# behind a filter control so the card leads with the #}
+                {# number, matching "filtering controls" rather than #}
+                {# settings being the first thing read. Nothing about what #}
+                {# the toggles do changed, only where they live. #}
+                <button type="button" class="btn btn-link p-0 text-muted" data-bs-toggle="collapse"
+                        data-bs-target="#revenueFilters" aria-expanded="false" aria-controls="revenueFilters"
+                        title="Revenue filters" aria-label="Revenue filters">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon></svg>
+                </button>
             </div>
             <div class="text-muted small mb-1">Total Revenue</div>
             <div class="fs-4 fw-bold">&#8369;{{ summary.total_revenue|peso }}</div>
             <div class="text-muted small mb-2">This month</div>
-            <form method="get" class="small border-top pt-2 mt-2">
-                <input type="hidden" name="branch" value="{{ selected_branch.pk|default:'' }}">
-                <div class="form-check form-switch">
-                    {# A browser never submits an unchecked checkbox's name/value at #}
-                    {# all, so unchecking this previously left "additional" absent from #}
-                    {# the request, and the view's own request.GET.get("additional", "1") #}
-                    {# default of "1" made it look identical to checked -- the switch #}
-                    {# could turn on but never actually turn off. This hidden field #}
-                    {# before the checkbox supplies the real "0" whenever the checkbox #}
-                    {# itself is unchecked (Django's QueryDict.get() returns the LAST #}
-                    {# value for a repeated name, so the checkbox's own "1" still wins #}
-                    {# when it IS checked, since it appears after this in the form). #}
-                    <input type="hidden" name="additional" value="0">
-                    <input class="form-check-input" type="checkbox" name="additional" value="1" id="incAdd"
-                           {% if include_additional_sales %}checked{% endif %} onchange="this.form.submit()">
-                    <label class="form-check-label" for="incAdd">Include Additional Sales</label>
-                </div>
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" name="exclude_discounts" value="1" id="exDisc"
-                           {% if exclude_discounts %}checked{% endif %} onchange="this.form.submit()">
-                    <label class="form-check-label" for="exDisc">Exclude Discounts</label>
-                </div>
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" name="exclude_vat" value="1" id="exVat"
-                           {% if exclude_vat %}checked{% endif %} onchange="this.form.submit()">
-                    <label class="form-check-label" for="exVat">Exclude VAT</label>
-                </div>
-            </form>
+            <div class="collapse" id="revenueFilters">
+                <form method="get" class="small border-top pt-2 mt-2">
+                    <input type="hidden" name="branch" value="{{ selected_branch.pk|default:'' }}">
+                    <div class="form-check form-switch">
+                        {# A browser never submits an unchecked checkbox's name/value at #}
+                        {# all, so unchecking this previously left "additional" absent from #}
+                        {# the request, and the view's own request.GET.get("additional", "1") #}
+                        {# default of "1" made it look identical to checked -- the switch #}
+                        {# could turn on but never actually turn off. This hidden field #}
+                        {# before the checkbox supplies the real "0" whenever the checkbox #}
+                        {# itself is unchecked (Django's QueryDict.get() returns the LAST #}
+                        {# value for a repeated name, so the checkbox's own "1" still wins #}
+                        {# when it IS checked, since it appears after this in the form). #}
+                        <input type="hidden" name="additional" value="0">
+                        <input class="form-check-input" type="checkbox" name="additional" value="1" id="incAdd"
+                               {% if include_additional_sales %}checked{% endif %} onchange="this.form.submit()">
+                        <label class="form-check-label" for="incAdd">Include Additional Sales</label>
+                    </div>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="exclude_discounts" value="1" id="exDisc"
+                               {% if exclude_discounts %}checked{% endif %} onchange="this.form.submit()">
+                        <label class="form-check-label" for="exDisc">Exclude Discounts</label>
+                    </div>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="exclude_vat" value="1" id="exVat"
+                               {% if exclude_vat %}checked{% endif %} onchange="this.form.submit()">
+                        <label class="form-check-label" for="exVat">Exclude VAT</label>
+                    </div>
+                </form>
+            </div>
+            {% comment %} Default state is Include Additional Sales ON, the
+            other two OFF -- only flag "Filters active" when something
+            differs from that default, not on every page load. {% endcomment %}
+            {% if not include_additional_sales or exclude_discounts or exclude_vat %}
+            <div class="small mt-2" style="color: var(--jc-teal);">Filters active</div>
+            {% endif %}
         </div>
     </div>
     <div class="col-md-3">
@@ -127,12 +148,21 @@
 
 <div class="row g-4 mb-4">
     <div class="col-lg-6">
-        <div class="jc-card p-3 p-md-4 h-100">
-            <div class="fw-semibold mb-1">Resource Monitoring</div>
+        {# UI/UX review (2026-11-05): dashboard = summary. Every row that #}
+        {# used to print here unconditionally still exists -- the first 2 #}
+        {# show plainly, the rest sit behind a "Show N more" toggle, and a #}
+        {# link to the full Resource Management page covers anyone who #}
+        {# wants the complete, uncollapsed view as their starting screen. #}
+        <div class="jc-card jc-card-interactive p-3 p-md-4 h-100">
+            <div class="d-flex justify-content-between align-items-start mb-1">
+                <div class="fw-semibold">Resource Monitoring</div>
+                <a href="{% url 'forecasting:resource_management_dashboard' %}" class="small text-decoration-none" style="color: var(--jc-teal);">View all &rarr;</a>
+            </div>
             <div class="text-muted small mb-2">Raw materials &middot; commissary stock only</div>
             {% if material_resource_status %}
-            {% for item in material_resource_status.items %}
-            <div class="d-flex justify-content-between align-items-center py-2 {% if not forloop.last %}border-bottom{% endif %}">
+            {% with items=material_resource_status.items %}
+            {% for item in items|slice:":2" %}
+            <div class="d-flex justify-content-between align-items-center py-2 {% if not forloop.last or items|length > 2 %}border-bottom{% endif %}">
                 <div>
                     <div class="fw-semibold">{{ item.product.name }}</div>
                     <div class="text-muted small">
@@ -150,17 +180,47 @@
             {% empty %}
             <p class="text-muted small mb-0">No raw material inventory tracked yet.</p>
             {% endfor %}
+            {% if items|length > 2 %}
+            <div class="collapse" id="resourceMonitoringMore">
+                {% for item in items|slice:"2:" %}
+                <div class="d-flex justify-content-between align-items-center py-2 {% if not forloop.last %}border-bottom{% endif %}">
+                    <div>
+                        <div class="fw-semibold">{{ item.product.name }}</div>
+                        <div class="text-muted small">
+                            {{ item.display_quantity }} on hand &middot; reorder at {{ item.reorder_threshold }}
+                        </div>
+                    </div>
+                    {% if item.is_out_of_stock %}
+                    <span class="jc-badge jc-badge-critical">Out of Stock</span>
+                    {% elif item.is_low_stock %}
+                    <span class="jc-badge jc-badge-low">Low Stock</span>
+                    {% else %}
+                    <span class="jc-badge jc-badge-adequate">Available</span>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            <button type="button" class="jc-expand-toggle mt-2" data-bs-toggle="collapse"
+                    data-bs-target="#resourceMonitoringMore" aria-expanded="false" aria-controls="resourceMonitoringMore">
+                <span>Show {{ items|length|add:"-2" }} more</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </button>
+            {% endif %}
+            {% endwith %}
             {% else %}
             <p class="text-muted small mb-0">No commissary branch configured yet.</p>
             {% endif %}
         </div>
     </div>
     <div class="col-lg-6">
-        <div class="jc-card p-3 p-md-4 h-100">
-            <div class="fw-semibold mb-1">Low Stock Orders Tracking</div>
+        <div class="jc-card jc-card-interactive p-3 p-md-4 h-100">
+            <div class="d-flex justify-content-between align-items-start mb-1">
+                <div class="fw-semibold">Low Stock Orders Tracking</div>
+                <a href="{% url 'forecasting:resource_management_dashboard' %}" class="small text-decoration-none" style="color: var(--jc-teal);">View all &rarr;</a>
+            </div>
             <div class="text-muted small mb-2">Raw materials at or below their minimum stock level</div>
-            {% for alert in material_low_stock_alerts %}
-            <div class="d-flex justify-content-between align-items-center py-2 {% if not forloop.last %}border-bottom{% endif %}">
+            {% for alert in material_low_stock_alerts|slice:":2" %}
+            <div class="d-flex justify-content-between align-items-center py-2 {% if not forloop.last or material_low_stock_alerts|length > 2 %}border-bottom{% endif %}">
                 <div>
                     <div class="fw-semibold">{{ alert.score.product.name }}</div>
                     <div class="text-muted small">
@@ -177,70 +237,152 @@
             {% empty %}
             <p class="text-muted small mb-0">No raw materials are currently low on stock.</p>
             {% endfor %}
+            {% if material_low_stock_alerts|length > 2 %}
+            <div class="collapse" id="lowStockMore">
+                {% for alert in material_low_stock_alerts|slice:"2:" %}
+                <div class="d-flex justify-content-between align-items-center py-2 {% if not forloop.last %}border-bottom{% endif %}">
+                    <div>
+                        <div class="fw-semibold">{{ alert.score.product.name }}</div>
+                        <div class="text-muted small">
+                            {{ alert.score.quantity_on_hand }} on hand &middot; {{ alert.score.branch.name }}
+                            &middot; recommend ordering +{{ alert.recommended_reorder_quantity }}
+                        </div>
+                    </div>
+                    {% if alert.score.risk_level == "HIGH" %}
+                    <span class="jc-badge jc-badge-critical">Out of Stock</span>
+                    {% else %}
+                    <span class="jc-badge jc-badge-low">Low Stock</span>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            <button type="button" class="jc-expand-toggle mt-2" data-bs-toggle="collapse"
+                    data-bs-target="#lowStockMore" aria-expanded="false" aria-controls="lowStockMore">
+                <span>Show {{ material_low_stock_alerts|length|add:"-2" }} more</span>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </button>
+            {% endif %}
         </div>
     </div>
 </div>
 
 <div class="row g-4 mb-4">
     <div class="col-lg-12">
+        {# UI/UX review (2026-11-05): same 5 sections as before, same data, #}
+        {# nothing removed -- organized as an accordion (one open at a #}
+        {# time by default) instead of 5 full blocks always rendered open, #}
+        {# plus a direct link to the dedicated Decision Support page #}
+        {# (forecasting:decision_support), which existed already but had #}
+        {# no link anywhere pointing to it until this change. #}
         <div class="jc-card p-3 p-md-4 h-100">
-            <div class="fw-semibold mb-3">AI-Powered Insights &amp; Recommendations</div>
-
-            {% if critical_alerts %}
-            <div class="jc-card jc-card-accent p-3 mb-2">
-                <div class="fw-semibold" style="color: var(--jc-critical);">Critical: Restock Needed</div>
-                {% for alert in critical_alerts|slice:":3" %}
-                <div class="small mt-1">
-                    {{ alert.score.product.name }} at {{ alert.score.branch.name }} &mdash;
-                    {{ alert.score.days_of_stock_left|floatformat:1 }} day(s) of stock left.
-                    <span class="fw-semibold">Order +{{ alert.recommended_reorder_quantity }}.</span>
-                </div>
-                {% endfor %}
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <div class="fw-semibold">AI-Powered Insights &amp; Recommendations</div>
+                <a href="{% url 'forecasting:decision_support' %}" class="small text-decoration-none" style="color: var(--jc-teal);">Open full Decision Support view &rarr;</a>
             </div>
-            {% endif %}
-
-            {% if slow_moving %}
-            <div class="jc-card jc-card-accent-sage p-3 mb-2">
-                <div class="fw-semibold">Slow-Moving Product{{ slow_moving|length|pluralize }} Detected</div>
-                {% for score in slow_moving|slice:":2" %}
-                <div class="small mt-1">{{ score.product.name }} at {{ score.branch.name }} &mdash; {{ score.avg_daily_demand|floatformat:1 }} units/day avg.</div>
-                {% endfor %}
-            </div>
-            {% endif %}
-
-            {% if peak_hour %}
-            <div class="jc-card jc-card-accent-teal p-3 mb-2">
-                <div class="fw-semibold">Peak Hour Pattern</div>
-                <div class="small mt-1">{{ peak_hour.hour }}:00 sees the most transactions ({{ peak_hour.transaction_count }} in the last 30 days) &mdash; consider staffing/promotions around this window.</div>
-            </div>
-            {% endif %}
-
-            {% if anomalies %}
-            <div class="jc-card p-3 mb-2" style="border-left: 4px solid #8B6BB0;">
-                <div class="fw-semibold">Unusual Pattern Detected</div>
-                {% for a in anomalies|slice:":2" %}
-                <div class="small mt-1">
-                    {{ a.product.name }}: {{ a.yesterday_units }} sold yesterday vs. {{ a.baseline_average }} average
-                    ({{ a.deviation_pct }}% deviation).
-                </div>
-                {% endfor %}
-            </div>
-            {% endif %}
-
-            {% if insights %}
-            <div class="jc-card p-3" style="border-left: 4px solid var(--jc-teal);">
-                <div class="fw-semibold mb-1">Automated Restocking Recommendation{{ insights|length|pluralize }}</div>
-                {% for insight in insights|slice:":3" %}
-                <div class="small mt-1">
-                    {{ insight.message }}
-                    {% if not insight.generated_by_ai %}<span class="text-muted">(template-generated)</span>{% endif %}
-                </div>
-                {% endfor %}
-            </div>
-            {% endif %}
 
             {% if not critical_alerts and not slow_moving and not peak_hour and not anomalies and not insights %}
             <p class="text-muted small mb-0">No insights generated yet for this selection.</p>
+            {% else %}
+            <div class="accordion" id="insightsAccordion">
+                {% if critical_alerts %}
+                <div class="accordion-item">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button {% if slow_moving or not critical_alerts %}collapsed{% endif %}" type="button"
+                                data-bs-toggle="collapse" data-bs-target="#accCritical" aria-expanded="true" aria-controls="accCritical">
+                            <span class="jc-count-pill jc-badge-critical me-2">{{ critical_alerts|length }}</span>
+                            <span style="color: var(--jc-critical);">Critical: Restock Needed</span>
+                        </button>
+                    </h2>
+                    <div id="accCritical" class="accordion-collapse collapse show" data-bs-parent="#insightsAccordion">
+                        <div class="accordion-body">
+                            {% for alert in critical_alerts %}
+                            <div class="small py-1 {% if not forloop.last %}border-bottom{% endif %}">
+                                {{ alert.score.product.name }} at {{ alert.score.branch.name }} &mdash;
+                                {{ alert.score.days_of_stock_left|floatformat:1 }} day(s) of stock left.
+                                <span class="fw-semibold">Order +{{ alert.recommended_reorder_quantity }}.</span>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if slow_moving %}
+                <div class="accordion-item">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button {% if critical_alerts %}collapsed{% endif %}" type="button"
+                                data-bs-toggle="collapse" data-bs-target="#accSlow" aria-expanded="{% if not critical_alerts %}true{% else %}false{% endif %}" aria-controls="accSlow">
+                            <span class="jc-count-pill jc-badge-low me-2">{{ slow_moving|length }}</span>
+                            Slow-Moving Product{{ slow_moving|length|pluralize }} Detected
+                        </button>
+                    </h2>
+                    <div id="accSlow" class="accordion-collapse collapse {% if not critical_alerts %}show{% endif %}" data-bs-parent="#insightsAccordion">
+                        <div class="accordion-body">
+                            {% for score in slow_moving %}
+                            <div class="small py-1 {% if not forloop.last %}border-bottom{% endif %}">{{ score.product.name }} at {{ score.branch.name }} &mdash; {{ score.avg_daily_demand|floatformat:1 }} units/day avg.</div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if peak_hour %}
+                <div class="accordion-item">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed" type="button"
+                                data-bs-toggle="collapse" data-bs-target="#accPeak" aria-expanded="false" aria-controls="accPeak">
+                            Peak Hour Pattern
+                        </button>
+                    </h2>
+                    <div id="accPeak" class="accordion-collapse collapse" data-bs-parent="#insightsAccordion">
+                        <div class="accordion-body small">{{ peak_hour.hour }}:00 sees the most transactions ({{ peak_hour.transaction_count }} in the last 30 days) &mdash; consider staffing/promotions around this window.</div>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if anomalies %}
+                <div class="accordion-item">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed" type="button"
+                                data-bs-toggle="collapse" data-bs-target="#accAnomalies" aria-expanded="false" aria-controls="accAnomalies">
+                            <span class="jc-count-pill jc-badge-info me-2">{{ anomalies|length }}</span>
+                            Unusual Pattern{{ anomalies|length|pluralize }} Detected
+                        </button>
+                    </h2>
+                    <div id="accAnomalies" class="accordion-collapse collapse" data-bs-parent="#insightsAccordion">
+                        <div class="accordion-body">
+                            {% for a in anomalies %}
+                            <div class="small py-1 {% if not forloop.last %}border-bottom{% endif %}">
+                                {{ a.product.name }}: {{ a.yesterday_units }} sold yesterday vs. {{ a.baseline_average }} average
+                                ({{ a.deviation_pct }}% deviation).
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if insights %}
+                <div class="accordion-item">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed" type="button"
+                                data-bs-toggle="collapse" data-bs-target="#accInsights" aria-expanded="false" aria-controls="accInsights">
+                            Automated Restocking Recommendation{{ insights|length|pluralize }}
+                        </button>
+                    </h2>
+                    <div id="accInsights" class="accordion-collapse collapse" data-bs-parent="#insightsAccordion">
+                        <div class="accordion-body">
+                            {% for insight in insights %}
+                            <div class="small py-1 {% if not forloop.last %}border-bottom{% endif %}">
+                                {{ insight.message }}
+                                {% if not insight.generated_by_ai %}<span class="text-muted">(template-generated)</span>{% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
             {% endif %}
         </div>
     </div>
