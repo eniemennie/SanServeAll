@@ -216,7 +216,7 @@ def stock_transfers(request):
             error = str(exc)
 
     orders = StockTransferOrder.objects.select_related(
-        "product", "source_branch", "destination_branch"
+        "product", "source_branch", "destination_branch", "delivered_by", "cancelled_by"
     )
 
     return render(
@@ -243,7 +243,7 @@ def advance_stock_transfer(request, order_id):
     if request.method == "POST":
         next_status = request.POST.get("next_status")
         try:
-            services.advance_stock_transfer_status(order, next_status)
+            services.advance_stock_transfer_status(order, next_status, acted_by=request.user)
         except services.StockTransferError:
             pass  # Stay on the page; the list view shows the order's real, unchanged status.
 
@@ -260,7 +260,7 @@ def cancel_stock_transfer(request, order_id):
     order = get_object_or_404(StockTransferOrder, pk=order_id)
     if request.method == "POST":
         try:
-            services.cancel_stock_transfer_order(order)
+            services.cancel_stock_transfer_order(order, cancelled_by=request.user)
         except services.StockTransferError:
             pass
 
