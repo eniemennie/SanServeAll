@@ -5,6 +5,7 @@ per branch" / "Stock order status tracking: processing, in transit,
 delivered").
 """
 
+from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
@@ -287,6 +288,61 @@ class TestAdvanceStockTransferStatus:
         with pytest.raises(services.StockTransferError, match="no further status change"):
             services.advance_stock_transfer_status(order, StockTransferOrder.Status.DELIVERED)
 
+    def test_marking_delivered_records_who_performed_it(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        """Task #166 (adviser dry-run, 2026-11-05): delivered_by must be
+        the acting user, not the order's original commissary_staff
+        (who merely created it -- a different person can later mark it
+        Delivered)."""
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        role = Role.objects.create(name=Role.OWNER_ADMIN)
+        deliverer = User.objects.create_user(username="owner1", password="x", role=role)
+
+        services.advance_stock_transfer_status(order, StockTransferOrder.Status.IN_TRANSIT)
+        services.advance_stock_transfer_status(
+            order, StockTransferOrder.Status.DELIVERED, acted_by=deliverer
+        )
+        order.refresh_from_db()
+        assert order.delivered_by == deliverer
+
+    def test_marking_in_transit_does_not_set_delivered_by(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        role = Role.objects.create(name=Role.OWNER_ADMIN)
+        actor = User.objects.create_user(username="owner1", password="x", role=role)
+
+        services.advance_stock_transfer_status(
+            order, StockTransferOrder.Status.IN_TRANSIT, acted_by=actor
+        )
+        order.refresh_from_db()
+        assert order.delivered_by is None
+
+    def test_acted_by_defaults_to_none_for_backward_compatible_callers(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        services.advance_stock_transfer_status(order, StockTransferOrder.Status.IN_TRANSIT)
+        services.advance_stock_transfer_status(order, StockTransferOrder.Status.DELIVERED)
+        order.refresh_from_db()
+        assert order.delivered_by is None
+
     def test_an_unrecognized_status_value_raises_stock_transfer_error_not_valueerror(
         self, commissary, commissary_staff, batangas, cake
     ):
@@ -417,6 +473,82 @@ class TestCancelStockTransferOrder:
         commissary_inventory = Inventory.objects.get(branch=commissary, product=cake)
         assert commissary_inventory.quantity_on_hand == 50  # not double-credited
 
+    def test_cancelling_records_who_performed_it(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        """Task #166 (adviser dry-run, 2026-11-05): cancelled_by must be
+        the acting user, not the order's original commissary_staff."""
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        role = Role.objects.create(name=Role.OWNER_ADMIN)
+        canceller = User.objects.create_user(username="owner1", password="x", role=role)
+
+        services.cancel_stock_transfer_order(order, cancelled_by=canceller)
+        order.refresh_from_db()
+        assert order.cancelled_by == canceller
+
+    def test_cancelled_by_defaults_to_none_for_backward_compatible_callers(
+        self, commissary, commissary_staff, batangas, cake
+    ):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        services.cancel_stock_transfer_order(order)
+        order.refresh_from_db()
+        assert order.cancelled_by is None
+
+
+class TestIsStaleInProcessing:
+    """Task #166 (adviser dry-run, 2026-11-05): the Stock Transfers
+    screen's visual flag for an order that's sat in PROCESSING for more
+    than two days."""
+
+    def test_false_when_recently_created(self, commissary, commissary_staff, batangas, cake):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        assert order.is_stale_in_processing is False
+
+    def test_true_once_older_than_two_days(self, commissary, commissary_staff, batangas, cake):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        StockTransferOrder.objects.filter(pk=order.pk).update(
+            created_at=timezone.now() - timedelta(days=3)
+        )
+        order.refresh_from_db()
+        assert order.is_stale_in_processing is True
+
+    def test_false_once_in_transit_even_if_old(self, commissary, commissary_staff, batangas, cake):
+        """An order that's moved on isn't "stalled" anymore, however
+        old it is -- the flag is specifically about PROCESSING."""
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=10,
+        )
+        StockTransferOrder.objects.filter(pk=order.pk).update(
+            created_at=timezone.now() - timedelta(days=3)
+        )
+        order.refresh_from_db()
+        services.advance_stock_transfer_status(order, StockTransferOrder.Status.IN_TRANSIT)
+        order.refresh_from_db()
+        assert order.is_stale_in_processing is False
+
 
 class TestStockTransfersView:
     def test_commissary_staff_can_view_the_page(self, commissary_client):
@@ -493,6 +625,74 @@ class TestStockTransfersView:
         delivered_local = timezone.localtime(order.delivered_at)
         assert delivered_local.strftime("%b %d, %Y") in content
         assert delivered_local.strftime("%H:%M") in content
+
+    def test_advance_view_records_the_logged_in_user_as_delivered_by(
+        self, commissary_client, commissary_staff, commissary, batangas, cake
+    ):
+        """Task #166 (adviser dry-run, 2026-11-05): the view must pass
+        request.user through to the service, and the page must display
+        it, not just store it silently."""
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+        commissary_client.post(
+            reverse("production:advance_stock_transfer", args=[order.pk]),
+            {"next_status": "IN_TRANSIT"},
+        )
+        commissary_client.post(
+            reverse("production:advance_stock_transfer", args=[order.pk]),
+            {"next_status": "DELIVERED"},
+        )
+        order.refresh_from_db()
+        assert order.delivered_by == commissary_staff
+
+        list_response = commissary_client.get(reverse("production:stock_transfers"))
+        content = list_response.content.decode()
+        assert str(commissary_staff) in content
+
+    def test_cancel_view_records_the_logged_in_user_as_cancelled_by(
+        self, commissary_client, commissary_staff, commissary, batangas, cake
+    ):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+        commissary_client.post(reverse("production:cancel_stock_transfer", args=[order.pk]))
+        order.refresh_from_db()
+        assert order.cancelled_by == commissary_staff
+
+    def test_stale_processing_order_is_visually_flagged(
+        self, commissary_client, commissary_staff, commissary, batangas, cake
+    ):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+        StockTransferOrder.objects.filter(pk=order.pk).update(
+            created_at=timezone.now() - timedelta(days=3)
+        )
+
+        response = commissary_client.get(reverse("production:stock_transfers"))
+        assert "Stalled" in response.content.decode()
+
+    def test_fresh_processing_order_is_not_flagged(
+        self, commissary_client, commissary_staff, commissary, batangas, cake
+    ):
+        services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+        response = commissary_client.get(reverse("production:stock_transfers"))
+        assert "Stalled" not in response.content.decode()
 
     def test_advance_view_moves_the_order_forward(
         self, commissary_client, commissary, commissary_staff, batangas, cake

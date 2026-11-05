@@ -290,13 +290,57 @@ def get_sales_summary_with_toggles(
     by the existing analytics:sales_dashboard screen and its tests --
     changing its behavior would be a real regression risk for no benefit
     to that screen, which doesn't have these toggles.
+
+    Task #161 (adviser dry-run, 2026-11-05): when branch is None ("All
+    Branches"), the window used to be anchored once to timezone.now()
+    for every branch's transactions combined. A batch-only branch (e.g.
+    Alangilan, updated via periodic upload rather than live POS -- see
+    _trailing_window_anchor) whose last upload is more than `days` in
+    the past then had ALL of its transactions fall outside that single
+    now-anchored window and silently contributed nothing to Total
+    Revenue -- while the Branch Performance cards (get_branch_
+    performance) anchor each branch independently to its OWN latest
+    activity and correctly include it. The result was Total Revenue !=
+    sum of the Branch Performance cards' own revenue figures whenever
+    any branch's last activity was more than `days` old.
+
+    Fixed by anchoring per branch, exactly like get_branch_performance:
+    when branch is None, the query is run once per active branch (each
+    with its own anchor) and the results are combined, rather than once
+    globally. A specific branch still resolves to a single query with
+    that branch's own anchor, unchanged from before.
     """
+    if branch is None:
+        from apps.accounts.models import Branch
+
+        branches = list(Branch.objects.filter(is_active=True, is_commissary=False))
+        combined = {
+            "total_revenue": Decimal("0.00"),
+            "total_transactions": 0,
+            "total_units_sold": 0,
+            "average_daily_revenue": Decimal("0.00"),
+            "days": days,
+        }
+        for b in branches:
+            per_branch = get_sales_summary_with_toggles(
+                branch=b,
+                days=days,
+                include_additional_sales=include_additional_sales,
+                exclude_discounts=exclude_discounts,
+                exclude_vat=exclude_vat,
+            )
+            combined["total_revenue"] += per_branch["total_revenue"]
+            combined["total_transactions"] += per_branch["total_transactions"]
+            combined["total_units_sold"] += per_branch["total_units_sold"]
+            combined["average_daily_revenue"] += per_branch["average_daily_revenue"]
+        return combined
+
     since = _trailing_window_anchor(branch) - timedelta(days=days)
     transactions = SalesTransaction.objects.filter(
-        status=SalesTransaction.Status.COMPLETED, completed_at__gte=since
+        status=SalesTransaction.Status.COMPLETED,
+        completed_at__gte=since,
+        branch=branch,
     ).prefetch_related("items")
-    if branch is not None:
-        transactions = transactions.filter(branch=branch)
 
     tax_rate = BusinessSettings.load().tax_rate_percent
     vat_divisor = Decimal("1") + (tax_rate / Decimal("100"))

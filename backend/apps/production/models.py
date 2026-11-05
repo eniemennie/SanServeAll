@@ -7,8 +7,11 @@ production run. Same word, two different real-world things in the
 manuscript; kept as separate models rather than forced into one.
 """
 
+from datetime import timedelta
+
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
 
 
 class ProductionRecord(models.Model):
@@ -129,6 +132,41 @@ class StockTransferOrder(models.Model):
     cancelled_at = models.DateTimeField(
         null=True, blank=True, help_text="Set only when status actually reaches CANCELLED."
     )
+    # Task #166 (adviser dry-run, 2026-11-05): who actually performed the
+    # Deliver/Cancel action -- commissary_staff above only records who
+    # CREATED the order, which isn't necessarily who later delivered or
+    # cancelled it (a different commissary staff member or the owner/
+    # admin -- both roles can act on an order, see role_required on the
+    # advance_stock_transfer/cancel_stock_transfer views). PROTECT, not
+    # CASCADE/SET_NULL: same reasoning as commissary_staff above --
+    # this is an audit trail, and a deleted user account shouldn't
+    # silently erase who performed a real stock movement. null=True
+    # because every pre-existing row (and any order that hasn't reached
+    # that status yet) genuinely has no such actor.
+    delivered_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="stock_transfer_orders_delivered",
+        help_text="Set only once status reaches DELIVERED.",
+    )
+    cancelled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="stock_transfer_orders_cancelled",
+        help_text="Set only when status actually reaches CANCELLED.",
+    )
+
+    # Task #166 (adviser dry-run, 2026-11-05): how long an order can sit
+    # in PROCESSING before the Stock Transfers screen visually flags it
+    # as stale. Not configurable/per-branch -- the ticket just asked for
+    # a flag at a fixed "more than two days" threshold, so this exists
+    # as a named constant purely so the two days isn't a magic number
+    # repeated between is_stale_in_processing and its own tests.
+    STALE_IN_PROCESSING_AFTER = timedelta(days=2)
 
     class Meta:
         ordering = ["-created_at"]
@@ -138,6 +176,22 @@ class StockTransferOrder(models.Model):
             f"Transfer #{self.pk}: {self.quantity} x {self.product.name} "
             f"{self.source_branch.code} -> {self.destination_branch.code} ({self.status})"
         )
+
+    @property
+    def is_stale_in_processing(self):
+        """True once an order has sat in PROCESSING (created but not
+        yet dispatched) for more than STALE_IN_PROCESSING_AFTER -- the
+        Stock Transfers screen uses this to visually flag an order
+        that's stalled before ever reaching In Transit. Deliberately
+        keyed off `created_at`, not `updated_at`: an order that is
+        STILL Processing has, by definition, never had a status change
+        since creation, so the two are equal anyway -- created_at is
+        used because it's the field whose meaning doesn't shift if
+        that ever stops being true (e.g. a future edit to the order
+        that isn't a status change)."""
+        if self.status != self.Status.PROCESSING:
+            return False
+        return timezone.now() - self.created_at > self.STALE_IN_PROCESSING_AFTER
 
 
 class IngredientUsage(models.Model):

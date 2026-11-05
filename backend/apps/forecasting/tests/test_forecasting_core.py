@@ -199,6 +199,37 @@ class TestRunForecastForProduct:
         assert len(forecasts) == 7
         assert all(f.model_used == "NAIVE_AVERAGE" for f in forecasts)
 
+    def test_end_to_end_with_real_sales_rows_actually_executes_the_holtwinters_path(
+        self, branch, cashier, latte
+    ):
+        """Task #165 (adviser dry-run, 2026-11-05): the Forecasting
+        Dashboard's own test coverage only ever asserted on
+        TestForecastModel (a synthetic pandas Series passed directly to
+        generate_forecast -- see that class above) or on the view
+        rendering a Forecast row created with a pre-set model_used. No
+        test ran the REAL pipeline -- build_daily_sales_series ->
+        generate_forecast -> bulk_create -- against real SalesTransaction/
+        SalesItem rows and checked what model it actually picked.
+
+        has_sufficient_history's real floor (data_prep.py) is "at least
+        14 days of history AND sales on at least 3 separate days" -- the
+        exact wording of the ticket's own verification requirement. This
+        creates real completed sales on exactly 3 distinct days within
+        a 90-day-old-enough window (so len(series) >= 14 is trivially
+        satisfied by the full window) and asserts the resulting Forecast
+        rows genuinely come from Holt-Winters, not a naive fallback.
+
+        This is test data only -- isolated to this test's own transaction/
+        branch/product fixtures, never touching real client records."""
+        for days_ago in (30, 20, 10):
+            _completed_sale(branch, cashier, latte, quantity=5, days_ago=days_ago)
+
+        forecasts = services.run_forecast_for_product(branch, latte, steps=7)
+
+        assert len(forecasts) == 7
+        assert all(f.model_used.startswith("HoltWinters") for f in forecasts)
+        assert all(f.mae is None or f.mae >= 0 for f in forecasts)
+
 
 class TestRunForecastForAllProducts:
     def test_only_processes_products_with_real_sales_history(self, branch, cashier, latte):
