@@ -931,6 +931,48 @@ class TestReportsHubView:
         response = owner_client.get(reverse("analytics:reports_hub"), {"days": 7})
         assert response.context["days"] == 7
 
+    def test_product_performance_chart_has_whole_number_y_axis_and_units_sold_label(
+        self, owner_client
+    ):
+        """Task #163 (adviser dry-run, 2026-11-05): the Product
+        Performance chart's Y-axis previously had no configuration at
+        all, so Chart.js's default "nice number" tick generator could
+        pick fractional intervals (e.g. 1.75) for small datasets, and
+        the axis carried no label explaining what it counted."""
+        content = owner_client.get(reverse("analytics:reports_hub")).content.decode()
+
+        assert '"text": "Units Sold"' in content or 'text: "Units Sold"' in content
+        assert "precision: 0" in content
+
+    def test_new_badge_has_tooltip_explaining_what_new_means(
+        self, owner_client, branch, cashier, latte
+    ):
+        """Task #163: the "New" growth badge (shown when a product has
+        no sales in the previous period, so no growth rate can be
+        computed) needs a tooltip explaining why, not just the bare
+        word "New" with no context."""
+        _completed_sale(branch, cashier, latte, 3, "125.00", "375.00")
+
+        content = owner_client.get(reverse("analytics:reports_hub")).content.decode()
+
+        assert 'title="No sales in previous period.">New<' in content
+
+    def test_branch_identified_on_product_performance_panel(
+        self, owner_client, branch, cashier, latte
+    ):
+        """Task #163: "clearly identify which branch the report covers
+        (label or column)" -- Product Performance can be branch-filtered
+        (see test_selected_branch_filters_product_performance above) but
+        previously showed no indication anywhere of which branch (or
+        "all branches") the numbers on screen actually covered."""
+        all_branches_content = owner_client.get(reverse("analytics:reports_hub")).content.decode()
+        assert "All Branches" in all_branches_content
+
+        scoped_content = owner_client.get(
+            reverse("analytics:reports_hub"), {"branch": branch.pk}
+        ).content.decode()
+        assert f"Branch: <strong>{branch.name}</strong>" in scoped_content
+
     def test_no_fourth_url_invented_for_operational_performance(self):
         """Regression guard for the real routing decision this batch
         made: Operational Performance is a tab within reports_hub, not

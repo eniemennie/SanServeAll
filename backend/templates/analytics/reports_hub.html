@@ -95,6 +95,9 @@
 </div>
 
 <div id="panel-products" class="report-panel d-none">
+    <p class="text-muted small mb-2">
+        Branch: <strong>{{ selected_branch.name|default:"All Branches" }}</strong>
+    </p>
     <div class="jc-card p-3 p-md-4 mb-3">
         <canvas id="productPerformanceChart" height="90"></canvas>
     </div>
@@ -110,7 +113,7 @@
                     <td>{{ row.previous_units }}</td>
                     <td>
                         {% if row.growth_rate is None %}
-                        <span class="jc-badge jc-badge-info">New</span>
+                        <span class="jc-badge jc-badge-info" title="No sales in previous period.">New</span>
                         {% elif row.growth_rate > 0 %}
                         <span class="jc-badge jc-badge-adequate">+{{ row.growth_rate|floatformat:1 }}%</span>
                         {% else %}
@@ -242,7 +245,17 @@
             labels: {{ product_names_json|safe }},
             datasets: [{ label: "Units This Period", data: {{ product_units_json|safe }}, backgroundColor: "#D2703F" }]
         },
-        options: { responsive: true, plugins: { legend: { display: false } } }
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: "Units Sold" },
+                    ticks: { precision: 0 }
+                }
+            }
+        }
     });
 })();
 </script>

@@ -280,6 +280,20 @@ body {
   background-color: var(--jc-white);
   border-bottom: 1px solid #EEF0F2;
   padding: 0.75rem 1.5rem;
+  /* Task #163 (adviser dry-run, 2026-11-05): below ~992px (desktop),
+     the topbar's five children (logo, branding text, branch filter,
+     and the two flex-shrink-0 groups) don't actually fit within
+     992px's own "md" range -- at 768px wide specifically (iPad
+     portrait, and the narrow end of Bootstrap's md breakpoint) they
+     overflowed the viewport entirely (790px needed in 768px of
+     space), causing the WHOLE PAGE to scroll horizontally, not just
+     the topbar. The dedicated mobile media query below already wraps
+     this at <768px; making wrap unconditional here means the exact
+     same safety net also covers the narrow 768-991px gap that query
+     didn't reach, with no visual change at any width wide enough to
+     already fit on one line (which remains every width >= ~900px). */
+  flex-wrap: wrap;
+  row-gap: 0.5rem;
 }
 
 /* Branch filter dropdown / commissary badge in the topbar -- pulled out
@@ -296,13 +310,10 @@ body {
    Mobile-first overrides for the topbar and sidebar. Desktop (>=768px)
    behavior above this block is completely unchanged. */
 @media (max-width: 767.98px) {
-  /* Topbar: allow wrapping instead of forcing every child to fit one
-     row (the fixed-width branch filter was the main horizontal-scroll
-     culprit on a phone-width screen). */
-  .jc-topbar {
-    flex-wrap: wrap;
-    row-gap: 0.5rem;
-  }
+  /* Topbar wrapping itself is now unconditional (see .jc-topbar above,
+     task #163) -- this block only needs the phone-specific placement
+     of the branch filter onto its own full-width row, and the
+     off-canvas sidebar drawer below. */
   .jc-topbar .jc-branch-filter {
     min-width: 0;
     max-width: none;

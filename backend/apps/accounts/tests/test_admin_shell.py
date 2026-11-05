@@ -7,6 +7,7 @@ test_rbac_and_2fa.py and isn't re-tested here.
 """
 
 import pytest
+from django.conf import settings
 from django.urls import reverse
 from django_otp.plugins.otp_totp.models import TOTPDevice
 
@@ -102,6 +103,35 @@ class TestAdminShell:
         response = authed_client.get(reverse("accounts:admin_dashboard"))
         content = response.content.decode()
         assert 'data-expanded="true"' in content
+
+
+class TestTopbarResponsiveOverflow:
+    """Task #163 (adviser dry-run, 2026-11-05): QA reported a horizontal
+    page overflow while reviewing the Product Performance Report. The
+    actual cause wasn't specific to that page -- it's the shared
+    .jc-topbar (logo, branding text, branch filter, user menu), which
+    is wide enough (~790px) that it overflowed EVERY Owner/Admin page
+    at exactly iPad-portrait width (768px) and the narrow end of the
+    768-991px tablet range, since the existing mobile wrap rule only
+    applied below 768px (`max-width: 767.98px`) and nothing covered
+    the gap above it. Confirmed live with Playwright against the real
+    rendered page across 320-1200px: before this fix, 768px alone
+    needed 790px (page-level horizontal scroll); after it, every width
+    from 320px to 1200px fits with zero scroll, with no visual change
+    at the widths that already fit on one line."""
+
+    def test_topbar_wrap_is_not_gated_to_the_mobile_breakpoint(self):
+        css = (settings.BASE_DIR / "static" / "css" / "main.css").read_text()
+
+        # The base (always-on) .jc-topbar rule -- not the one nested
+        # inside @media (max-width: 767.98px) -- must itself allow
+        # wrapping, so a mid-range width that doesn't fit on one line
+        # (e.g. 768px) wraps instead of forcing the whole page wider
+        # than the viewport.
+        base_rule_start = css.index(".jc-topbar {")
+        base_rule_end = css.index("}", base_rule_start)
+        base_rule = css[base_rule_start:base_rule_end]
+        assert "flex-wrap: wrap" in base_rule
 
 
 class TestIncludeAdditionalSalesToggle:
