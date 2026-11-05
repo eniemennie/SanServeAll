@@ -524,6 +524,78 @@ class TestForecastingDashboardView:
         assert "No forecasts yet for this selection" in content
         assert "per-product sales history" in content
 
+    def test_latest_forecast_detail_intro_does_not_claim_holtwinters_when_all_naive(
+        self, owner_client, branch, latte
+    ):
+        """Task #165 (adviser dry-run, 2026-11-05): the 'Latest Forecast
+        Detail' intro paragraph used to unconditionally say "This is the
+        Holt-Winters model's own demand prediction," even when every row
+        below was actually a Simple Average fallback -- directly
+        contradicting the correct, already-conditional banner above it."""
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=timezone.now().date(),
+            predicted_quantity=0.5,
+            model_used="NAIVE_AVERAGE",
+        )
+
+        response = owner_client.get(
+            reverse("forecasting:forecasting_dashboard"), {"branch": branch.pk}
+        )
+        content = response.content.decode()
+        assert "This is the Holt-Winters model's own demand prediction" not in content
+        assert "None of the predictions below come from the Holt-Winters model yet" in content
+
+    def test_latest_forecast_detail_intro_confirms_holtwinters_when_all_real(
+        self, owner_client, branch, latte
+    ):
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=timezone.now().date(),
+            predicted_quantity=8.0,
+            model_used="HoltWinters(seasonal=7)",
+        )
+
+        response = owner_client.get(
+            reverse("forecasting:forecasting_dashboard"), {"branch": branch.pk}
+        )
+        content = response.content.decode()
+        assert "These are the Holt-Winters model's own demand predictions" in content
+
+    def test_zero_prediction_shows_a_plain_language_label_not_bare_0_0(
+        self, owner_client, branch, latte
+    ):
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=timezone.now().date(),
+            predicted_quantity=0.0,
+            model_used="HoltWinters(seasonal=7)",
+        )
+
+        response = owner_client.get(
+            reverse("forecasting:forecasting_dashboard"), {"branch": branch.pk}
+        )
+        content = response.content.decode()
+        assert "No demand expected" in content
+
+    def test_empty_mae_and_confidence_cards_show_helper_text(self, owner_client, branch):
+        """No forecasts at all -- the Avg. MAE / Avg. Confidence cards
+        fall back to an em-dash, which used to give no explanation for
+        why they're empty."""
+        response = owner_client.get(
+            reverse("forecasting:forecasting_dashboard"), {"branch": branch.pk}
+        )
+        content = response.content.decode()
+        assert content.count("Available once actual sales are recorded.") == 2
+
+    def test_demand_pattern_chart_has_a_units_per_day_axis_label(self, owner_client):
+        response = owner_client.get(reverse("forecasting:forecasting_dashboard"))
+        content = response.content.decode()
+        assert "Units/day" in content
+
 
 class TestResourceManagementDashboardView:
     def test_owner_can_view(self, owner_client):
