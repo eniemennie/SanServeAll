@@ -79,17 +79,39 @@
     {% endif %}
 </div>
 
-{% if resource_status and resource_status.critical_items %}
-<div class="jc-card p-3 p-md-4 mt-4">
+{% comment %}
+  UI/UX review (2026-11-05): previously gated on critical_items alone,
+  so a commissary with real low-stock items but zero out-of-stock ones
+  saw no warning card at all -- fixed to show whenever either list has
+  something. Critical (out-of-stock) items always render in full, since
+  they're the most urgent; low-stock items use the same
+  show-2-then-expand pattern as the Owner/Admin dashboard's Resource
+  Monitoring card, for consistent interaction across dashboards.
+{% endcomment %}
+{% if resource_status and resource_status.critical_items or resource_status.low_items %}
+<div class="jc-card jc-card-interactive p-3 p-md-4 mt-4">
     <h2 class="h6 mb-3" style="color: var(--jc-critical);">Materials Needing Attention</h2>
     <ul class="mb-0">
         {% for item in resource_status.critical_items %}
         <li>{{ item.product.name }} -- out of stock</li>
         {% endfor %}
-        {% for item in resource_status.low_items %}
+        {% for item in resource_status.low_items|slice:":2" %}
         <li>{{ item.product.name }} -- low stock ({{ item.display_quantity }} on hand)</li>
         {% endfor %}
     </ul>
+    {% if resource_status.low_items|length > 2 %}
+    <div class="collapse" id="commissaryLowStockMore">
+        <ul class="mb-0 mt-0">
+            {% for item in resource_status.low_items|slice:"2:" %}
+            <li>{{ item.product.name }} -- low stock ({{ item.display_quantity }} on hand)</li>
+            {% endfor %}
+        </ul>
+    </div>
+    <button class="jc-expand-toggle mt-2" type="button" data-bs-toggle="collapse" data-bs-target="#commissaryLowStockMore" aria-expanded="false" aria-controls="commissaryLowStockMore">
+        <span>Show {{ resource_status.low_items|length|add:"-2" }} more</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+    </button>
+    {% endif %}
 </div>
 {% endif %}
 
