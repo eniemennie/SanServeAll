@@ -674,6 +674,85 @@ class TestSalesSummaryWithToggles:
         assert inclusive["total_revenue"] == pytest.approx(112.00)
         assert exclusive["total_revenue"] == pytest.approx(100.00, abs=0.01)
 
+    def test_all_branches_total_matches_sum_of_branch_performance_with_batch_only_branch(
+        self, branch, cashier, latte
+    ):
+        """Task #161 (adviser dry-run, 2026-11-05): Alangilan's real
+        scenario -- a batch-only branch whose last upload is more than
+        `days` in the past -- was showing up on the Branch Performance
+        cards (which anchor per-branch, see
+        test_branch_with_only_old_batch_data_still_shows_its_real_numbers)
+        but NOT in the Total Revenue KPI, because
+        get_sales_summary_with_toggles(branch=None) anchored its single
+        window to timezone.now() for every branch combined, instead of
+        anchoring each branch independently the same way
+        get_branch_performance does. Total Revenue must equal the sum of
+        every branch's own Branch Performance revenue, for every
+        combination of the three toggles -- not just when every branch
+        happens to have recent activity."""
+        other_branch = Branch.objects.create(name="Batangas City", code="BATANGAS")
+        other_cashier = User.objects.create_user(
+            username="cashier2", password="testpass123", role=cashier.role, branch=other_branch
+        )
+        old_date = timezone.now() - timedelta(days=60)
+        _completed_sale(
+            branch,
+            cashier,
+            latte,
+            quantity=1,
+            unit_price="125.00",
+            amount_tendered="125.00",
+            when=old_date,
+        )
+        _completed_sale(
+            other_branch,
+            other_cashier,
+            latte,
+            quantity=3,
+            unit_price="125.00",
+            amount_tendered="375.00",
+        )
+
+        # Default toggles: Total Revenue (branch=None) must equal the sum
+        # of the Branch Performance cards' own revenue -- the literal bug
+        # reported ("Total Revenue excludes Alangilan").
+        branch_rows = services.get_branch_performance()
+        expected_default_total = sum(r["revenue"] for r in branch_rows)
+        default_result = services.get_sales_summary_with_toggles(branch=None)
+        assert float(default_result["total_revenue"]) == pytest.approx(
+            float(expected_default_total)
+        )
+
+        # For every toggle combination, Total Revenue (branch=None) must
+        # equal the sum of that SAME toggle combination applied per
+        # branch -- the general "one consistent calculation" requirement,
+        # now exercised across a batch-only branch plus a live branch.
+        for kwargs in [
+            {},
+            {"include_additional_sales": False},
+            {"exclude_discounts": True},
+            {"exclude_vat": True},
+            {"include_additional_sales": False, "exclude_discounts": True, "exclude_vat": True},
+        ]:
+            all_branches_total = services.get_sales_summary_with_toggles(branch=None, **kwargs)[
+                "total_revenue"
+            ]
+            per_branch_sum = sum(
+                (
+                    services.get_sales_summary_with_toggles(branch=branch, **kwargs)[
+                        "total_revenue"
+                    ],
+                    services.get_sales_summary_with_toggles(branch=other_branch, **kwargs)[
+                        "total_revenue"
+                    ],
+                ),
+                Decimal("0.00"),
+            )
+            assert float(all_branches_total) == pytest.approx(float(per_branch_sum)), (
+                f"Total Revenue mismatch for toggles={kwargs}: "
+                f"{all_branches_total} != {per_branch_sum}"
+            )
+
 
 class TestWeeklySalesTrendByBranch:
     def test_returns_one_series_per_active_branch(self, branch, cashier, latte):
