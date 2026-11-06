@@ -32,3 +32,4 @@ desktop.ini
 # specific database (production and any other environment each have
 # their own, already excluded from git the same way).
 backend/scripts/sample_data_manifest.json
+backend/scripts/synthetic_backfill_manifest.json
