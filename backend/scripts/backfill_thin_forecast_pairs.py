@@ -92,6 +92,7 @@ import json
 import os
 import random
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 import django
@@ -205,6 +206,26 @@ class _SkipSale(Exception):
     rolls back the whole block rather than leaving a partial write."""
 
 
+def _has_sufficient_stock(branch, product, quantity):
+    """Shared by both the dry-run preview and the live path, so a
+    dry run actually previews what the live run will do -- including
+    skips -- rather than unconditionally claiming every candidate day
+    would be created. (Found right after the atomicity fix: the dry
+    run never called this check at all, so it kept showing a
+    known-negative-stock pair as "would create" when the live run
+    would actually skip it.)
+
+    Read-only deliberately -- a plain filter().first(), not
+    get_or_create(): this is called from the dry-run path too, which
+    must never write anything, not even an Inventory row that happens
+    to be missing. A missing row reads as 0 (healthy default; the
+    real create-if-missing still happens, correctly, in
+    _create_synthetic_sale's own live-path lookup)."""
+    inv = Inventory.objects.filter(branch=branch, product=product).first()
+    current_qty = inv.quantity_on_hand if inv is not None else Decimal("0")
+    return current_qty >= quantity, current_qty
+
+
 def _create_synthetic_sale(bot_user, branch, product, day_date, quantity):
     """One synthetic sale, through the real service layer -- same
     deduction/logging side effects a real sale would trigger, same as
@@ -224,15 +245,16 @@ def _create_synthetic_sale(bot_user, branch, product, day_date, quantity):
     whole sale+compensation sequence in one atomic block, so any
     unexpected failure anywhere in it rolls back everything instead of
     leaving a half-done write."""
-    inv, _ = Inventory.objects.get_or_create(branch=branch, product=product)
-    if inv.quantity_on_hand < quantity:
+    sufficient, current_qty = _has_sufficient_stock(branch, product, quantity)
+    if not sufficient:
         print(
             f"    skipping {day_date} -- real stock for {product.name} @ {branch.name} "
-            f"is {inv.quantity_on_hand}, not enough to safely deduct {quantity} unit(s) "
+            f"is {current_qty}, not enough to safely deduct {quantity} unit(s) "
             "and compensate without going negative. Not attempting this sale."
         )
         return None
 
+    inv, _ = Inventory.objects.get_or_create(branch=branch, product=product)
     try:
         with transaction.atomic():
             draft = pos_services.get_or_create_draft_transaction(bot_user, branch)
@@ -313,7 +335,15 @@ def backfill(under_served_pairs, bot_user, dry_run):
         for day_date in sorted(chosen_days):
             quantity = random.randint(1, 2)
             if dry_run:
-                print(f"    [DRY RUN] would create: {day_date} -- {quantity} unit(s)")
+                sufficient, current_qty = _has_sufficient_stock(branch, product, quantity)
+                if sufficient:
+                    print(f"    [DRY RUN] would create: {day_date} -- {quantity} unit(s)")
+                    succeeded_for_pair += 1
+                else:
+                    print(
+                        f"    [DRY RUN] would SKIP {day_date} -- real stock is "
+                        f"{current_qty}, not enough to safely deduct {quantity} unit(s)."
+                    )
                 continue
             txn = _create_synthetic_sale(bot_user, branch, product, day_date, quantity)
             if txn is not None:
@@ -330,7 +360,7 @@ def backfill(under_served_pairs, bot_user, dry_run):
                 )
                 print(f"    {day_date} -- {quantity} unit(s) -- transaction #{txn.pk}")
 
-        if not dry_run and succeeded_for_pair < shortfall:
+        if succeeded_for_pair < shortfall:
             incomplete_pairs.append(
                 {
                     "branch": branch.name,
@@ -392,7 +422,18 @@ def run(dry_run=True):
 
     if dry_run:
         print("\nDRY RUN -- previewing what would be created (no bot account created, no writes):")
-        backfill(under_served, bot_user=None, dry_run=True)
+        _, _, incomplete_pairs = backfill(under_served, bot_user=None, dry_run=True)
+        if incomplete_pairs:
+            print(
+                f"\n  {len(incomplete_pairs)} pair(s) would NOT reach their full shortfall "
+                "even in a live run (insufficient real stock -- see the 'would SKIP' "
+                "messages above):"
+            )
+            for p in incomplete_pairs:
+                print(
+                    f"    {p['product']} @ {p['branch']} -- would get "
+                    f"{p['succeeded']}/{p['shortfall']} day(s); would stay under-served."
+                )
         print("\n" + "=" * 70)
         print("Dry run complete. No database changes were made.")
         print("Review the above, then call run(dry_run=False) to actually create these rows.")
