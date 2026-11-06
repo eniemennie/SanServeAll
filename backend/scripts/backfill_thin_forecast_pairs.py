@@ -55,6 +55,19 @@ data without duplicating or modifying our existing real transactions"):
    BOT_USERNAME) the same way seed_sample_operations_data.py does, so
    remove_synthetic_backfill.py can undo precisely this run later --
    entirely independent of that other script's own manifest.
+8. (Added 2026-11-06, after a production incident) Real stock is
+   checked as sufficient BEFORE attempting a synthetic sale, and the
+   sale + its compensation run inside one atomic transaction. The
+   first live run crashed on a product whose real stock was already
+   negative before this script touched anything:
+   complete_sale_payment()'s deduction has no floor (by design), but
+   the compensating adjust_stock() call does refuse to leave a result
+   negative, and non-atomic execution let the deduction commit before
+   its own compensation failed. A pair whose real stock can't safely
+   support a synthetic sale is now skipped outright (reported at the
+   end as "incomplete"), rather than attempted and left half-done. See
+   scripts/recover_partial_backfill_20261106.py for how that one
+   partial write was undone.
 
 HONEST LIMITATION, stated here rather than just in conversation:
 clearing the 3-non-zero-day floor makes generate_forecast() ATTEMPT a
@@ -88,6 +101,7 @@ if not django.apps.apps.ready:
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.development")
     django.setup()
 
+from django.db import transaction  # noqa: E402
 from django.db.models import Max  # noqa: E402
 from django.utils import timezone  # noqa: E402
 
@@ -184,57 +198,109 @@ def find_under_served_pairs():
     return under_served
 
 
+class _SkipSale(Exception):
+    """Raised inside the atomic block below to abandon this one
+    candidate sale cleanly -- caught outside the `with`, never inside
+    it, so Django's atomic() always sees the exception propagate and
+    rolls back the whole block rather than leaving a partial write."""
+
+
 def _create_synthetic_sale(bot_user, branch, product, day_date, quantity):
     """One synthetic sale, through the real service layer -- same
     deduction/logging side effects a real sale would trigger, same as
     seed_sample_operations_data.py's own approach, then immediately
-    compensated (see module docstring, safety property 6)."""
-    draft = pos_services.get_or_create_draft_transaction(bot_user, branch)
-    pos_services.add_catalog_item(draft, product.pk, quantity=quantity)
-    if not draft.items.exists():
-        print(f"    could not add {product.name} to a draft order -- skipped.")
-        return None
+    compensated (see module docstring, safety property 6).
 
-    pos_services.set_dining_option(draft, SalesTransaction.DiningOption.TAKE_OUT)
-    total = draft.grand_total
-    try:
-        completed = pos_services.complete_sale_payment(
-            draft,
-            payment_method=SalesTransaction.PaymentMethod.CASH,
-            amount_tendered=total,
-        )
-    except pos_services.PaymentError as exc:
-        print(f"    could not complete synthetic sale for {product.name}: {exc} -- skipped.")
-        return None
-
-    hour = random.randint(8, 18)
-    minute = random.randint(0, 59)
-    ts = timezone.make_aware(
-        timezone.datetime(day_date.year, day_date.month, day_date.day, hour, minute)
-    )
-    SalesTransaction.objects.filter(pk=completed.pk).update(created_at=ts, completed_at=ts)
-    SalesItem.objects.filter(transaction_id=completed.pk).update(created_at=ts, updated_at=ts)
-
-    # Undo complete_sale_payment's unconditional stock deduction (safety
-    # property 6) -- real Inventory.quantity_on_hand must not end this
-    # script altered, only the forecasting-relevant sales rows should be.
+    Two defenses added after the 2026-11-06 production incident, where
+    a product's real stock was already negative before this script
+    ran: complete_sale_payment()'s own deduction has no floor (by
+    design), but the compensating adjust_stock() call does refuse to
+    leave a result negative -- so a sale deducting from already-thin
+    or negative real stock could succeed while its own compensation
+    then failed, and non-atomic execution let that partial state
+    commit. Fixed here by (1) checking real stock is sufficient BEFORE
+    attempting anything, so a thin/negative-stock item is skipped
+    outright rather than deducted past zero, and (2) wrapping the
+    whole sale+compensation sequence in one atomic block, so any
+    unexpected failure anywhere in it rolls back everything instead of
+    leaving a half-done write."""
     inv, _ = Inventory.objects.get_or_create(branch=branch, product=product)
-    inventory_services.adjust_stock(
-        inv,
-        quantity,
-        reason="Synthetic backfill compensation -- restores stock a synthetic "
-        "sale deducted (sample data, forecast-coverage backfill)",
-    )
-    InventoryTransaction.objects.filter(pk=InventoryTransaction.objects.latest("pk").pk).update(
-        created_at=ts
-    )
+    if inv.quantity_on_hand < quantity:
+        print(
+            f"    skipping {day_date} -- real stock for {product.name} @ {branch.name} "
+            f"is {inv.quantity_on_hand}, not enough to safely deduct {quantity} unit(s) "
+            "and compensate without going negative. Not attempting this sale."
+        )
+        return None
 
-    return completed
+    try:
+        with transaction.atomic():
+            draft = pos_services.get_or_create_draft_transaction(bot_user, branch)
+            pos_services.add_catalog_item(draft, product.pk, quantity=quantity)
+            if not draft.items.exists():
+                raise _SkipSale(f"could not add {product.name} to a draft order")
+
+            pos_services.set_dining_option(draft, SalesTransaction.DiningOption.TAKE_OUT)
+            total = draft.grand_total
+            completed = pos_services.complete_sale_payment(
+                draft,
+                payment_method=SalesTransaction.PaymentMethod.CASH,
+                amount_tendered=total,
+            )
+
+            hour = random.randint(8, 18)
+            minute = random.randint(0, 59)
+            ts = timezone.make_aware(
+                timezone.datetime(day_date.year, day_date.month, day_date.day, hour, minute)
+            )
+            SalesTransaction.objects.filter(pk=completed.pk).update(created_at=ts, completed_at=ts)
+            SalesItem.objects.filter(transaction_id=completed.pk).update(
+                created_at=ts, updated_at=ts
+            )
+
+            # Undo complete_sale_payment's unconditional stock deduction
+            # (safety property 6) -- real Inventory.quantity_on_hand must
+            # not end this script altered, only the forecasting-relevant
+            # sales rows should be. The pre-check above guarantees this
+            # can never fail on a negative-result refusal, since we only
+            # got here because quantity_on_hand was already >= quantity.
+            #
+            # MUST re-fetch here, not reuse the `inv` object from the
+            # pre-check above: adjust_stock() writes back
+            # inventory.quantity_on_hand from whatever is already in
+            # memory on the object it's given, not a fresh read. The
+            # pre-check's `inv` was fetched BEFORE complete_sale_payment()
+            # deducted stock (via its own separate fetch), so passing
+            # that same object here would make adjust_stock() compute
+            # "pre-deduction value + quantity" and overwrite the real,
+            # already-deducted DB value with it -- silently discarding
+            # the deduction instead of compensating it. Caught locally
+            # by testing this exact fix against a clean, round-number
+            # baseline before it ever reached production.
+            inv.refresh_from_db()
+            inventory_services.adjust_stock(
+                inv,
+                quantity,
+                reason="Synthetic backfill compensation -- restores stock a synthetic "
+                "sale deducted (sample data, forecast-coverage backfill)",
+            )
+            InventoryTransaction.objects.filter(
+                pk=InventoryTransaction.objects.latest("pk").pk
+            ).update(created_at=ts)
+
+            return completed
+    except (pos_services.PaymentError, inventory_services.InventoryServiceError, _SkipSale) as exc:
+        print(
+            f"    could not complete synthetic sale for {product.name} on {day_date}: "
+            f"{exc} -- skipped (rolled back, nothing committed)."
+        )
+        return None
 
 
 def backfill(under_served_pairs, bot_user, dry_run):
     created_count = 0
     details = []
+    incomplete_pairs = []
     today = timezone.localdate()
 
     for entry in under_served_pairs:
@@ -243,6 +309,7 @@ def backfill(under_served_pairs, bot_user, dry_run):
         chosen_days = random.sample(candidate_days, k=min(shortfall, len(candidate_days)))
 
         print(f"\n  {product.name} @ {branch.name}: needs +{shortfall} non-zero day(s)")
+        succeeded_for_pair = 0
         for day_date in sorted(chosen_days):
             quantity = random.randint(1, 2)
             if dry_run:
@@ -251,6 +318,7 @@ def backfill(under_served_pairs, bot_user, dry_run):
             txn = _create_synthetic_sale(bot_user, branch, product, day_date, quantity)
             if txn is not None:
                 created_count += 1
+                succeeded_for_pair += 1
                 details.append(
                     {
                         "branch": branch.name,
@@ -262,7 +330,17 @@ def backfill(under_served_pairs, bot_user, dry_run):
                 )
                 print(f"    {day_date} -- {quantity} unit(s) -- transaction #{txn.pk}")
 
-    return created_count, details
+        if not dry_run and succeeded_for_pair < shortfall:
+            incomplete_pairs.append(
+                {
+                    "branch": branch.name,
+                    "product": product.name,
+                    "shortfall": shortfall,
+                    "succeeded": succeeded_for_pair,
+                }
+            )
+
+    return created_count, details, incomplete_pairs
 
 
 def _write_manifest(pk_floor, bot_username, details):
@@ -324,8 +402,20 @@ def run(dry_run=True):
     bot_user = ensure_bot_user()
 
     print("\nCreating synthetic sales (only on days each pair had zero real sales)...")
-    created_count, details = backfill(under_served, bot_user, dry_run=False)
+    created_count, details, incomplete_pairs = backfill(under_served, bot_user, dry_run=False)
     print(f"\n  Created {created_count} synthetic sale(s) across {len(under_served)} pair(s).")
+
+    if incomplete_pairs:
+        print(
+            f"\n  {len(incomplete_pairs)} pair(s) did NOT reach their full shortfall "
+            "(commonly: insufficient real stock to safely deduct from -- see the "
+            "'skipping' messages above for why):"
+        )
+        for p in incomplete_pairs:
+            print(
+                f"    {p['product']} @ {p['branch']} -- got {p['succeeded']}/{p['shortfall']} "
+                "day(s); still under-served after this run."
+            )
 
     real_transactions_after = (
         SalesTransaction.objects.filter(status=SalesTransaction.Status.COMPLETED)
