@@ -16,7 +16,8 @@ how far each is from the threshold, on the real production data -- not
 a guess.
 
 Usage:
-    python manage.py shell --settings=config.settings.production -c "from scripts.audit_forecast_coverage import run; run()"
+    python manage.py shell --settings=config.settings.production \
+        -c "from scripts.audit_forecast_coverage import run; run()"
 """
 
 import os
