@@ -74,6 +74,7 @@ there's nothing to do and makes no changes.
 import json
 import os
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 import django
@@ -140,8 +141,15 @@ def run():
 
     manifest = json.loads(MANIFEST_PATH.read_text())
     pk_floor = manifest["pk_floor"]
-    reorder_snapshot = {int(k): v for k, v in manifest["reorder_threshold_snapshot"].items()}
-    inventory_snapshot = {int(k): v for k, v in manifest["inventory_snapshot"].items()}
+    # Decimal(str_value), not the raw JSON value -- the seed script writes
+    # these as strings (json.dumps can't serialize Decimal directly; see
+    # its own _write_removal_manifest comment), and Decimal(str) round-trips
+    # exactly, unlike float(str_value) which could introduce binary-float
+    # noise into a fractional raw-material quantity.
+    reorder_snapshot = {
+        int(k): Decimal(v) for k, v in manifest["reorder_threshold_snapshot"].items()
+    }
+    inventory_snapshot = {int(k): Decimal(v) for k, v in manifest["inventory_snapshot"].items()}
     demo_usernames = manifest["demo_usernames"]
 
     with transaction.atomic():

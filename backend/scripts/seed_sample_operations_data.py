@@ -483,6 +483,30 @@ def seed_operational_history(cashiers, commissary_user, commissary_branch):
     print(f"  History seeding complete ({production_count} production records).")
 
 
+def _set_quantity_for_demo(inv, target, label):
+    """Drives a specific Inventory row to `target` via adjust_stock() --
+    not a direct .save() -- so this change is logged (InventoryTransaction,
+    reason="...(sample data)") and therefore auditable/traceable the same
+    way every other change this script makes already is. A direct .save()
+    here previously left no record of the prior value anywhere once the
+    removal manifest was written (or, as happened in production on
+    2026-11-06, no record at all if the manifest write crashed before it
+    got that far) -- adjust_stock()'s own transaction log is now a second,
+    independent trail even if the manifest is ever lost or never written."""
+    target = max(0, target)
+    delta = target - inv.quantity_on_hand
+    if delta == 0:
+        print(f"  {label} already at the target level ({target}) -- left as is.")
+        return
+    try:
+        inventory_services.adjust_stock(
+            inv, delta, reason="Demo low/critical stock snapshot (sample data)"
+        )
+        print(f"  {label} -> {target}")
+    except inventory_services.InventoryServiceError as exc:
+        print(f"  {label}: could not apply demo snapshot ({exc}) -- left as is.")
+
+
 def apply_demo_stock_snapshot(commissary_branch):
     """Deliberately pushes a handful of specific items below their
     reorder threshold so Resource Management / risk classification has
@@ -496,9 +520,7 @@ def apply_demo_stock_snapshot(commissary_branch):
         inv = Inventory.objects.filter(branch=commissary_branch, product=material).first()
         if inv is None:
             continue
-        inv.quantity_on_hand = max(0, inv.reorder_threshold // 3)
-        inv.save(update_fields=["quantity_on_hand"])
-        print(f"  {material.name} @ Commissary -> critical/low stock")
+        _set_quantity_for_demo(inv, inv.reorder_threshold // 3, f"{material.name} @ Commissary")
 
     low_finished_goods = Product.objects.filter(
         product_type=Product.ProductType.FINISHED_GOOD, is_active=True
@@ -508,9 +530,9 @@ def apply_demo_stock_snapshot(commissary_branch):
             inv = Inventory.objects.filter(branch=branch, product=product).first()
             if inv is None:
                 continue
-            inv.quantity_on_hand = max(0, inv.reorder_threshold // 2)
-            inv.save(update_fields=["quantity_on_hand"])
-            print(f"  {product.name} @ {branch.name} -> low stock")
+            _set_quantity_for_demo(
+                inv, inv.reorder_threshold // 2, f"{product.name} @ {branch.name}"
+            )
 
 
 def generate_forecasts_and_insights():
@@ -568,11 +590,22 @@ def _write_removal_manifest(reorder_snapshot, inventory_snapshot, pk_floor):
         pk_floor = existing["pk_floor"]
         print(f"\n(A removal manifest already exists at {MANIFEST_PATH} -- keeping its original")
         print(" pre-seed snapshot/floor rather than overwriting it with this run's.)")
+    # str(), not the raw Decimal -- quantity_on_hand/reorder_threshold are
+    # both DecimalField (fractional kg/liter real-material quantities,
+    # see Inventory's own field comments), and json.dumps() cannot
+    # serialize Decimal on its own (TypeError: Object of type Decimal is
+    # not JSON serializable). This crashed in production on 2026-11-06:
+    # local testing against an empty database never caught it because
+    # the pre-seed snapshot was trivially empty there -- a database that
+    # already has real Inventory rows (as production does) hits this
+    # every time. remove_sample_operations_data.py converts these back
+    # to Decimal on read, via Decimal(str_value), which is exact (no
+    # float round-trip).
     manifest = {
         "seeded_at": timezone.now().isoformat(),
         "demo_usernames": demo_usernames,
-        "reorder_threshold_snapshot": {str(k): v for k, v in reorder_snapshot.items()},
-        "inventory_snapshot": {str(k): v for k, v in inventory_snapshot.items()},
+        "reorder_threshold_snapshot": {str(k): str(v) for k, v in reorder_snapshot.items()},
+        "inventory_snapshot": {str(k): str(v) for k, v in inventory_snapshot.items()},
         "pk_floor": pk_floor,
     }
     MANIFEST_PATH.write_text(json.dumps(manifest, indent=2))
