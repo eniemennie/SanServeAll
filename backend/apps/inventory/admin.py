@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from apps.inventory.models import Inventory, InventoryTransaction, Product
+from apps.inventory.models import Inventory, InventoryTransaction, Product, ProductPackaging
 
 
 @admin.register(Product)
@@ -29,3 +29,10 @@ class InventoryTransactionAdmin(admin.ModelAdmin):
     list_display = ("product", "branch", "movement_type", "quantity_change", "created_at")
     list_filter = ("branch", "movement_type")
     search_fields = ("product__name",)
+
+
+@admin.register(ProductPackaging)
+class ProductPackagingAdmin(admin.ModelAdmin):
+    list_display = ("finished_good", "packaging_material", "quantity_per_unit")
+    list_filter = ("finished_good",)
+    search_fields = ("finished_good__name", "packaging_material__name")
