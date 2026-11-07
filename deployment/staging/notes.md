@@ -19,8 +19,8 @@ that point rather than assuming anything here already happened.
 5. `python manage.py migrate --settings=config.settings.staging`
 6. Reload the web app.
 7. Same nightly-jobs reliability setup as production (see
-   `deployment/production/notes.md` steps 7-8) -- three PythonAnywhere
+   `deployment/production/notes.md` steps 7-8) -- four PythonAnywhere
    Scheduled Tasks calling `run_nightly_forecast`,
-   `run_nightly_risk_classification`, and `run_nightly_insight_generation`
-   with `--settings=config.settings.staging`, then
-   `APSCHEDULER_AUTOSTART=false` once those are confirmed running.
+   `run_nightly_risk_classification`, `run_nightly_insight_generation`, and
+   `run_low_stock_alert`, all with `--settings=config.settings.staging`,
+   then `APSCHEDULER_AUTOSTART=false` once those are confirmed running.
