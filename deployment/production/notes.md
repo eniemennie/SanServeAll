@@ -52,28 +52,39 @@ tracking.
 4. `pip install -r backend/requirements/production.txt`
 5. `python manage.py migrate --settings=config.settings.production`
 6. Reload the web app.
-7. Set up the three nightly forecasting jobs as **PythonAnywhere Scheduled
-   Tasks**, not just the in-process scheduler that starts automatically with
-   the web app. The web app's own APScheduler (`config/scheduler.py`) only
+7. Set up all **four** scheduled jobs registered in `config/scheduler.py` as
+   **PythonAnywhere Scheduled Tasks**, not just the in-process scheduler that
+   starts automatically with the web app. The web app's own APScheduler only
    runs while that specific worker process is alive, which PythonAnywhere's
-   free tier does not guarantee at a fixed time of night -- idle workers can
+   free tier does not guarantee at a fixed time of day -- idle workers can
    restart on the next incoming request. A real, independent Scheduled Task
    is the reliable path. Under the "Tasks" tab, add one task per command
    below. **Times are UTC** (PythonAnywhere always schedules in UTC,
    regardless of the app's `TIME_ZONE` setting of `Asia/Manila`, UTC+8) --
-   the times below are already converted from the jobs' local 2:00/2:30/3:00
-   AM:
+   the times below are already converted from the jobs' local 2:00/2:30/3:00/
+   6:00 AM:
 
    | Command | UTC time (= local time) |
    | --- | --- |
    | `python /home/<username>/<project-path>/backend/manage.py run_nightly_forecast --settings=config.settings.production` | 18:00 (= 2:00 AM Asia/Manila) |
    | `python /home/<username>/<project-path>/backend/manage.py run_nightly_risk_classification --settings=config.settings.production` | 18:30 (= 2:30 AM Asia/Manila) |
    | `python /home/<username>/<project-path>/backend/manage.py run_nightly_insight_generation --settings=config.settings.production` | 19:00 (= 3:00 AM Asia/Manila) |
+   | `python /home/<username>/<project-path>/backend/manage.py run_low_stock_alert --settings=config.settings.production` | 22:00 (= 6:00 AM Asia/Manila) |
+
+   The fourth row (`run_low_stock_alert`) was added 2026-11-07: the job
+   itself (`daily_low_stock_alert`, 6 AM local) has been registered in
+   `config/scheduler.py` since the low-stock alerting feature shipped, but
+   unlike the other three jobs it had no standalone management command of
+   its own until now -- so there was previously no way to put it on a real
+   Scheduled Task at all. That mattered here specifically: step 8 below
+   turns off the in-process scheduler once the Scheduled Tasks are confirmed
+   working, and with the command missing, that would have silently disabled
+   low-stock alerting entirely rather than migrating it.
 
    Use the full path to the virtualenv's `python` (shown on the Tasks tab
    itself once the task is saved) so the command runs with the right
    dependencies, not the system Python.
-8. Once all three Scheduled Tasks are confirmed running (check their logs
+8. Once all four Scheduled Tasks are confirmed running (check their logs
    after the first overnight run), set `APSCHEDULER_AUTOSTART=false` in the
    production `.env` and reload the web app, so the in-process scheduler and
    the Scheduled Tasks don't both run the same job. Leaving it unset/`true`
