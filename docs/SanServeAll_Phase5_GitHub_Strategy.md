@@ -110,7 +110,7 @@ Why this convention: it makes the commit log itself scannable by module and type
    - Linked issue, if one exists
 4. At least **one other team member reviews and approves** before merge (3-person team → simple peer review, not a large approval chain).
 5. CI must pass (Phase 5's GitHub Actions — runs `pytest` per Phase 3's testing stack) before merge is allowed.
-6. Merge strategy: **Squash and merge** into `staging`/`main` — keeps the target branch's history clean (one commit per feature/fix) while the feature branch itself can have messy in-progress commits.
+6. Merge strategy: **Merge commit** (not squash) into `staging`/`main` — each PR's own commits land intact under a single "Merge pull request #N" commit, so individual commit history (and authorship, including Claude Code's co-authored commits) stays visible rather than being flattened. This is the actual practice used from PR #183 onward, confirmed against the repo's merge commits.
 7. Delete the source branch after merge.
 
 **PR description template** (`.github/pull_request_template.md`):

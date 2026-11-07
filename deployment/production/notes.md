@@ -29,8 +29,20 @@ separate question from which Django settings module it runs
 (`production`, confirmed above) -- don't assume these always point the
 same direction without checking both directly.
 
-Promotion flow: only deploy here via a merged `staging -> main` PR (Phase 5),
-verified on staging first, ideally during low-traffic hours (after closing).
+Promotion flow, as actually practiced: the live app's working directory
+tracks `staging` directly (confirmed above) and is updated with `git pull`
+on that branch after each PR merges into `staging` -- there is no separate
+`main`-tracking deployment target, so the Phase 5 "`staging -> main` then
+deploy from `main`" flow was never actually followed in practice. `main`
+still exists in the repo, but as of this writing it is 84 commits behind
+`staging` (last synced 2026-11-02, PR #136) and is not being kept current
+as a release-tagging record either (see Phase 5 Versioning) -- nothing
+currently deploys from it, and nothing is currently promoting into it.
+Treat any future reference to "promote to main, then deploy" as describing
+the aspirational flow, not what's on the live site; if the team wants
+`main` to mean something again before the defense, it needs a deliberate
+`staging -> main` catch-up PR, not an assumption that it's already
+tracking.
 
 1. Create the production PythonAnywhere web app. No separate database to create --
    the app uses SQLite (see `env.production.example`'s `SQLITE_DB_PATH` comment),
