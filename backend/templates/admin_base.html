@@ -14,8 +14,10 @@ review, item re: the Reports & Export screen's naming).
 
 Required/optional context from the view:
   active_nav      -- Owner/Admin: one of dashboard, batch, forecast,
-                     resource, reports, availability, settings.
+                     resource, reports, availability, settings,
+                     purchase_orders.
                      Commissary Staff: one of dashboard, record, batch.
+                     Purchasing: one of suppliers, purchase_orders.
                      Highlights the matching nav item. Omit and nothing is
                      highlighted (fails safe).
   branches        -- queryset/list of Branch for the dropdown. Falls back
@@ -158,6 +160,13 @@ Usage in a screen template:
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
         <span class="jc-nav-label">Suppliers</span>
       </a>
+      {% comment %} Consolidated Task Tracker "Purchasing/Receiving records
+      model" (2026-11-07): Purchasing's second screen, same role_required
+      gating as Suppliers above. {% endcomment %}
+      <a href="{% url 'purchasing:purchase_order_list' %}" class="jc-nav-item {% if active_nav == 'purchase_orders' %}active{% endif %}">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+        <span class="jc-nav-label">Purchase Orders</span>
+      </a>
       {% else %}
       <a href="{% url 'accounts:admin_dashboard' %}" class="jc-nav-item {% if active_nav == 'dashboard' %}active{% endif %}">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
@@ -207,6 +216,10 @@ Usage in a screen template:
       <a href="{% url 'purchasing:supplier_management' %}" class="jc-nav-item {% if active_nav == 'suppliers' %}active{% endif %}">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="3" width="15" height="13"></rect><polygon points="16 8 20 8 23 11 23 16 16 16 16 8"></polygon><circle cx="5.5" cy="18.5" r="2.5"></circle><circle cx="18.5" cy="18.5" r="2.5"></circle></svg>
         <span class="jc-nav-label">Suppliers</span>
+      </a>
+      <a href="{% url 'purchasing:purchase_order_list' %}" class="jc-nav-item {% if active_nav == 'purchase_orders' %}active{% endif %}">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+        <span class="jc-nav-label">Purchase Orders</span>
       </a>
       {% endif %}
     </div>

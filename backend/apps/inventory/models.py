@@ -272,6 +272,19 @@ class InventoryTransaction(models.Model):
         # never misrepresents this as a real-time staff action, and (2) this
         # command can detect its own prior run and refuse to double-apply.
         HISTORICAL_BACKFILL = "HISTORICAL_BACKFILL", "Historical Backfill"
+        # Consolidated Task Tracker "Purchasing/Receiving records model"
+        # (2026-11-07 scoped options, Option B): this module's docstring
+        # above literally names RESTOCK as planned since Week 5 -- it's
+        # only being added now because nothing in the codebase could
+        # ever receive a delivery before apps.purchasing.PurchaseOrder
+        # existed. Logged when a PurchaseOrder is marked RECEIVED (see
+        # apps.purchasing.services.receive_purchase_order), using the
+        # order's actual received_quantity per line, not the quantity
+        # originally ordered -- distinct from PRODUCTION_OUTPUT (the
+        # commissary made it) and MANUAL_ADJUSTMENT (a staff correction
+        # with no external source): this is specifically stock arriving
+        # from an outside supplier.
+        RESTOCK = "RESTOCK", "Restock (Purchase Order Received)"
 
     branch = models.ForeignKey("accounts.Branch", on_delete=models.PROTECT)
     product = models.ForeignKey(Product, on_delete=models.PROTECT)

@@ -1,0 +1,55 @@
+{% extends "admin_base.html" %}
+{% block admin_title %}Receive Purchase Order #{{ order.pk }}{% endblock %}
+{% block admin_content %}
+
+<div class="mb-3">
+    <h1 class="h5 mb-1">Receive Purchase Order #{{ order.pk }}</h1>
+    <p class="text-muted small mb-0">
+        {{ order.supplier.name }} &rarr; {{ order.branch.name }}. Quantities default to what was
+        ordered -- edit a row if what actually arrived was short or over.
+    </p>
+</div>
+
+{% if error %}
+<div class="alert alert-danger py-2">{{ error }}</div>
+{% endif %}
+
+<div class="jc-card p-4">
+    <form method="post">
+        {% csrf_token %}
+        <div class="table-responsive">
+            <table class="table table-sm">
+                <thead>
+                    <tr>
+                        <th>Material</th>
+                        <th>Ordered</th>
+                        <th style="width: 200px;">Received</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr>
+                        <td class="align-middle">
+                            <input type="hidden" name="item_id" value="{{ item.pk }}">
+                            {{ item.material.name }}
+                        </td>
+                        <td class="align-middle">{{ item.ordered_quantity }} {{ item.material.get_unit_of_measure_display }}</td>
+                        <td>
+                            <input type="number" step="0.001" min="0"
+                                   name="received_quantity_{{ item.pk }}"
+                                   class="form-control form-control-sm"
+                                   value="{{ item.ordered_quantity }}">
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <button type="submit" class="btn" style="background: var(--jc-orange); color: #fff;">
+            Confirm Received
+        </button>
+        <a href="{% url 'purchasing:purchase_order_detail' order.pk %}" class="btn btn-outline-secondary">Cancel</a>
+    </form>
+</div>
+
+{% endblock %}

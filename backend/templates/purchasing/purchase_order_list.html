@@ -1,0 +1,146 @@
+{% extends "admin_base.html" %}
+{% block admin_title %}Purchase Orders{% endblock %}
+{% block admin_content %}
+
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+    <div>
+        <h1 class="h5 mb-1">Purchase Orders</h1>
+        <p class="text-muted small mb-0">
+            Order materials from a supplier and track them through to receiving.
+            Visible only to Purchasing and Owner/Admin.
+        </p>
+    </div>
+    <button type="button" class="btn btn-sm flex-shrink-0" style="background: var(--jc-orange); color: #fff;"
+            data-bs-toggle="collapse" data-bs-target="#newOrderForm" aria-expanded="{% if error or not orders %}true{% else %}false{% endif %}" aria-controls="newOrderForm">
+        + New Purchase Order
+    </button>
+</div>
+
+{% if error %}
+<div class="alert alert-danger py-2">{{ error }}</div>
+{% endif %}
+
+{% if created_order %}
+<div class="alert alert-success py-2">Purchase order <strong>#{{ created_order.pk }}</strong> created as Draft.</div>
+{% endif %}
+
+<div class="collapse mb-4{% if error or not orders %} show{% endif %}" id="newOrderForm">
+    <div class="jc-card p-4">
+        <h2 class="h6 mb-3">New Purchase Order</h2>
+        <form method="post">
+            {% csrf_token %}
+            <div class="row g-2 mb-3">
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">Supplier</label>
+                    <select name="supplier_id" class="form-select" required>
+                        <option value="">Select a supplier&hellip;</option>
+                        {% for supplier in suppliers %}
+                        <option value="{{ supplier.pk }}">{{ supplier.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">Deliver To</label>
+                    <select name="branch_id" class="form-select" required>
+                        <option value="">Select a branch&hellip;</option>
+                        {% for branch in branches %}
+                        <option value="{{ branch.pk }}">{{ branch.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+
+            <h3 class="h6 mt-4">Items</h3>
+            <p class="text-muted small">Enter the quantity to order for each material (leave blank to skip).</p>
+            <div class="table-responsive">
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>Material</th>
+                            <th style="width: 180px;">Quantity to Order</th>
+                            <th style="width: 180px;">Unit Cost</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for material in materials %}
+                        <tr>
+                            <td class="align-middle">
+                                <input type="hidden" name="material_id" value="{{ material.pk }}">
+                                {{ material.name }}
+                                <span class="text-muted small">({{ material.get_unit_of_measure_display }})</span>
+                            </td>
+                            <td>
+                                <input type="number" step="0.001" min="0" name="ordered_quantity"
+                                       class="form-control form-control-sm" placeholder="0">
+                            </td>
+                            <td>
+                                <input type="number" step="0.01" min="0" name="unit_cost"
+                                       class="form-control form-control-sm" placeholder="0.00">
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="3" class="text-muted text-center py-3">
+                                No raw materials in the catalog yet.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Notes</label>
+                <textarea name="notes" class="form-control" rows="2"></textarea>
+            </div>
+            <button type="submit" class="btn" style="background: var(--jc-orange); color: #fff;">
+                Create Purchase Order
+            </button>
+        </form>
+    </div>
+</div>
+
+<div class="jc-card p-0">
+    <table class="table mb-0">
+        <thead>
+            <tr>
+                <th>Order</th>
+                <th>Supplier</th>
+                <th>Deliver To</th>
+                <th>Status</th>
+                <th>Placed</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for order in orders %}
+            <tr>
+                <td>#{{ order.pk }}</td>
+                <td>{{ order.supplier.name }}</td>
+                <td>{{ order.branch.name }}</td>
+                <td>
+                    {% if order.status == "RECEIVED" %}
+                    <span class="jc-badge jc-badge-adequate">Received</span>
+                    {% elif order.status == "CANCELLED" %}
+                    <span class="jc-badge jc-badge-critical">Cancelled</span>
+                    {% elif order.status == "ORDERED" %}
+                    <span class="jc-badge jc-badge-low">Ordered</span>
+                    {% else %}
+                    <span class="jc-badge jc-badge-info">Draft</span>
+                    {% endif %}
+                </td>
+                <td>{{ order.created_at|date:"M j, Y" }}</td>
+                <td class="text-end">
+                    <a href="{% url 'purchasing:purchase_order_detail' order.pk %}" class="btn btn-sm btn-outline-secondary">View</a>
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="6" class="text-muted text-center py-4">No purchase orders yet.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% endblock %}
