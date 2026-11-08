@@ -427,3 +427,34 @@ def _deduct_inventory_for_sale(transaction_obj):
             quantity_change=-item.quantity,
             related_sales_item=item,
         )
+
+        _deduct_packaging_for_sale_item(transaction_obj.branch, item)
+
+
+def _deduct_packaging_for_sale_item(branch, item):
+    """Consolidated Task Tracker "Packaging material consumption
+    tracking" (2026-11-07 scoped options, Option A). Right after the
+    sold finished good itself is deducted above, deduct whatever
+    packaging is configured for it (ProductPackaging.packaging_material,
+    e.g. a cup + a lid per drink) -- same shape as the SALE_DEDUCTION
+    block above, logged under its own PACKAGING_CONSUMPTION movement
+    type so the audit trail can tell the two apart.
+
+    A no-op for any item with no configured ProductPackaging row --
+    nothing is guessed; packaging only deducts once someone has
+    actually mapped it for that finished good."""
+    for requirement in item.product.packaging_requirements.select_related("packaging_material"):
+        packaging_material = requirement.packaging_material
+        quantity_to_deduct = requirement.quantity_per_unit * item.quantity
+
+        inventory, _ = Inventory.objects.get_or_create(branch=branch, product=packaging_material)
+        inventory.quantity_on_hand -= quantity_to_deduct
+        inventory.save()
+
+        InventoryTransaction.objects.create(
+            branch=branch,
+            product=packaging_material,
+            movement_type=InventoryTransaction.MovementType.PACKAGING_CONSUMPTION,
+            quantity_change=-quantity_to_deduct,
+            related_sales_item=item,
+        )

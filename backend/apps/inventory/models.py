@@ -8,6 +8,8 @@ built, so POS's and the deduction hook's existing FK references and
 behavior stay valid unchanged.
 """
 
+from decimal import Decimal
+
 from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models.functions import Lower
@@ -152,6 +154,65 @@ class Product(models.Model):
         return self.category in self.BEVERAGE_CATEGORIES
 
 
+class ProductPackaging(models.Model):
+    """Packaging consumed per unit of a sold finished good (Consolidated
+    Task Tracker "Packaging material consumption tracking" -- 2026-11-07
+    scoped options, Option A). A lightweight packaging bill-of-materials:
+    e.g. one Spanish Latte sold consumes 1 cup + 1 lid.
+
+    Deliberately not apps.production.IngredientUsage -- that model ties
+    consumption to a ProductionRecord (a commissary batch); this ties
+    consumption to a *sale* of a finished good (POS), which is how
+    cups/lids/straws are actually used up, one sold drink at a time,
+    not per production batch. (Packaging that genuinely is consumed per
+    batch, e.g. takeout boxes assembled at the commissary, can already
+    be logged as an ordinary IngredientUsage row today -- its `material`
+    FK only requires product_type=MATERIAL, which every packaging
+    Product already is; see import_raw_and_packaging_materials.py.
+    That's a separate, already-working path, not this one.)
+
+    No mapping exists until someone (Owner/Admin or Purchasing) adds one
+    here -- deliberately opt-in rather than guessed, since not every
+    finished good uses packaging the same way (e.g. a dine-in order may
+    use none at all)."""
+
+    finished_good = models.ForeignKey(
+        "inventory.Product",
+        on_delete=models.CASCADE,
+        related_name="packaging_requirements",
+        limit_choices_to={"product_type": "FINISHED_GOOD"},
+    )
+    packaging_material = models.ForeignKey(
+        "inventory.Product",
+        on_delete=models.PROTECT,
+        related_name="used_as_packaging_for",
+        limit_choices_to={"category": "PACKAGING"},
+    )
+    quantity_per_unit = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        default=Decimal("1"),
+        validators=[MinValueValidator(Decimal("0.001"))],
+        help_text="How much of this packaging material one unit sold of the finished "
+        "good consumes, e.g. 1 cup + 1 lid per drink.",
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["finished_good", "packaging_material"],
+                name="unique_packaging_per_finished_good",
+            )
+        ]
+        verbose_name_plural = "Product Packaging"
+
+    def __str__(self):
+        return (
+            f"{self.quantity_per_unit} x {self.packaging_material.name} "
+            f"per {self.finished_good.name}"
+        )
+
+
 class Inventory(models.Model):
     """Current stock on hand for a product at a specific branch."""
 
@@ -285,6 +346,16 @@ class InventoryTransaction(models.Model):
         # with no external source): this is specifically stock arriving
         # from an outside supplier.
         RESTOCK = "RESTOCK", "Restock (Purchase Order Received)"
+        # Consolidated Task Tracker "Packaging material consumption
+        # tracking" (2026-11-07 scoped options, Option A): logged
+        # alongside SALE_DEDUCTION whenever a sold item has a configured
+        # ProductPackaging row -- see apps.pos.services.
+        # _deduct_inventory_for_sale, which now deducts the mapped
+        # packaging (cups, lids, etc.) right after the finished good
+        # itself, for the same SalesItem. Distinct from SALE_DEDUCTION
+        # so the audit trail can tell "the item sold" apart from "the
+        # packaging consumed to sell it" at a glance.
+        PACKAGING_CONSUMPTION = "PACKAGING_CONSUMPTION", "Packaging Consumption"
 
     branch = models.ForeignKey("accounts.Branch", on_delete=models.PROTECT)
     product = models.ForeignKey(Product, on_delete=models.PROTECT)

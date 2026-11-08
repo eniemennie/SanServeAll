@@ -11,7 +11,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("accounts", "0007_add_purchasing_role"),
-        ("inventory", "0019_alter_inventorytransaction_movement_type"),
+        ("inventory", "0019_alter_inventorytransaction_movement_type_and_more"),
         ("purchasing", "0001_initial"),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
