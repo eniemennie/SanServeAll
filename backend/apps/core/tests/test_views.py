@@ -72,3 +72,44 @@ class TestLandingPage:
         the actual proof of that."""
         response = client.get(reverse("core:landing"))
         assert response.status_code == 200
+
+
+class TestRoleButtonLayout:
+    """Regression test for the 2026-11-08 role-button layout task: the
+    four role buttons used a flex-wrap row (flex: 1 1 160px, max-width
+    220px) that fit only 3 per line inside the hero's 640px container,
+    leaving the 4th button alone on its own row, narrower than its
+    siblings -- "one button awkwardly positioned on a separate row".
+    Reworked to a 2x2 CSS grid, which is a complete shape for exactly
+    4 items at every non-mobile width (never a partial row), collapsing
+    to one column on phones where that's the natural layout. This only
+    checks the fix's CSS is present -- Django's test client can't
+    execute real browser layout -- so it guards against someone
+    reverting to the old flex-wrap approach by accident."""
+
+    def test_role_grid_uses_a_2x2_css_grid_not_flex_wrap(self, client):
+        response = client.get(reverse("core:landing"))
+        content = response.content.decode()
+
+        assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in content
+        assert "flex-wrap: wrap;" not in content
+
+    def test_role_grid_collapses_to_one_column_on_phones(self, client):
+        response = client.get(reverse("core:landing"))
+        content = response.content.decode()
+
+        assert "@media (max-width: 575.98px)" in content
+        mobile_block = content.split("@media (max-width: 575.98px)", 1)[1]
+        assert ".jc-role-grid" in mobile_block
+        assert "grid-template-columns: 1fr;" in mobile_block
+
+    def test_each_role_gets_a_distinct_brand_color(self, client):
+        """Req. 3 ("distinguish each account type"): four different
+        classes, not an alternating 2-color pattern repeated twice."""
+        response = client.get(reverse("core:landing"))
+        content = response.content.decode()
+
+        assert 'class="jc-role-btn jc-role-btn-orange"' in content
+        assert 'class="jc-role-btn jc-role-btn-navy"' in content
+        assert 'class="jc-role-btn jc-role-btn-sage"' in content
+        assert 'class="jc-role-btn jc-role-btn-teal"' in content
