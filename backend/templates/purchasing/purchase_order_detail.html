@@ -1,0 +1,111 @@
+{% extends "admin_base.html" %}
+{% block admin_title %}Purchase Order #{{ order.pk }}{% endblock %}
+{% block admin_content %}
+
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+    <div>
+        <h1 class="h5 mb-1">Purchase Order #{{ order.pk }}</h1>
+        <p class="text-muted small mb-0">
+            {{ order.supplier.name }} &rarr; {{ order.branch.name }}
+        </p>
+    </div>
+    <a href="{% url 'purchasing:purchase_order_list' %}" class="btn btn-sm btn-outline-secondary">&larr; All Orders</a>
+</div>
+
+<div class="jc-card p-4 mb-3">
+    <div class="row g-3">
+        <div class="col-md-3">
+            <div class="text-muted small">Status</div>
+            {% if order.status == "RECEIVED" %}
+            <span class="jc-badge jc-badge-adequate">Received</span>
+            {% elif order.status == "CANCELLED" %}
+            <span class="jc-badge jc-badge-critical">Cancelled</span>
+            {% elif order.status == "ORDERED" %}
+            <span class="jc-badge jc-badge-low">Ordered</span>
+            {% else %}
+            <span class="jc-badge jc-badge-info">Draft</span>
+            {% endif %}
+        </div>
+        <div class="col-md-3">
+            <div class="text-muted small">Placed by</div>
+            <div>{{ order.created_by.username }}</div>
+        </div>
+        <div class="col-md-3">
+            <div class="text-muted small">Order Total</div>
+            <div>&#8369;{{ order.total_cost|floatformat:2 }}</div>
+        </div>
+        <div class="col-md-3">
+            <div class="text-muted small">Placed On</div>
+            <div>{{ order.created_at|date:"M j, Y g:i A" }}</div>
+        </div>
+    </div>
+    {% if order.notes %}
+    <hr>
+    <div class="text-muted small">Notes</div>
+    <div>{{ order.notes }}</div>
+    {% endif %}
+</div>
+
+<div class="jc-card p-0 mb-3">
+    <table class="table mb-0">
+        <thead>
+            <tr>
+                <th>Material</th>
+                <th>Ordered</th>
+                <th>Received</th>
+                <th>Variance</th>
+                <th>Unit Cost</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td>{{ item.material.name }}</td>
+                <td>{{ item.ordered_quantity }} {{ item.material.get_unit_of_measure_display }}</td>
+                <td>
+                    {% if item.received_quantity is not None %}
+                    {{ item.received_quantity }} {{ item.material.get_unit_of_measure_display }}
+                    {% else %}
+                    &mdash;
+                    {% endif %}
+                </td>
+                <td>
+                    {% if item.received_variance is not None %}
+                        {% if item.received_variance < 0 %}
+                        <span class="jc-badge jc-badge-critical">{{ item.received_variance }}</span>
+                        {% elif item.received_variance > 0 %}
+                        <span class="jc-badge jc-badge-low">+{{ item.received_variance }}</span>
+                        {% else %}
+                        <span class="jc-badge jc-badge-adequate">Exact</span>
+                        {% endif %}
+                    {% else %}
+                    &mdash;
+                    {% endif %}
+                </td>
+                <td>&#8369;{{ item.unit_cost }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="d-flex gap-2">
+    {% if order.status == "DRAFT" %}
+    <form method="post" action="{% url 'purchasing:purchase_order_mark_ordered' order.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="btn" style="background: var(--jc-orange); color: #fff;">Mark as Ordered</button>
+    </form>
+    <form method="post" action="{% url 'purchasing:purchase_order_cancel' order.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-outline-danger">Cancel Order</button>
+    </form>
+    {% elif order.status == "ORDERED" %}
+    <a href="{% url 'purchasing:purchase_order_receive' order.pk %}" class="btn" style="background: var(--jc-orange); color: #fff;">Receive Delivery</a>
+    <form method="post" action="{% url 'purchasing:purchase_order_cancel' order.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-outline-danger">Cancel Order</button>
+    </form>
+    {% endif %}
+</div>
+
+{% endblock %}
