@@ -156,10 +156,17 @@ def add_custom_product(request):
     message instead of rendering a standalone error page."""
     if request.method == "POST":
         draft = _get_draft(request)
-        item = services.add_custom_item(draft, request.POST.get("name"), request.POST.get("price"))
+        item = services.add_custom_item(
+            draft,
+            request.POST.get("name"),
+            request.POST.get("price"),
+            request.POST.get("quantity", 1),
+        )
         if item is not None:
             return redirect("pos:ordering")
-        messages.error(request, "Enter a valid name and a non-negative price.")
+        messages.error(
+            request, "Enter a valid name, a price greater than ₱0.00, and a valid quantity."
+        )
     return redirect("pos:ordering")
 
 

@@ -367,7 +367,12 @@
                     <div class="mb-2">
                         <label class="form-label fw-semibold">Price (₱)</label>
                         <input type="number" name="price" id="custom-price" class="form-control"
-                               step="0.01" min="0" placeholder="0.00" required>
+                               step="0.01" min="0.01" placeholder="0.00" required>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label fw-semibold">Quantity</label>
+                        <input type="number" name="quantity" id="custom-quantity" class="form-control"
+                               step="1" min="1" value="1" required>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -442,11 +447,16 @@
                     <div class="mb-2">
                         <label class="form-label fw-semibold">Discounts (Optional)</label>
                         <label class="form-label small text-muted mb-1">Category</label>
-                        <select name="discount_category" id="discount-category" class="form-select mb-2">
+                        <select name="discount_category" id="discount-category" class="form-select mb-1">
                             {% for value, label in discount_categories %}
                             <option value="{{ value }}">{{ label }}</option>
                             {% endfor %}
                         </select>
+                        <div class="form-text small mb-2">
+                            SC2 = Senior Citizen (20% discount, VAT-exempt), PWD2 = PWD (20% discount, VAT-exempt).
+                            For CSC, CPWD, EMP, SD, and Family, check your branch's posted discount policy for the
+                            applicable rate before applying.
+                        </div>
                     </div>
 
                     <div id="discount-details" class="mb-2 d-none">
@@ -510,11 +520,16 @@
                 <div class="modal-body">
                     <div class="mb-3">
                         <label class="form-label small text-muted mb-1">Category</label>
-                        <select name="category" class="form-select">
+                        <select name="category" class="form-select mb-1">
                             {% for value, label in discount_categories %}
                             <option value="{{ value }}" {% if draft.transaction_discount_category == value %}selected{% endif %}>{{ label }}</option>
                             {% endfor %}
                         </select>
+                        <div class="form-text small">
+                            SC2 = Senior Citizen (20% discount, VAT-exempt), PWD2 = PWD (20% discount, VAT-exempt).
+                            For CSC, CPWD, EMP, SD, and Family, check your branch's posted discount policy for the
+                            applicable rate before applying.
+                        </div>
                     </div>
                     <div class="row g-2">
                         <div class="col-6">
@@ -727,11 +742,15 @@
     });
 
     const priceInput = document.getElementById("custom-price");
+    const quantityInput = document.getElementById("custom-quantity");
     const addBtn = document.getElementById("custom-add-btn");
-    priceInput.addEventListener("input", function () {
-        const value = parseFloat(priceInput.value) || 0;
-        addBtn.textContent = "Add to Cart - \u20b1" + value.toFixed(2);
-    });
+    function updateCustomAddBtn() {
+        const price = parseFloat(priceInput.value) || 0;
+        const quantity = parseInt(quantityInput.value, 10) || 0;
+        addBtn.textContent = "Add to Cart - \u20b1" + (price * quantity).toFixed(2);
+    }
+    priceInput.addEventListener("input", updateCustomAddBtn);
+    quantityInput.addEventListener("input", updateCustomAddBtn);
 
     {% if messages %}
     var addCustomModal = new bootstrap.Modal(document.getElementById("addCustomModal"));

@@ -201,13 +201,40 @@ class TestPosOrdering:
 class TestAddCustomProduct:
     def test_valid_custom_item_is_added_to_draft(self, unlocked_client, cashier, branch):
         response = unlocked_client.post(
-            reverse("pos:add_custom_product"), {"name": "Special Cake Slice", "price": "85.50"}
+            reverse("pos:add_custom_product"),
+            {"name": "Special Cake Slice", "price": "85.50", "quantity": "1"},
         )
         assert response.status_code == 302
         draft = SalesTransaction.objects.get(cashier=cashier, branch=branch)
         item = draft.items.get(custom_name="Special Cake Slice")
         assert item.product is None
         assert item.unit_price == Decimal("85.50")
+        assert item.quantity == 1
+
+    def test_quantity_greater_than_one_is_respected(self, unlocked_client, cashier, branch):
+        """ST-03 (Deployment Report Appendix E / Client Acceptance Appendix
+        F): Add Custom Product used to have no quantity field at all --
+        every custom item was silently forced to quantity=1 no matter what
+        the cashier actually sold."""
+        response = unlocked_client.post(
+            reverse("pos:add_custom_product"),
+            {"name": "Special Cake Slice", "price": "85.50", "quantity": "4"},
+        )
+        assert response.status_code == 302
+        draft = SalesTransaction.objects.get(cashier=cashier, branch=branch)
+        item = draft.items.get(custom_name="Special Cake Slice")
+        assert item.quantity == 4
+
+    def test_quantity_defaults_to_one_when_omitted(self, unlocked_client, cashier, branch):
+        """Backward compatible: older clients/tests that don't send a
+        quantity field at all still get the previous quantity=1 behavior."""
+        response = unlocked_client.post(
+            reverse("pos:add_custom_product"), {"name": "Special Cake Slice", "price": "85.50"}
+        )
+        assert response.status_code == 302
+        draft = SalesTransaction.objects.get(cashier=cashier, branch=branch)
+        item = draft.items.get(custom_name="Special Cake Slice")
+        assert item.quantity == 1
 
     def test_blank_name_is_rejected(self, unlocked_client):
         """Row 3 redesign: Add Custom Product is now a modal on the
@@ -229,6 +256,44 @@ class TestAddCustomProduct:
         assert response.status_code == 302
         assert response.url == reverse("pos:ordering")
 
+        follow = unlocked_client.get(response.url)
+        assert b"valid name" in follow.content
+
+    def test_zero_price_is_rejected(self, unlocked_client, cashier, branch):
+        """ST-03: a price of ₱0.00 used to be silently accepted --
+        only a strictly negative price was rejected. A free "custom
+        product" with no price makes no business sense and was never the
+        intent (that scenario is what the catalog's existing comped/void
+        flows are for), so this must be rejected the same as a negative
+        price."""
+        response = unlocked_client.post(
+            reverse("pos:add_custom_product"), {"name": "Item", "price": "0.00"}
+        )
+        assert response.status_code == 302
+        assert response.url == reverse("pos:ordering")
+
+        follow = unlocked_client.get(response.url)
+        assert b"valid name" in follow.content
+        draft = SalesTransaction.objects.get(cashier=cashier, branch=branch)
+        assert not draft.items.filter(custom_name="Item").exists()
+
+    def test_zero_quantity_is_rejected(self, unlocked_client, cashier, branch):
+        response = unlocked_client.post(
+            reverse("pos:add_custom_product"),
+            {"name": "Item", "price": "10.00", "quantity": "0"},
+        )
+        assert response.status_code == 302
+        follow = unlocked_client.get(response.url)
+        assert b"valid name" in follow.content
+        draft = SalesTransaction.objects.get(cashier=cashier, branch=branch)
+        assert not draft.items.filter(custom_name="Item").exists()
+
+    def test_non_numeric_quantity_is_rejected(self, unlocked_client):
+        response = unlocked_client.post(
+            reverse("pos:add_custom_product"),
+            {"name": "Item", "price": "10.00", "quantity": "abc"},
+        )
+        assert response.status_code == 302
         follow = unlocked_client.get(response.url)
         assert b"valid name" in follow.content
 

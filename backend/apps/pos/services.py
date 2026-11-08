@@ -46,9 +46,18 @@ def add_catalog_item(draft, product_id, quantity=1):
     )
 
 
-def add_custom_item(draft, name, price):
-    """Adds an off-menu item (Fig. 3-13) -- a manually entered name and
-    price for something not in the standard catalog."""
+def add_custom_item(draft, name, price, quantity=1):
+    """Adds an off-menu item (Fig. 3-13) -- a manually entered name,
+    price, and quantity for something not in the standard catalog.
+
+    ST-03 (Deployment Report Appendix E / Client Acceptance Appendix F,
+    documented 2026-11-03 as "pending retest", confirmed in this session
+    2026-11-08 as still unresolved in the deployed code): a price of
+    Decimal("0") used to be accepted here (only `price < 0` was
+    rejected), and there was no quantity field at all -- every custom
+    item was silently forced to quantity=1 regardless of what the
+    cashier actually sold. Both are fixed here: price must be strictly
+    positive, and quantity must be a positive whole number."""
     name = (name or "").strip()
     if not name:
         return None
@@ -56,7 +65,14 @@ def add_custom_item(draft, name, price):
         price = Decimal(str(price))
     except (InvalidOperation, TypeError):
         return None
-    if price < 0:
+    if price <= 0:
+        return None
+
+    try:
+        quantity = int(quantity)
+    except (TypeError, ValueError):
+        return None
+    if quantity < 1:
         return None
 
     return SalesItem.objects.create(
@@ -64,7 +80,7 @@ def add_custom_item(draft, name, price):
         product=None,
         custom_name=name,
         unit_price=price,
-        quantity=1,
+        quantity=quantity,
     )
 
 
