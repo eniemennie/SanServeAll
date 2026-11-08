@@ -353,6 +353,28 @@ class TestSilentSkipWarningUI:
         assert b"were skipped and were not imported" not in response.content
 
 
+class TestFailedBatchDashboardVisibility:
+    """Bug fix (2026-11-08, capstone QA pass): the dashboard list showed a
+    FAILED batch as a bare "Failed" badge with no reason visible -- a
+    reader had to already know to click through to the batch detail page
+    to learn why (e.g. missing required columns). The underlying
+    error_log was always populated correctly; it just wasn't surfaced on
+    the list itself."""
+
+    def test_dashboard_shows_failure_reason_for_failed_batch(
+        self, owner_client, kahero_branch, owner
+    ):
+        bad_file = SimpleUploadedFile(
+            "bad.csv", b"not,even,valid\nheaders", content_type="text/csv"
+        )
+        batch = services.process_kahero_upload(kahero_branch, owner, bad_file)
+        assert batch.status == KaheroImportBatch.Status.FAILED
+
+        response = owner_client.get(reverse("kahero:dashboard"))
+        assert response.status_code == 200
+        assert batch.error_log[0]["message"].encode() in response.content
+
+
 class TestUploadView:
     def test_owner_can_access_upload_page(self, owner_client):
         response = owner_client.get(reverse("kahero:upload"))

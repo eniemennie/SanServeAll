@@ -61,10 +61,16 @@
                     <span class="jc-badge jc-badge-low" title="Completed, but some rows were skipped -- see batch detail for the row errors.">
                         Completed (warnings)
                     </span>
+                    {% elif batch.status == 'FAILED' %}
+                    <span class="jc-badge jc-badge-critical" title="{% if batch.error_log %}{{ batch.error_log.0.message }}{% else %}Failed -- see batch detail for more.{% endif %}">
+                        {{ batch.get_status_display }}
+                    </span>
+                    {% if batch.error_log %}
+                    <div class="small text-muted mt-1" style="max-width: 320px;">{{ batch.error_log.0.message }}</div>
+                    {% endif %}
                     {% else %}
                     <span class="jc-badge
                         {% if batch.status == 'COMPLETED' %}jc-badge-adequate
-                        {% elif batch.status == 'FAILED' %}jc-badge-critical
                         {% else %}jc-badge-info{% endif %}">
                         {{ batch.get_status_display }}
                     </span>

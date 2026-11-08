@@ -85,7 +85,16 @@ def product_management(request):
             error = str(exc) or "Please check the values entered."
 
     branch_id = request.GET.get("branch")
-    selected_branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
+    selected_branch = None
+    if branch_id:
+        try:
+            selected_branch = Branch.objects.filter(pk=branch_id).first()
+        except (ValueError, TypeError):
+            # Bug fix (2026-11-08, capstone QA pass): a malformed or
+            # hand-edited branch= value (non-numeric pk) used to raise an
+            # uncaught ValueError here and surface as a raw Django 500.
+            # Treat it the same as no branch selected rather than crashing.
+            selected_branch = None
     product_type = request.GET.get("type", "")
     category = request.GET.get("category", "")
     search = request.GET.get("search", "")

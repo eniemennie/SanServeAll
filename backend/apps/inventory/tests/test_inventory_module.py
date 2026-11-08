@@ -569,6 +569,38 @@ class TestProductManagementView:
         response = owner_client.get(reverse("inventory:product_management"))
         assert response.status_code == 200
 
+    def test_malformed_branch_param_does_not_crash(self, owner_client):
+        """Bug fix (2026-11-08, capstone QA pass): a hand-edited or
+        malformed branch= value (non-numeric pk) used to raise an
+        uncaught ValueError from Branch.objects.filter(pk=...) and
+        surface as a raw Django 500 instead of a handled response.
+        A non-numeric or nonexistent branch now just falls back to no
+        branch selected."""
+        response = owner_client.get(
+            reverse("inventory:product_management"), {"branch": "not-a-number"}
+        )
+        assert response.status_code == 200
+        assert response.context["selected_branch"] is None
+
+        response = owner_client.get(reverse("inventory:product_management"), {"branch": "999999"})
+        assert response.status_code == 200
+        assert response.context["selected_branch"] is None
+
+    def test_unexpected_query_params_do_not_crash(self, owner_client):
+        """Unrecognized param names/values (e.g. q= instead of search=,
+        or an unrecognized type=/category=) should fall back to the
+        unfiltered view rather than erroring."""
+        response = owner_client.get(reverse("inventory:product_management"), {"q": "something"})
+        assert response.status_code == 200
+
+        response = owner_client.get(reverse("inventory:product_management"), {"type": "not-a-type"})
+        assert response.status_code == 200
+
+        response = owner_client.get(
+            reverse("inventory:product_management"), {"category": "not-a-category"}
+        )
+        assert response.status_code == 200
+
     def test_stock_value_card_shows_two_decimal_places(self, owner_client, branch):
         """Task #137 (client review): currency/number formatting
         standardization. "Stock Value" used |floatformat:0 (a whole peso
