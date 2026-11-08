@@ -497,6 +497,34 @@ class TestPaymentView:
         assert b'id="transactionCompleteModal"' in follow.content
         assert b"Spanish Latte" in follow.content
 
+    def test_completion_modal_shows_the_discount_that_was_applied(
+        self, unlocked_client, cashier, branch, product
+    ):
+        """Found 2026-11-08 testing the receipt printer flow: the
+        Transaction Complete modal showed only Subtotal and Total, with
+        no line explaining the gap between them -- so an SC/PWD discount
+        silently disappeared from view right after payment, even though
+        it was still correctly applied (grand_total already reflected
+        it) and even though the standalone receipt.html page already
+        shows this breakdown (task #48's BIR requirement). The modal
+        must show the same discount line the pre-payment Order Summary
+        and the standalone receipt page already show."""
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 1)
+        services.apply_transaction_discount(
+            draft, category="SC", discount_type="PERCENT", amount="20"
+        )
+
+        response = unlocked_client.post(
+            reverse("pos:payment"), {"payment_method": "CASH", "amount_tendered": "200.00"}
+        )
+        assert response.status_code == 302
+
+        follow = unlocked_client.get(response.url)
+        content = follow.content.decode()
+        assert "Discount" in content
+        assert "-₱25.00" in content  # 20% of 125.00
+
     def test_completion_modal_does_not_reappear_on_a_page_refresh(
         self, unlocked_client, cashier, branch, product
     ):
