@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load sanserveall_filters %}
+{% load sanserveall_filters static %}
 {% block title %}Receipt - SanServeAll{% endblock %}
 {% block extra_css %}
 <style>
@@ -93,6 +93,30 @@
                 Requires the free <strong>RawBT</strong> app, connected to your receipt
                 printer once beforehand. Tapping this hands the print job to RawBT directly.
             </p>
+            <button type="button" id="direct-bt-print-btn" class="btn btn-jc-outline w-100 btn-sm mt-2">
+                Print Directly (Chrome/Edge, no app)
+            </button>
+            <p id="direct-bt-print-status" class="text-muted small text-center mt-2 mb-0"></p>
+            <p class="text-muted small text-center mt-1 mb-0">
+                Experimental: connects straight to the printer over Bluetooth from this
+                computer. Needs Chrome or Edge -- not available in Safari or Firefox. If
+                it doesn't work on your printer, use RawBT above instead.
+            </p>
     </div>
 </div>
+{% endblock %}
+{% block extra_js %}
+<script src="{% static 'js/escpos_bluetooth_print.js' %}"></script>
+<script>
+    (function () {
+        var btn = document.getElementById("direct-bt-print-btn");
+        var status = document.getElementById("direct-bt-print-status");
+        btn.addEventListener("click", function () {
+            window.SanServeAllEscposPrint.printEscposDirect(
+                "{% url 'pos:receipt_escpos_payload' transaction.pk %}",
+                status
+            );
+        });
+    })();
+</script>
 {% endblock %}

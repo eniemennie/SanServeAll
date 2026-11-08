@@ -202,3 +202,103 @@ class TestReceiptPrintFontSize:
         assert response.status_code == 200
         assert "Spanish Latte" in content
         assert f"Transaction #{completed_transaction.pk}" in content
+
+
+class TestReceiptEscposPayloadView:
+    """Direct-to-laptop Web Bluetooth print path (task tracker,
+    2026-11-08) -- the JSON endpoint static/js/escpos_bluetooth_print.js
+    fetches before writing bytes straight to the printer's BLE
+    characteristic. Same data as the RawBT intent URL, just not wrapped
+    in RawBT's intent:// scheme, and same ownership/branch scoping as
+    the existing receipt view it sits beside."""
+
+    def _unlock(self, client, cashier, branch):
+        client.force_login(cashier)
+        session = client.session
+        session["selected_branch_id"] = branch.pk
+        session["pos_unlocked"] = True
+        session.save()
+
+    def test_returns_base64_escpos_matching_build_escpos_receipt(
+        self, client, cashier, branch, completed_transaction
+    ):
+        import base64
+
+        from django.urls import reverse
+
+        self._unlock(client, cashier, branch)
+        response = client.get(
+            reverse("pos:receipt_escpos_payload", args=[completed_transaction.pk])
+        )
+
+        assert response.status_code == 200
+        assert response["Content-Type"] == "application/json"
+        payload = response.json()
+        decoded = base64.b64decode(payload["escpos_base64"])
+        assert decoded == printing.build_escpos_receipt(completed_transaction)
+        assert decoded.startswith(b"\x1b\x40")
+
+    def test_404s_for_a_transaction_belonging_to_another_cashier(
+        self, client, branch, completed_transaction
+    ):
+        from django.urls import reverse
+
+        other_cashier = User.objects.create_user(
+            username="cashier2",
+            password="testpass123",
+            role=completed_transaction.cashier.role,
+            branch=branch,
+        )
+        self._unlock(client, other_cashier, branch)
+
+        response = client.get(
+            reverse("pos:receipt_escpos_payload", args=[completed_transaction.pk])
+        )
+        assert response.status_code == 404
+
+    def test_denies_access_when_selected_branch_does_not_match_the_transactions_branch(
+        self, client, cashier, completed_transaction
+    ):
+        """A cashier whose session branch doesn't match the transaction's
+        branch never reaches the view's own 404 check -- pos_unlock_required
+        itself redirects first (a cashier is tied to one branch, so a
+        mismatched selected_branch_id means their session is stale/invalid).
+        Either way, the payload must not be served."""
+        from django.urls import reverse
+
+        other_branch = Branch.objects.create(name="Batangas City", code="BATC")
+        client.force_login(cashier)
+        session = client.session
+        session["selected_branch_id"] = other_branch.pk
+        session["pos_unlocked"] = True
+        session.save()
+
+        response = client.get(
+            reverse("pos:receipt_escpos_payload", args=[completed_transaction.pk])
+        )
+        assert response.status_code != 200
+
+    def test_404s_for_a_non_completed_transaction(self, client, branch, cashier):
+        from django.urls import reverse
+
+        draft = SalesTransaction.objects.create(
+            branch=branch, cashier=cashier, status=SalesTransaction.Status.DRAFT
+        )
+        self._unlock(client, cashier, branch)
+
+        response = client.get(reverse("pos:receipt_escpos_payload", args=[draft.pk]))
+        assert response.status_code == 404
+
+    def test_requires_pos_unlock(self, client, cashier, branch, completed_transaction):
+        from django.urls import reverse
+
+        client.force_login(cashier)
+        session = client.session
+        session["selected_branch_id"] = branch.pk
+        # Deliberately not setting pos_unlocked=True.
+        session.save()
+
+        response = client.get(
+            reverse("pos:receipt_escpos_payload", args=[completed_transaction.pk])
+        )
+        assert response.status_code != 200

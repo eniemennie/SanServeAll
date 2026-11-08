@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load sanserveall_filters %}
+{% load sanserveall_filters static %}
 {% block title %}POS - SanServeAll{% endblock %}
 {% block extra_css %}
 <style>
@@ -640,14 +640,21 @@
                 {% if completed_rawbt_url %}
                 <a href="{{ completed_rawbt_url }}" class="btn btn-jc-outline">Print via Bluetooth</a>
                 {% endif %}
+                {% if completed_transaction %}
+                <button type="button" id="direct-bt-print-btn" class="btn btn-jc-outline">Print Directly (Chrome/Edge)</button>
+                {% endif %}
                 <button type="button" class="btn btn-jc-primary" data-bs-dismiss="modal">Done</button>
             </div>
+            {% if completed_transaction %}
+            <p id="direct-bt-print-status" class="text-muted small text-center mb-2 jc-print-hide"></p>
+            {% endif %}
         </div>
     </div>
 </div>
 {% endif %}
 {% endblock %}
 {% block extra_js %}
+{% if completed_transaction %}<script src="{% static 'js/escpos_bluetooth_print.js' %}"></script>{% endif %}
 <script>
 (function () {
     const searchInput = document.getElementById("product-search");
@@ -896,6 +903,22 @@
     // won't reopen it for the same transaction.
     var completeModal = new bootstrap.Modal(document.getElementById("transactionCompleteModal"));
     completeModal.show();
+
+    // "Add it alongside RawBT" direct-to-laptop Web Bluetooth print option
+    // (task tracker, 2026-11-08) -- see static/js/escpos_bluetooth_print.js
+    // and apps.pos.views.receipt_escpos_payload. Wired here rather than in
+    // receipt.html's own extra_js block because this modal, not a
+    // standalone page, is where a cashier sees the completed transaction.
+    var directBtBtn = document.getElementById("direct-bt-print-btn");
+    var directBtStatus = document.getElementById("direct-bt-print-status");
+    if (directBtBtn) {
+        directBtBtn.addEventListener("click", function () {
+            window.SanServeAllEscposPrint.printEscposDirect(
+                "{% url 'pos:receipt_escpos_payload' completed_transaction.pk %}",
+                directBtStatus
+            );
+        });
+    }
 })();
 {% endif %}
 </script>
