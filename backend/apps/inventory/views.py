@@ -106,14 +106,35 @@ def product_management(request):
         search=search,
     )
 
+    # Client review (2026-11-08): Packaging materials (tape, boxes, cups,
+    # etc.) now get their own dedicated tab, split out of the general
+    # Raw Materials tab rather than requiring the category dropdown --
+    # the client separately maintains and uploads packaging data (its
+    # own spreadsheet) distinct from food raw materials, so it should
+    # read as its own section here too, not a filter one has to know to
+    # apply.
+    is_packaging_tab = (
+        product_type == Product.ProductType.MATERIAL and category == Product.Category.PACKAGING
+    )
+    if is_packaging_tab:
+        active_tab = "packaging"
+    elif product_type == Product.ProductType.MATERIAL:
+        active_tab = "materials"
+    else:
+        active_tab = "finished"
+
     # Task #148 (client review, 2026-11-04): category options depend on
     # which type tab is active -- a finished-goods category (Coffee,
     # Pasta, ...) means nothing on the Raw Materials tab, and the
     # Packaging/Raw Materials split means nothing on the Finished
     # Products tab. Materials' own "Raw Materials (Food)" option maps to
     # services.RAW_MATERIAL_CATEGORY_FILTER, not a real stored category
-    # (see that constant's docstring).
-    if product_type == Product.ProductType.MATERIAL:
+    # (see that constant's docstring). The dedicated Packaging tab shows
+    # no category dropdown at all -- it's already scoped to the one
+    # category, so there's nothing left to filter by.
+    if is_packaging_tab:
+        category_choices = []
+    elif product_type == Product.ProductType.MATERIAL:
         category_choices = [
             (Product.Category.PACKAGING, Product.Category.PACKAGING.label),
             (services.RAW_MATERIAL_CATEGORY_FILTER, "Raw Materials (Food)"),
@@ -134,6 +155,7 @@ def product_management(request):
             "selected_branch": selected_branch,
             "selected_type": product_type,
             "selected_category": category,
+            "active_tab": active_tab,
             "category_choices": category_choices,
             "search": search,
             "items": availability["items"],
