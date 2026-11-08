@@ -24,6 +24,21 @@
  * SDK's own documented pacing for its BLE transport (the PT-210 sits
  * behind a UART module with no flow control, so pacing is open-loop on
  * the sender's side either way).
+ *
+ * Known flakiness (found 2026-11-08, confirmed working against the
+ * real printer): the first print after opening the page succeeds, but
+ * a later attempt sometimes hangs forever at "Connecting..." with no
+ * error, and the only fix found was power-cycling the printer. Most
+ * likely cause -- unconfirmed, since this is unofficial/reverse-
+ * engineered hardware with no documented reconnect behavior: the
+ * browser returns the SAME BluetoothDevice object once permission is
+ * granted, and if the printer's side didn't cleanly tear down the
+ * previous GATT connection, a fresh connect() call can simply never
+ * resolve. Two mitigations below: a timeout on the connect/print steps
+ * so a hang becomes a clear error instead of an indefinitely frozen
+ * button, and disconnecting defensively before every new attempt.
+ * Neither can fix a printer-side issue outright -- if it still hangs,
+ * powering the printer off and on remains the real fix.
  */
 (function (window) {
   "use strict";
@@ -35,6 +50,10 @@
 
   var CHUNK_SIZE = 182;
   var CHUNK_DELAY_MS = 40;
+  var CONNECT_TIMEOUT_MS = 12000;
+  var PRINT_TIMEOUT_MS = 20000;
+  var POWER_CYCLE_HINT =
+    "If this keeps happening, turn the printer off and back on, then try again.";
 
   function base64ToBytes(base64) {
     var binary = window.atob(base64);
@@ -48,6 +67,32 @@
   function sleep(ms) {
     return new Promise(function (resolve) {
       setTimeout(resolve, ms);
+    });
+  }
+
+  /** Races `promise` against a `ms`-millisecond timer so a step that
+   * never resolves (the hang this file's module docstring describes)
+   * surfaces as a clear, timed-out error instead of leaving the
+   * cashier staring at a frozen status line indefinitely. The original
+   * promise is left to settle on its own after the timeout fires --
+   * there's no way to cancel an in-flight Web Bluetooth call -- so
+   * this only changes what the UI reports, not the underlying
+   * request. */
+  function withTimeout(promise, ms, timeoutMessage) {
+    return new Promise(function (resolve, reject) {
+      var timer = setTimeout(function () {
+        reject(new Error(timeoutMessage));
+      }, ms);
+      promise.then(
+        function (value) {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        function (err) {
+          clearTimeout(timer);
+          reject(err);
+        }
+      );
     });
   }
 
@@ -116,6 +161,8 @@
       return Promise.resolve();
     }
 
+    var chosenDevice = null;
+
     setStatus("Fetching receipt data...");
     return fetch(payloadUrl, { credentials: "same-origin" })
       .then(function (response) {
@@ -147,24 +194,48 @@
             optionalServices: [BLE_SERVICE_UUID, BLE_SERVICE_UUID_ALT],
           })
           .then(function (device) {
+            chosenDevice = device;
+            // Defensive cleanup before reconnecting (see this file's
+            // module docstring for the hang this guards against): the
+            // browser hands back the same BluetoothDevice once
+            // permission is granted, so if a previous print's
+            // connection is still considered open from our side,
+            // force it closed before asking for a new one.
+            if (chosenDevice.gatt && chosenDevice.gatt.connected) {
+              chosenDevice.gatt.disconnect();
+            }
             setStatus("Connecting...");
-            return device.gatt.connect();
+            return withTimeout(
+              chosenDevice.gatt.connect(),
+              CONNECT_TIMEOUT_MS,
+              "Connecting timed out. " + POWER_CYCLE_HINT
+            );
           })
           .then(function (server) {
             return findWriteCharacteristic(server).then(function (characteristic) {
               setStatus("Printing...");
-              return writeInChunks(characteristic, bytes).then(function () {
-                server.disconnect();
-                setStatus("Sent to printer.");
-              });
+              return withTimeout(
+                writeInChunks(characteristic, bytes),
+                PRINT_TIMEOUT_MS,
+                "Printing timed out partway through. " + POWER_CYCLE_HINT
+              );
             });
+          })
+          .then(function () {
+            if (chosenDevice.gatt && chosenDevice.gatt.connected) {
+              chosenDevice.gatt.disconnect();
+            }
+            setStatus("Sent to printer.");
           });
       })
       .catch(function (err) {
+        if (chosenDevice && chosenDevice.gatt && chosenDevice.gatt.connected) {
+          chosenDevice.gatt.disconnect();
+        }
         setStatus(
           "Could not print directly: " +
             (err && err.message ? err.message : err) +
-            ". Try the RawBT option instead."
+            ". Try the RawBT option instead, or turn the printer off and on and try again."
         );
       });
   }
