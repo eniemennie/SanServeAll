@@ -686,3 +686,29 @@ class TestReceiptView:
         assert b"VAT-Exempt Sales" in response.content
         assert b"VATable Sales" not in response.content
         assert b"VAT (12%)" not in response.content
+
+
+class TestCustomizeModalScrolling:
+    """Regression test for the 2026-11-08 report: the product
+    customization modal (#customizeModal) already had Bootstrap's
+    `modal-dialog-scrollable` class, but a product with add-ons and a
+    discount category selected still grew past the bottom of the
+    screen with no way to reach the ADD button. Root cause: the
+    modal's .modal-body/.modal-footer are wrapped in a <form> (needed
+    for the POST submit), which breaks the flexbox chain
+    `modal-dialog-scrollable` relies on -- the <form>, not .modal-body,
+    became the flex item, and a flex item's default min-height:auto
+    stops it (and everything inside it) from ever shrinking enough to
+    let .modal-body's overflow-y:auto actually have something to
+    scroll within. This only checks the fix's CSS rule is present in
+    the rendered page -- Django's test client can't execute real
+    browser layout -- so it guards against the fix being reverted or
+    narrowed to only this one modal by accident."""
+
+    def test_scrollable_modal_css_makes_the_form_part_of_the_flex_chain(self, unlocked_client):
+        response = unlocked_client.get(reverse("pos:ordering"))
+        content = response.content.decode()
+
+        assert ".modal-dialog-scrollable .modal-content > form {" in content
+        assert ".modal-dialog-scrollable .modal-content > form .modal-body {" in content
+        assert "overflow-y: auto;" in content
