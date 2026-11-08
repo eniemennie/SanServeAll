@@ -4,6 +4,7 @@ Management (Row 6.2), Finished Goods & Materials filtering (Row 6.3), and
 Low-Stock Alert Triggering (Row 6.4).
 """
 
+import re
 from decimal import Decimal
 
 import pytest
@@ -967,6 +968,93 @@ class TestProductAvailabilityEnhancements:
         )
         product_names = {i.product.name for i in response.context["items"]}
         assert product_names == {"Cling Wrap"}
+
+    def test_packaging_materials_tab_shows_only_packaging_items(self, owner_client, branch):
+        """Client review (2026-11-08): Packaging gets its own dedicated
+        tab (type=MATERIAL&category=PACKAGING) rather than only being
+        reachable via the Raw Materials tab's category dropdown -- the
+        client maintains and imports packaging data separately from food
+        raw materials and wants it to read as its own section."""
+        cling_wrap = Product.objects.create(
+            name="Cling Wrap",
+            price="40.00",
+            product_type=Product.ProductType.MATERIAL,
+            category=Product.Category.PACKAGING,
+        )
+        flour = Product.objects.create(
+            name="Flour", price="45.00", product_type=Product.ProductType.MATERIAL
+        )
+        latte = Product.objects.create(name="Spanish Latte", price="125.00")
+        Inventory.objects.create(branch=branch, product=cling_wrap, quantity_on_hand=100)
+        Inventory.objects.create(branch=branch, product=flour, quantity_on_hand=20)
+        Inventory.objects.create(branch=branch, product=latte, quantity_on_hand=10)
+
+        response = owner_client.get(
+            reverse("inventory:product_management"),
+            {"type": "MATERIAL", "category": "PACKAGING"},
+        )
+        assert response.status_code == 200
+        product_names = {i.product.name for i in response.context["items"]}
+        assert product_names == {"Cling Wrap"}
+        assert response.context["active_tab"] == "packaging"
+        assert b"Packaging Materials" in response.content
+
+    def test_packaging_materials_tab_link_is_marked_active(self, owner_client, branch):
+        response = owner_client.get(
+            reverse("inventory:product_management"),
+            {"type": "MATERIAL", "category": "PACKAGING"},
+        )
+        content = response.content.decode()
+        tabs = re.findall(r'<a href="[^"]*"[^>]*>[^<]*</a>', content)
+        packaging_tag = next(t for t in tabs if "Packaging Materials" in t)
+        assert "jc-filter-tab-active" in packaging_tag
+
+    def test_raw_materials_tab_not_marked_active_on_packaging_tab(self, owner_client, branch):
+        """The general Raw Materials tab and the dedicated Packaging tab
+        are mutually exclusive -- only one shows as active at a time,
+        even though both carry type=MATERIAL."""
+        response = owner_client.get(
+            reverse("inventory:product_management"),
+            {"type": "MATERIAL", "category": "PACKAGING"},
+        )
+        content = response.content.decode()
+        tabs = re.findall(r'<a href="[^"]*"[^>]*>[^<]*</a>', content)
+        raw_materials_tag = next(t for t in tabs if ">Raw Materials<" in t)
+        assert "jc-filter-tab-active" not in raw_materials_tag
+
+    def test_general_materials_tab_still_shows_both_packaging_and_food(self, owner_client, branch):
+        """The plain Raw Materials tab (no category) still shows
+        everything tagged MATERIAL, packaging included -- the dedicated
+        tab is an added shortcut, not a removal of data from the general
+        view."""
+        cling_wrap = Product.objects.create(
+            name="Cling Wrap",
+            price="40.00",
+            product_type=Product.ProductType.MATERIAL,
+            category=Product.Category.PACKAGING,
+        )
+        flour = Product.objects.create(
+            name="Flour", price="45.00", product_type=Product.ProductType.MATERIAL
+        )
+        Inventory.objects.create(branch=branch, product=cling_wrap, quantity_on_hand=100)
+        Inventory.objects.create(branch=branch, product=flour, quantity_on_hand=20)
+
+        response = owner_client.get(reverse("inventory:product_management"), {"type": "MATERIAL"})
+        product_names = {i.product.name for i in response.context["items"]}
+        assert product_names == {"Cling Wrap", "Flour"}
+        assert response.context["active_tab"] == "materials"
+
+    def test_category_dropdown_hidden_on_packaging_tab(self, owner_client):
+        """Already scoped to the one category, so there's nothing left
+        to filter by -- unlike Finished Products/Raw Materials, which
+        both keep their category dropdown."""
+        response = owner_client.get(
+            reverse("inventory:product_management"),
+            {"type": "MATERIAL", "category": "PACKAGING"},
+        )
+        assert response.context["category_choices"] == []
+        assert b'<select name="category"' not in response.content
+        assert b'<input type="hidden" name="category" value="PACKAGING">' in response.content
 
     def test_category_filter_narrows_to_raw_materials_food(self, owner_client, branch):
         """The 'Raw Materials (Food)' option is the complement of
