@@ -50,11 +50,20 @@ class TestLandingPage:
         response = client.get(reverse("core:landing"))
         assert reverse("accounts:commissary_login").encode() in response.content
 
-    def test_shows_all_three_role_labels(self, client):
+    def test_purchasing_button_links_to_purchasing_login(self, client):
+        """Purchasing Staff (Task #143) gets its own branded login screen,
+        the same way Commissary Staff does -- see
+        PurchasingLoginView's docstring for why the landing page needed
+        this button at all."""
+        response = client.get(reverse("core:landing"))
+        assert reverse("accounts:purchasing_login").encode() in response.content
+
+    def test_shows_all_four_role_labels(self, client):
         response = client.get(reverse("core:landing"))
         assert b"Cashier" in response.content
         assert b"Admin" in response.content
         assert b"Commissary" in response.content
+        assert b"Purchasing" in response.content
 
     def test_does_not_require_authentication(self, client):
         """The landing page is the public entry point -- it must be

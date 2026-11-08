@@ -332,4 +332,83 @@ class TestCommissaryLogin:
         )
         assert response.status_code == 200
         assert not response.wsgi_request.user.is_authenticated
+
+
+class TestPurchasingLogin:
+    """Task #143 created the Purchasing role and its post-login
+    destination, but never gave it a landing-page/login front door -- see
+    PurchasingLoginView's docstring. Mirrors TestCommissaryLogin, since
+    the view itself mirrors CommissaryLoginView."""
+
+    def test_purchasing_login_page_loads(self, client):
+        response = client.get(reverse("accounts:purchasing_login"))
+        assert response.status_code == 200
+        assert b"Purchasing Staff Login" in response.content
+
+    def test_valid_purchasing_credentials_log_in_and_reach_supplier_management(
+        self, client, purchasing_staff
+    ):
+        response = client.post(
+            reverse("accounts:purchasing_login"),
+            {"username": "purchasing1", "password": "testpass123"},
+        )
+        assert response.status_code == 302
+        assert response.url == reverse("accounts:select_branch")
+        assert response.wsgi_request.user.is_authenticated
+
+        # BranchSelectionView's existing Purchasing special-case (Task
+        # #143) is what actually lands a Purchasing account on Supplier
+        # Management -- following the redirect proves that routing still
+        # applies correctly to a user who came in through this new page.
+        response = client.get(response.url)
+        assert response.status_code == 302
+        assert response.url == reverse("purchasing:supplier_management")
+
+    def test_wrong_password_is_rejected(self, client, purchasing_staff):
+        response = client.post(
+            reverse("accounts:purchasing_login"),
+            {"username": "purchasing1", "password": "wrongpassword"},
+        )
+        assert response.status_code == 200
+        assert not response.wsgi_request.user.is_authenticated
+        assert b"Invalid username or password" in response.content
+
+    def test_non_purchasing_role_cannot_use_purchasing_login_even_with_correct_credentials(
+        self, client, cashier
+    ):
+        """A BRANCH_STAFF account with perfectly valid credentials must
+        still be refused here -- this is a Purchasing-only entry point,
+        mirroring how AdminLoginView/CommissaryLoginView guard their own
+        doors."""
+        response = client.post(
+            reverse("accounts:purchasing_login"),
+            {"username": "cashier1", "password": "testpass123"},
+        )
+        assert response.status_code == 200
+        assert not response.wsgi_request.user.is_authenticated
+
+    def test_owner_admin_cannot_use_purchasing_login_either(self, client, owner):
+        response = client.post(
+            reverse("accounts:purchasing_login"),
+            {"username": "owner1", "password": "testpass123"},
+        )
+        assert response.status_code == 200
+        assert not response.wsgi_request.user.is_authenticated
+        assert "selected_branch_id" not in client.session
+
+    def test_locks_out_after_threshold_wrong_passwords_even_the_correct_one(
+        self, client, purchasing_staff
+    ):
+        for _ in range(LOGIN_LOCKOUT_THRESHOLD):
+            client.post(
+                reverse("accounts:purchasing_login"),
+                {"username": "purchasing1", "password": "wrongpassword"},
+            )
+
+        response = client.post(
+            reverse("accounts:purchasing_login"),
+            {"username": "purchasing1", "password": "testpass123"},
+        )
+        assert response.status_code == 200
+        assert not response.wsgi_request.user.is_authenticated
         assert b"Too many incorrect attempts" in response.content
