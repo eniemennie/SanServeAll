@@ -40,6 +40,39 @@
     }
     .jc-add-custom-tile:hover { background-color: rgba(232, 139, 90, 0.06); }
 
+    /* Reported 2026-11-08: the product customization modal
+       (#customizeModal -- size/sugar/add-ons/discount) already has
+       Bootstrap's `modal-dialog-scrollable` class, but it wasn't
+       scrolling -- on a product with add-ons and a discount category
+       selected, the modal just grew past the bottom of the screen with
+       no way to reach the ADD button.
+
+       Root cause: `modal-dialog-scrollable` is a flexbox chain that
+       assumes `.modal-header`, `.modal-body` and `.modal-footer` are
+       all direct children of `.modal-content`, so only `.modal-body`
+       scrolls while header/footer stay put. This modal's `.modal-body`
+       and `.modal-footer` are wrapped in a `<form>` instead (needed so
+       the ADD button's POST submits the whole customization in one
+       request) -- which becomes the flex item in `.modal-content`'s
+       place. A flex item's height defaults to its own content's full
+       height (min-height: auto), so the form, and everything inside
+       it, never shrinks to fit the modal -- `.modal-body`'s
+       `overflow-y: auto` had no bounded height to actually scroll
+       within. Making the <form> itself part of the flex column (and
+       letting .modal-body shrink/scroll inside it) restores scrolling
+       without restructuring the existing form-wraps-body-and-footer
+       markup. Scoped to any current/future scrollable modal built the
+       same way, not just this one. */
+    .modal-dialog-scrollable .modal-content > form {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+    }
+    .modal-dialog-scrollable .modal-content > form .modal-body {
+        overflow-y: auto;
+    }
+
     /* Printing the Transaction Complete modal (Row 3 redesign) should
        produce a clean, single-page receipt printout, not the whole POS
        page (product grid, cart, other modals) bleeding through.
