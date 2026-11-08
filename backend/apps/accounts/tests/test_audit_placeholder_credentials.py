@@ -12,6 +12,7 @@ from apps.accounts.models import Branch, CashierPIN, Role
 from apps.accounts.services import (
     PLACEHOLDER_CASHIER_PIN,
     PLACEHOLDER_COMMISSARY_PASSWORD,
+    PLACEHOLDER_PURCHASING_PASSWORD,
     find_accounts_with_placeholder_credentials,
 )
 
@@ -36,6 +37,11 @@ def branch_staff_role():
 @pytest.fixture
 def commissary_staff_role():
     return Role.objects.create(name=Role.COMMISSARY_STAFF)
+
+
+@pytest.fixture
+def purchasing_role():
+    return Role.objects.create(name=Role.PURCHASING)
 
 
 class TestFindAccountsWithPlaceholderCredentials:
@@ -102,6 +108,29 @@ class TestFindAccountsWithPlaceholderCredentials:
             role=commissary_staff_role,
             branch=commissary_branch,
             is_active=True,
+        )
+        staff.set_password("a-real-rotated-password")
+        staff.save()
+
+        assert find_accounts_with_placeholder_credentials() == []
+
+    def test_flags_a_purchasing_account_still_on_the_placeholder_password(self, purchasing_role):
+        User = get_user_model()
+        staff = User.objects.create(
+            username="purchasing_staff", role=purchasing_role, is_active=True
+        )
+        staff.set_password(PLACEHOLDER_PURCHASING_PASSWORD)
+        staff.save()
+
+        findings = find_accounts_with_placeholder_credentials()
+        assert len(findings) == 1
+        assert findings[0]["credential_type"] == "Purchasing password"
+        assert findings[0]["user"] == staff
+
+    def test_a_rotated_purchasing_password_is_not_flagged(self, purchasing_role):
+        User = get_user_model()
+        staff = User.objects.create(
+            username="purchasing_staff", role=purchasing_role, is_active=True
         )
         staff.set_password("a-real-rotated-password")
         staff.save()
