@@ -24,4 +24,9 @@ urlpatterns = [
     ),
     path("payment/", views.payment, name="payment"),
     path("receipt/<int:transaction_id>/", views.receipt, name="receipt"),
+    path(
+        "receipt/<int:transaction_id>/escpos-payload/",
+        views.receipt_escpos_payload,
+        name="receipt_escpos_payload",
+    ),
 ]

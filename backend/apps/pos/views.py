@@ -8,7 +8,10 @@ branch selection -> cashier PIN flow) and operate only on the current
 cashier's own DRAFT transaction for their selected branch.
 """
 
+import base64
+
 from django.contrib import messages
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from apps.accounts.permissions import pos_unlock_required
@@ -271,3 +274,25 @@ def receipt(request, transaction_id):
             "discount_total": discount_total,
         },
     )
+
+
+@pos_unlock_required
+def receipt_escpos_payload(request, transaction_id):
+    """JSON endpoint for the direct-to-laptop Web Bluetooth print path
+    (static/js/escpos_bluetooth_print.js) -- PT-210 printer integration,
+    "add it alongside RawBT" (task tracker, 2026-11-08). Returns the same
+    ESC/POS byte stream build_rawbt_print_url already base64-encodes into
+    an intent URL for RawBT, just as plain JSON instead: the browser
+    decodes it client-side and writes it straight to the printer's BLE
+    characteristic, no RawBT/Android app in between. Same
+    ownership/branch scoping as the receipt view -- this is the same
+    receipt data in a different shape, not a new access path."""
+    completed_transaction = get_object_or_404(
+        SalesTransaction,
+        pk=transaction_id,
+        cashier=request.user,
+        branch=request.selected_branch,
+        status=SalesTransaction.Status.COMPLETED,
+    )
+    escpos_bytes = printing.build_escpos_receipt(completed_transaction)
+    return JsonResponse({"escpos_base64": base64.b64encode(escpos_bytes).decode("ascii")})
