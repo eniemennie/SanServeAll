@@ -23,6 +23,7 @@ from apps.accounts.models import Branch, CashierPIN, Role, TwoFactorBackupCode
 # the exact same values those commands actually set.
 PLACEHOLDER_CASHIER_PIN = "0000"
 PLACEHOLDER_COMMISSARY_PASSWORD = "CommissaryPending2026!"
+PLACEHOLDER_PURCHASING_PASSWORD = "PurchasingPending2026!"
 
 
 def find_accounts_with_placeholder_credentials():
@@ -61,6 +62,18 @@ def find_accounts_with_placeholder_credentials():
                     "credential_type": "Commissary password",
                     "message": (
                         f"{user.username}: still using the placeholder commissary password."
+                    ),
+                }
+            )
+
+    for user in get_user_model().objects.filter(role__name=Role.PURCHASING, is_active=True):
+        if user.check_password(PLACEHOLDER_PURCHASING_PASSWORD):
+            findings.append(
+                {
+                    "user": user,
+                    "credential_type": "Purchasing password",
+                    "message": (
+                        f"{user.username}: still using the placeholder purchasing password."
                     ),
                 }
             )
