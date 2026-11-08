@@ -47,56 +47,127 @@
         .jc-hero .jc-logo-img { height: 100px; }
     }
 
-    /* Role-selection buttons (Row 19): replaces the old "Start Shift" /
+    /* Role-selection buttons (Row 19, reworked 2026-11-08 -- task
+       tracker "role button layout"): replaces the old "Start Shift" /
        "Sign In" pair with one button per role. Scoped to this page only
-       (not static/css/main.css) since this stacked icon-over-label card
-       shape is specific to the landing page's role picker -- the shared
+       (not static/css/main.css) since this card shape is specific to
+       the landing page's role picker -- the shared
        .btn-jc-primary/.btn-jc-teal pill classes used elsewhere (POS,
-       Admin Login, etc.) are untouched by this. */
+       Admin Login, etc.) are untouched by this.
+
+       Previously a flex-wrap row (flex: 1 1 160px, max-width 220px):
+       with 4 cards and a 640px container, 3 fit on the first line and
+       the 4th wrapped alone onto its own row, narrower than it should
+       be and visually orphaned. A CSS grid fixes this at its source --
+       2 columns x 2 rows is a complete, balanced shape for exactly 4
+       items at every width down to tablet, so there is never a
+       partial last row; it collapses to a single column on phones,
+       where one-per-row is the natural (not awkward) layout. */
     .jc-role-grid {
-        display: flex;
-        flex-wrap: wrap;
-        justify-content: center;
-        gap: 1rem;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1.1rem;
+        max-width: 460px;
+        margin: 0 auto;
     }
     .jc-role-btn {
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 0.6rem;
-        flex: 1 1 160px;
-        max-width: 220px;
-        padding: 1.5rem 1rem;
+        gap: 0.7rem;
+        padding: 1.65rem 1rem;
         border-radius: var(--jc-radius);
         text-decoration: none;
         color: #fff;
         font-weight: 600;
-        font-size: 1rem;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+        font-size: 0.98rem;
+        letter-spacing: 0.01em;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.14);
         transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
     }
     .jc-role-btn:hover,
-    .jc-role-btn:focus {
+    .jc-role-btn:focus-visible {
         color: #fff;
         transform: translateY(-3px);
-        box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+        box-shadow: 0 10px 18px rgba(0,0,0,0.2);
+    }
+    .jc-role-btn:hover .jc-role-btn-icon,
+    .jc-role-btn:focus-visible .jc-role-btn-icon {
+        background: rgba(255,255,255,0.4);
+        transform: scale(1.06);
+    }
+    /* Pressed/active feedback (req. 5: "interactive feedback") -- a
+       quick settle back toward the resting position instead of staying
+       lifted, so tapping reads as a real press rather than just a
+       hover. */
+    .jc-role-btn:active {
+        transform: translateY(0);
+        box-shadow: 0 3px 8px rgba(0,0,0,0.16);
+    }
+    .jc-role-btn:focus-visible {
+        outline: none;
+        box-shadow: 0 10px 18px rgba(0,0,0,0.2), 0 0 0 3px rgba(255,255,255,0.55);
     }
     .jc-role-btn-icon {
-        width: 44px;
-        height: 44px;
+        width: 46px;
+        height: 46px;
         border-radius: 50%;
         background: rgba(255,255,255,0.28);
         display: flex;
         align-items: center;
         justify-content: center;
+        transition: background-color 0.15s ease, transform 0.15s ease;
     }
+    /* Each role gets its own color from the existing brand palette
+       (main.css's --jc-* tokens -- nothing new introduced) instead of
+       a plain alternating orange/teal, so the four roles read as
+       visually distinct account types (req. 3), not just four
+       identical buttons with different labels. Cashier keeps the
+       brand's primary orange since it's the highest-traffic, most
+       frequently tapped role; Admin/Owner gets the deep navy already
+       used for primary text/headers, for a deliberately more
+       "authoritative" tone befitting the most-privileged role;
+       Commissary and Purchasing -- the two back-office/inventory
+       roles -- share the cooler sage/teal pairing already used
+       elsewhere for secondary actions. */
     .jc-role-btn-orange { background-color: var(--jc-orange); }
     .jc-role-btn-orange:hover,
-    .jc-role-btn-orange:focus { background-color: var(--jc-orange-dark); }
+    .jc-role-btn-orange:focus-visible { background-color: var(--jc-orange-dark); }
+    .jc-role-btn-navy { background-color: var(--jc-navy); }
+    .jc-role-btn-navy:hover,
+    .jc-role-btn-navy:focus-visible { background-color: #141D29; }
+    .jc-role-btn-sage { background-color: var(--jc-sage); }
+    .jc-role-btn-sage:hover,
+    .jc-role-btn-sage:focus-visible { background-color: #74916F; }
     .jc-role-btn-teal { background-color: var(--jc-teal); }
     .jc-role-btn-teal:hover,
-    .jc-role-btn-teal:focus { background-color: #4A7684; }
+    .jc-role-btn-teal:focus-visible { background-color: #4A7684; }
+
+    @media (max-width: 575.98px) {
+        .jc-role-grid {
+            grid-template-columns: 1fr;
+            max-width: 280px;
+            gap: 0.85rem;
+        }
+        .jc-role-btn { padding: 1.3rem 1rem; flex-direction: row; justify-content: flex-start; }
+        .jc-role-btn-icon { width: 40px; height: 40px; flex-shrink: 0; }
+    }
+
+    /* Respect a reduced-motion preference (req. 5 polish, not just
+       "add animation") -- the hover lift/scale is cosmetic, not a
+       state change the person needs to perceive, so it's safe to drop
+       entirely rather than just shortening it. */
+    @media (prefers-reduced-motion: reduce) {
+        .jc-role-btn,
+        .jc-role-btn-icon {
+            transition: none;
+        }
+        .jc-role-btn:hover,
+        .jc-role-btn:focus-visible {
+            transform: none;
+        }
+    }
 </style>
 {% endblock %}
 {% block content %}
@@ -114,13 +185,13 @@
                 </span>
                 Cashier
             </a>
-            <a href="{% url 'accounts:admin_login' %}" class="jc-role-btn jc-role-btn-teal">
+            <a href="{% url 'accounts:admin_login' %}" class="jc-role-btn jc-role-btn-navy">
                 <span class="jc-role-btn-icon">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path><polyline points="9 12 11 14 15 10"></polyline></svg>
                 </span>
                 Admin / Owner
             </a>
-            <a href="{% url 'accounts:commissary_login' %}" class="jc-role-btn jc-role-btn-orange">
+            <a href="{% url 'accounts:commissary_login' %}" class="jc-role-btn jc-role-btn-sage">
                 <span class="jc-role-btn-icon">
                     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
                 </span>
