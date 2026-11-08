@@ -9,7 +9,7 @@ import pytest
 from django.urls import reverse
 
 from apps.accounts.models import Branch, CashierPIN, Role, User
-from apps.inventory.models import Inventory, InventoryTransaction, Product
+from apps.inventory.models import Inventory, InventoryTransaction, Product, ProductPackaging
 from apps.pos import services
 from apps.pos.models import SalesTransaction
 
@@ -232,6 +232,129 @@ class TestCompleteSalePayment:
         inventory = Inventory.objects.get(branch=branch, product=product)
         assert inventory.quantity_on_hand == 7
         assert InventoryTransaction.objects.filter(branch=branch, product=product).count() == 1
+
+
+class TestPackagingConsumptionOnSale:
+    """Consolidated Task Tracker "Packaging material consumption
+    tracking" (2026-11-07 scoped options, Option A): a sale of a
+    finished good with a configured ProductPackaging mapping also
+    deducts the mapped packaging, right alongside the finished good's
+    own SALE_DEDUCTION."""
+
+    @pytest.fixture
+    def cup(self, branch):
+        cup = Product.objects.create(
+            name="16oz Cup",
+            price="3.00",
+            product_type=Product.ProductType.MATERIAL,
+            category=Product.Category.PACKAGING,
+        )
+        Inventory.objects.create(branch=branch, product=cup, quantity_on_hand=50)
+        return cup
+
+    @pytest.fixture
+    def packaged_product(self, product, cup):
+        ProductPackaging.objects.create(
+            finished_good=product, packaging_material=cup, quantity_per_unit="1"
+        )
+        return product
+
+    def test_selling_a_mapped_product_deducts_its_packaging(
+        self, cashier, branch, packaged_product, cup
+    ):
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, packaged_product.pk, 3)
+
+        services.complete_sale_payment(draft, "CASH", "500.00")
+
+        cup_inventory = Inventory.objects.get(branch=branch, product=cup)
+        assert cup_inventory.quantity_on_hand == 47  # 50 - (1 x 3)
+
+    def test_packaging_deduction_is_logged_as_its_own_movement_type(
+        self, cashier, branch, packaged_product, cup
+    ):
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, packaged_product.pk, 2)
+
+        services.complete_sale_payment(draft, "CASH", "500.00")
+
+        movement = InventoryTransaction.objects.get(branch=branch, product=cup)
+        assert movement.movement_type == InventoryTransaction.MovementType.PACKAGING_CONSUMPTION
+        assert movement.quantity_change == -2
+
+    def test_quantity_per_unit_scales_with_items_sold(self, cashier, branch, product, cup):
+        """A product needing 2 of a packaging material per unit (e.g.
+        a double-cup iced drink) deducts a multiple, not a flat amount."""
+        ProductPackaging.objects.create(
+            finished_good=product, packaging_material=cup, quantity_per_unit="2"
+        )
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 3)
+
+        services.complete_sale_payment(draft, "CASH", "500.00")
+
+        cup_inventory = Inventory.objects.get(branch=branch, product=cup)
+        assert cup_inventory.quantity_on_hand == 44  # 50 - (2 x 3)
+
+    def test_selling_an_unmapped_product_does_not_touch_packaging_stock(
+        self, cashier, branch, product, cup
+    ):
+        """No ProductPackaging row exists for `product` in this test --
+        nothing should be guessed or deducted."""
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 3)
+
+        services.complete_sale_payment(draft, "CASH", "500.00")
+
+        cup_inventory = Inventory.objects.get(branch=branch, product=cup)
+        assert cup_inventory.quantity_on_hand == 50  # unchanged
+        assert not InventoryTransaction.objects.filter(branch=branch, product=cup).exists()
+
+    def test_a_product_can_require_several_packaging_materials_at_once(
+        self, cashier, branch, product, cup
+    ):
+        lid = Product.objects.create(
+            name="Cup Lid",
+            price="1.00",
+            product_type=Product.ProductType.MATERIAL,
+            category=Product.Category.PACKAGING,
+        )
+        Inventory.objects.create(branch=branch, product=lid, quantity_on_hand=50)
+        ProductPackaging.objects.create(finished_good=product, packaging_material=cup)
+        ProductPackaging.objects.create(finished_good=product, packaging_material=lid)
+
+        draft = services.get_or_create_draft_transaction(cashier, branch)
+        services.add_catalog_item(draft, product.pk, 2)
+        services.complete_sale_payment(draft, "CASH", "500.00")
+
+        assert Inventory.objects.get(branch=branch, product=cup).quantity_on_hand == 48
+        assert Inventory.objects.get(branch=branch, product=lid).quantity_on_hand == 48
+
+    def test_kahero_branch_sale_does_not_deduct_packaging_either(
+        self, kahero_branch, packaged_product, cup
+    ):
+        """Same architectural rule as the finished-good deduction hook:
+        a Kahero-imported branch's inventory is reconciled through the
+        batch-import pipeline, not real-time POS sales, so packaging
+        must not move there either."""
+        role = Role.objects.create(name=Role.BRANCH_STAFF)
+        cashier = User.objects.create_user(
+            username="alangilan_cashier2",
+            password="testpass123",
+            role=role,
+            branch=kahero_branch,
+        )
+        Inventory.objects.create(
+            branch=kahero_branch, product=packaged_product, quantity_on_hand=10
+        )
+        Inventory.objects.create(branch=kahero_branch, product=cup, quantity_on_hand=50)
+        draft = services.get_or_create_draft_transaction(cashier, kahero_branch)
+        services.add_catalog_item(draft, packaged_product.pk, 3)
+
+        services.complete_sale_payment(draft, "CASH", "500.00")
+
+        cup_inventory = Inventory.objects.get(branch=kahero_branch, product=cup)
+        assert cup_inventory.quantity_on_hand == 50  # unchanged
 
 
 class TestPaymentView:
