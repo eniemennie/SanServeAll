@@ -58,6 +58,9 @@ def pos_ordering(request):
     # never re-shows the modal for an old transaction.
     completed_transaction = None
     completed_rawbt_url = None
+    completed_discount_total = None
+    completed_vat_exclusive = None
+    completed_vat_amount = None
     completed_transaction_id = request.session.pop("just_completed_transaction_id", None)
     if completed_transaction_id:
         completed_transaction = SalesTransaction.objects.filter(
@@ -67,6 +70,22 @@ def pos_ordering(request):
         ).first()
         if completed_transaction:
             completed_rawbt_url = printing.build_rawbt_print_url(completed_transaction)
+            # Task tracker, 2026-11-08: the Transaction Complete modal
+            # showed Subtotal and Total with no line explaining the gap
+            # between them, so an SC/PWD discount silently vanished from
+            # view right after payment (it was still applied -- grand_total
+            # already reflects it -- just never displayed), even though
+            # the standalone receipt.html page already shows this
+            # breakdown (added for task #48's BIR requirement). Same
+            # computation as the receipt view, reused here rather than
+            # duplicated logic.
+            completed_vat_exclusive, completed_vat_amount = completed_transaction.vat_breakdown(
+                business_settings.tax_rate_percent
+            )
+            completed_discount_total = (
+                completed_transaction.item_discounts_total
+                + completed_transaction.transaction_discount_value
+            )
 
     return render(
         request,
@@ -88,6 +107,9 @@ def pos_ordering(request):
             "business_settings": business_settings,
             "completed_transaction": completed_transaction,
             "completed_rawbt_url": completed_rawbt_url,
+            "completed_discount_total": completed_discount_total,
+            "completed_vat_exclusive": completed_vat_exclusive,
+            "completed_vat_amount": completed_vat_amount,
         },
     )
 

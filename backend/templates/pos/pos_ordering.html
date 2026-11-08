@@ -616,6 +616,27 @@
                             <div class="d-flex justify-content-between">
                                 <span>Subtotal</span><span>{{ business_settings.currency_symbol }}{{ completed_transaction.total_amount|peso }}</span>
                             </div>
+                            {% if completed_discount_total %}
+                            <div class="d-flex justify-content-between" style="color: var(--jc-adequate);">
+                                <span>Discount{% if completed_transaction.transaction_discount_category %} ({{ completed_transaction.transaction_discount_category }}{% if completed_transaction.transaction_discount_type == "PERCENT" %} - {{ completed_transaction.transaction_discount_amount|floatformat:0 }}%{% endif %}){% endif %}</span>
+                                <span>-{{ business_settings.currency_symbol }}{{ completed_discount_total|peso }}</span>
+                            </div>
+                            {% endif %}
+                            {% if completed_vat_amount %}
+                            <div class="d-flex justify-content-between small text-muted">
+                                <span>VATable Sales</span>
+                                <span>{{ business_settings.currency_symbol }}{{ completed_vat_exclusive|peso }}</span>
+                            </div>
+                            <div class="d-flex justify-content-between small text-muted">
+                                <span>VAT ({{ tax_rate_percent|floatformat:0 }}%)</span>
+                                <span>{{ business_settings.currency_symbol }}{{ completed_vat_amount|peso }}</span>
+                            </div>
+                            {% else %}
+                            <div class="d-flex justify-content-between small text-muted">
+                                <span>VAT-Exempt Sales</span>
+                                <span>{{ business_settings.currency_symbol }}{{ completed_vat_exclusive|peso }}</span>
+                            </div>
+                            {% endif %}
                             <div class="d-flex justify-content-between fw-bold fs-5 mb-2" style="color: var(--jc-orange-dark);">
                                 <span>Total</span><span>{{ business_settings.currency_symbol }}{{ completed_transaction.grand_total|peso }}</span>
                             </div>
