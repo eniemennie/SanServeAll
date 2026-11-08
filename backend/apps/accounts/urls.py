@@ -51,6 +51,8 @@ urlpatterns = [
     path("pin/", views.CashierPinView.as_view(), name="cashier_pin"),
     # Commissary Staff login (landing page role selector, Row 19)
     path("commissary/login/", views.CommissaryLoginView.as_view(), name="commissary_login"),
+    # Purchasing Staff login (landing page role selector, Row 19; Task #143)
+    path("purchasing/login/", views.PurchasingLoginView.as_view(), name="purchasing_login"),
     # Admin login + 2FA (Row 16, Row 17)
     path("admin/login/", views.AdminLoginView.as_view(), name="admin_login"),
     path("admin/2fa/setup/", views.TwoFactorSetupView.as_view(), name="admin_2fa_setup"),
