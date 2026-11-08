@@ -330,6 +330,49 @@ class CommissaryLoginView(View):
         return redirect("accounts:select_branch")
 
 
+class PurchasingLoginView(View):
+    """Purchasing Staff Login (landing page role selector, Row 19).
+
+    Task #143 created the PURCHASING role and its post-login destination
+    (BranchSelectionView redirects it straight to
+    purchasing:supplier_management, the same way it does for Owner/Admin)
+    but never gave the role a way to reach that door from the UI -- the
+    landing page only offered Cashier/Admin/Commissary, and the one view
+    that would accept Purchasing credentials (the generic accounts:login)
+    was never linked from anywhere. This closes that gap the same way
+    CommissaryLoginView closed it for Commissary Staff: its own
+    jc-auth-* themed page, authenticating by username/password (Purchasing
+    accounts have no email-first/2FA flow the way Owner/Admin's does),
+    gated to PURCHASING accounts only -- a correct password for any other
+    role is treated the same as a wrong one here, so this can't be used
+    as a second way into another role's account.
+    """
+
+    template_name = "accounts/purchasing_login.html"
+
+    def get(self, request):
+        return render(request, self.template_name)
+
+    def post(self, request):
+        username = request.POST.get("username", "").strip()
+        password = request.POST.get("password", "")
+
+        candidate = User.objects.filter(username__iexact=username).first()
+        user, lockout_error = authenticate_with_lockout(
+            request, candidate, password, Role.PURCHASING
+        )
+
+        if user is None:
+            return render(
+                request,
+                self.template_name,
+                {"error": lockout_error or "Invalid username or password."},
+            )
+
+        auth_login(request, user)
+        return redirect("accounts:select_branch")
+
+
 class TwoFactorSetupView(LoginRequiredMixin, View):
     """2FA enrollment (Row 17, finalized Row 12.4). Shown the first time
     an Owner/Admin logs in with no confirmed authenticator device yet.
