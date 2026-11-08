@@ -103,7 +103,9 @@ class TestBuildEscposReceipt:
         assert b"250.00" in receipt_bytes  # 2 x 125.00
         assert b"250.00" in receipt_bytes  # change: 500 tendered - 250 total
 
-    def test_omits_footer_section_when_not_configured(self, completed_transaction):
+    def test_still_produces_a_valid_receipt_when_footer_setting_is_blank(
+        self, completed_transaction
+    ):
         settings_obj = BusinessSettings.load()
         settings_obj.receipt_footer_text = ""
         settings_obj.save()
@@ -111,6 +113,188 @@ class TestBuildEscposReceipt:
         receipt_bytes = printing.build_escpos_receipt(completed_transaction)
         # Should not crash and should still produce a valid receipt
         assert receipt_bytes.startswith(b"\x1b\x40")
+
+
+class TestPrintedReceiptMatchesDigitalReceipt:
+    """Task tracker, 2026-11-08: "match the digital receipt" -- the
+    printed/thermal receipt must show the same branch, cashier,
+    discount, and VAT breakdown information as receipt.html, computed
+    from the exact same SalesTransaction properties/methods (never
+    recalculated independently), plus two fixed footer lines that must
+    always be present regardless of the BusinessSettings.receipt_footer_text
+    setting."""
+
+    def test_includes_the_branch_name(self, completed_transaction):
+        receipt_bytes = printing.build_escpos_receipt(completed_transaction)
+        assert b"Lipa City" in receipt_bytes
+
+    def test_includes_the_cashier_name(self, completed_transaction):
+        receipt_bytes = printing.build_escpos_receipt(completed_transaction)
+        assert b"Cashier: cashier1" in receipt_bytes
+
+    def test_includes_the_cashiers_full_name_when_set(self, completed_transaction):
+        completed_transaction.cashier.first_name = "Juana"
+        completed_transaction.cashier.last_name = "Dela Cruz"
+        completed_transaction.cashier.save()
+
+        receipt_bytes = printing.build_escpos_receipt(completed_transaction)
+        assert b"Cashier: Juana Dela Cruz" in receipt_bytes
+
+    def test_includes_a_discount_line_matching_the_transactions_discount_value(
+        self, completed_transaction
+    ):
+        from apps.pos.models import DiscountCategory, DiscountType
+
+        completed_transaction.transaction_discount_category = DiscountCategory.SC2
+        completed_transaction.transaction_discount_type = DiscountType.PERCENT
+        completed_transaction.transaction_discount_amount = Decimal("20")
+        completed_transaction.save()
+
+        receipt_bytes = printing.build_escpos_receipt(completed_transaction)
+        expected_discount = (
+            completed_transaction.item_discounts_total
+            + completed_transaction.transaction_discount_value
+        )
+        assert b"Discount" in receipt_bytes
+        assert _amount_bytes(expected_discount) in receipt_bytes
+
+    def test_omits_the_discount_line_when_there_is_no_discount(self, completed_transaction):
+        receipt_bytes = printing.build_escpos_receipt(completed_transaction)
+        assert b"Discount" not in receipt_bytes
+
+    def test_includes_a_vat_breakdown_matching_the_transactions_vat_breakdown(
+        self, completed_transaction
+    ):
+        settings_obj = BusinessSettings.load()
+        vat_exclusive, vat_amount = completed_transaction.vat_breakdown(
+            settings_obj.tax_rate_percent
+        )
+
+        receipt_bytes = printing.build_escpos_receipt(completed_transaction)
+        assert b"VAT" in receipt_bytes
+        assert _amount_bytes(vat_exclusive) in receipt_bytes
+        assert _amount_bytes(vat_amount) in receipt_bytes
+
+    def test_shows_vat_exempt_sales_for_an_exempt_discount_category(self, completed_transaction):
+        from apps.pos.models import DiscountCategory, DiscountType
+
+        completed_transaction.transaction_discount_category = DiscountCategory.SC2
+        completed_transaction.transaction_discount_type = DiscountType.PERCENT
+        completed_transaction.transaction_discount_amount = Decimal("20")
+        completed_transaction.save()
+
+        receipt_bytes = printing.build_escpos_receipt(completed_transaction)
+        assert b"VAT-Exempt Sales" in receipt_bytes
+
+    def test_always_includes_both_required_footer_lines(self, completed_transaction):
+        receipt_bytes = printing.build_escpos_receipt(completed_transaction)
+        assert b"Thank you for your purchase!" in receipt_bytes
+        assert b"This is just a supplementary receipt." in receipt_bytes
+
+    def test_required_footer_lines_present_even_when_footer_setting_is_blanked(
+        self, completed_transaction
+    ):
+        settings_obj = BusinessSettings.load()
+        settings_obj.receipt_footer_text = ""
+        settings_obj.save()
+
+        receipt_bytes = printing.build_escpos_receipt(completed_transaction)
+        assert b"Thank you for your purchase!" in receipt_bytes
+        assert b"This is just a supplementary receipt." in receipt_bytes
+
+    def test_does_not_duplicate_the_default_footer_text(self, completed_transaction):
+        """BusinessSettings.receipt_footer_text defaults to the exact same
+        text as the first required footer line -- left at that default,
+        the receipt must show it once, not twice in a row."""
+        settings_obj = BusinessSettings.load()
+        settings_obj.receipt_footer_text = "Thank you for your purchase!"
+        settings_obj.save()
+
+        receipt_bytes = printing.build_escpos_receipt(completed_transaction)
+        assert receipt_bytes.count(b"Thank you for your purchase!") == 1
+
+    def test_keeps_a_distinct_configured_footer_message_alongside_the_required_lines(
+        self, completed_transaction
+    ):
+        settings_obj = BusinessSettings.load()
+        settings_obj.receipt_footer_text = "Follow us on Instagram @jorgescafe!"
+        settings_obj.save()
+
+        receipt_bytes = printing.build_escpos_receipt(completed_transaction)
+        assert b"Follow us on Instagram @jorgescafe!" in receipt_bytes
+        assert b"Thank you for your purchase!" in receipt_bytes
+        assert b"This is just a supplementary receipt." in receipt_bytes
+
+    def test_long_product_name_and_multiple_items_do_not_break_the_layout(self, branch, cashier):
+        """A product name long enough to collide with its price column,
+        and more than one line item, must never corrupt the byte stream
+        or crash -- _line()'s truncation must hold under real-world data."""
+        product = Product.objects.create(
+            name="Iced Caramel Macchiato with Extra Espresso Shot and Oat Milk",
+            price="180.00",
+        )
+        transaction = SalesTransaction.objects.create(
+            branch=branch,
+            cashier=cashier,
+            status=SalesTransaction.Status.COMPLETED,
+            payment_method="CASH",
+            amount_tendered=Decimal("1000.00"),
+            completed_at=timezone.now(),
+        )
+        SalesItem.objects.create(
+            transaction=transaction, product=product, unit_price=Decimal("180.00"), quantity=3
+        )
+        SalesItem.objects.create(
+            transaction=transaction,
+            custom_name="Croissant",
+            unit_price=Decimal("85.00"),
+            quantity=2,
+        )
+
+        receipt_bytes = printing.build_escpos_receipt(transaction)
+        assert isinstance(receipt_bytes, bytes)
+        assert receipt_bytes.startswith(b"\x1b\x40")
+        assert receipt_bytes.endswith(b"\x1d\x56\x00")
+        assert b"Thank you for your purchase!" in receipt_bytes
+        assert b"This is just a supplementary receipt." in receipt_bytes
+        assert b"Croissant" in receipt_bytes
+
+        # printing._line() is what actually enforces the paper width for
+        # every item/discount/VAT/total line -- confirm directly that a
+        # long product name doesn't defeat its truncation, rather than
+        # trying to recover each line's width from the full byte stream
+        # (which also carries non-printing ESC/POS control bytes that
+        # have nothing to do with the paper's character width).
+        long_name_line = printing._line(
+            "Iced Caramel Macchiato with Extra Espresso Shot and Oat Milk x3",
+            "540.00",
+        )
+        assert len(long_name_line) <= printing.RECEIPT_WIDTH_CHARS
+
+    def test_receipt_and_direct_bluetooth_payload_byte_streams_are_identical(
+        self, completed_transaction
+    ):
+        """Both print paths (RawBT intent URL and the direct Web
+        Bluetooth JSON payload) must build the receipt via the same
+        function, so neither path can ever produce a different receipt
+        or trigger a second, separate build -- no duplicate print jobs
+        from one transaction."""
+        import base64
+        import re
+
+        direct_payload = printing.build_escpos_receipt(completed_transaction)
+        rawbt_url = printing.build_rawbt_print_url(completed_transaction)
+        match = re.search(r"intent:base64,([^#]+)#", rawbt_url)
+        rawbt_payload = base64.b64decode(match.group(1))
+
+        assert direct_payload == rawbt_payload
+
+
+def _amount_bytes(decimal_amount):
+    """ASCII-encodes a Decimal the same way printing.py's own f-strings
+    do (plain str(Decimal), no manual quantization), so test
+    expectations never drift from the real formatting."""
+    return str(decimal_amount).encode("ascii")
 
 
 class TestBuildRawbtPrintUrl:
