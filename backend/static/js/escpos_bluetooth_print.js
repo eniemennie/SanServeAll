@@ -128,9 +128,22 @@
         var bytes = base64ToBytes(data.escpos_base64);
 
         setStatus("Select your printer from the browser's Bluetooth picker...");
+        // acceptAllDevices (not a services filter) on purpose: a
+        // `filters: [{ services: [...] }]` requestDevice call only
+        // matches a device that advertises that service UUID in its
+        // Bluetooth broadcast packet, not one that merely has it once
+        // connected. Found 2026-11-08 against the real PT-210: the
+        // browser's picker reported "No compatible devices found" even
+        // scanning right next to it -- the cheap UART-to-BLE module
+        // these printers use broadcasts only a generic name, keeping
+        // its actual GATT services hidden until after connection, so a
+        // services filter can never see it. optionalServices still
+        // has to list both UUID sets here, or the browser blocks
+        // access to those services after connecting even once the
+        // device itself is chosen.
         return navigator.bluetooth
           .requestDevice({
-            filters: [{ services: [BLE_SERVICE_UUID] }, { services: [BLE_SERVICE_UUID_ALT] }],
+            acceptAllDevices: true,
             optionalServices: [BLE_SERVICE_UUID, BLE_SERVICE_UUID_ALT],
           })
           .then(function (device) {
