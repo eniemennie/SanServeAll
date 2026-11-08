@@ -67,10 +67,43 @@ def _line(left, right="", width=RECEIPT_WIDTH_CHARS):
     return f"{left}{' ' * space}{right}"[:width]
 
 
+# Two fixed lines every printed receipt must carry, regardless of the
+# business's own configurable BusinessSettings.receipt_footer_text
+# (task tracker, 2026-11-08: "match the digital receipt" -- required
+# footer). The first one happens to be BusinessSettings.receipt_footer_text's
+# own default value, so a business left on that default would otherwise see
+# "Thank you for your purchase!" printed twice in a row; _required_footer_lines()
+# below skips the configurable line in that case rather than duplicate it.
+REQUIRED_FOOTER_LINES = (
+    "Thank you for your purchase!",
+    "This is just a supplementary receipt.",
+)
+
+
+def _required_footer_lines(configured_footer_text):
+    """Returns the footer lines to print, in order: the business's own
+    configured message first (if any, and only when it isn't already
+    identical to the first required line), then the two lines every
+    receipt must carry. Never recalculates or alters either value --
+    just decides whether the configured one is redundant."""
+    configured = (configured_footer_text or "").strip()
+    lines = []
+    if configured and configured != REQUIRED_FOOTER_LINES[0]:
+        lines.append(configured)
+    lines.extend(REQUIRED_FOOTER_LINES)
+    return lines
+
+
 def build_escpos_receipt(transaction):
     """Builds the raw ESC/POS byte sequence for a completed
-    SalesTransaction -- the same information shown on receipt.html,
-    formatted for a physical thermal printer instead of a browser."""
+    SalesTransaction -- the same information shown on receipt.html
+    (business info, branch, cashier, items, discount, VAT breakdown,
+    total, payment, change), formatted for a physical thermal printer
+    instead of a browser, plus the two required footer lines every
+    printed receipt must carry (task tracker, 2026-11-08: "match the
+    digital receipt"). All financial figures below are read straight
+    from the transaction's own model properties/methods -- the same
+    ones receipt.html uses -- never recalculated here."""
     from apps.system_config.models import BusinessSettings
 
     settings_obj = BusinessSettings.load()
@@ -85,6 +118,9 @@ def build_escpos_receipt(transaction):
 
     lines.append(_safe_ascii(f"Transaction #{transaction.pk}") + b"\n")
     lines.append(_safe_ascii(f"{transaction.completed_at:%Y-%m-%d %H:%M}") + b"\n")
+    lines.append(_safe_ascii(transaction.branch.name) + b"\n")
+    cashier_name = transaction.cashier.get_full_name() or transaction.cashier.username
+    lines.append(_safe_ascii(f"Cashier: {cashier_name}") + b"\n")
     lines.append(_safe_ascii("-" * RECEIPT_WIDTH_CHARS) + b"\n")
 
     lines.append(_ALIGN_LEFT)
@@ -94,6 +130,22 @@ def build_escpos_receipt(transaction):
         lines.append(_safe_ascii(_line(name, price)) + b"\n")
 
     lines.append(_safe_ascii("-" * RECEIPT_WIDTH_CHARS) + b"\n")
+    lines.append(_safe_ascii(_line("Subtotal", f"{currency}{transaction.total_amount}")) + b"\n")
+
+    # Discount and VAT breakdown: identical formulas/model calls to the
+    # ones apps/pos/views.py's receipt() view passes to receipt.html, so
+    # the printed figures can never drift from the digital ones.
+    discount_total = transaction.item_discounts_total + transaction.transaction_discount_value
+    if discount_total:
+        lines.append(_safe_ascii(_line("Discount", f"-{currency}{discount_total}")) + b"\n")
+    vat_exclusive, vat_amount = transaction.vat_breakdown(settings_obj.tax_rate_percent)
+    if vat_amount:
+        lines.append(_safe_ascii(_line("VATable Sales", f"{currency}{vat_exclusive}")) + b"\n")
+        tax_rate_label = f"VAT ({settings_obj.tax_rate_percent:.0f}%)"
+        lines.append(_safe_ascii(_line(tax_rate_label, f"{currency}{vat_amount}")) + b"\n")
+    else:
+        lines.append(_safe_ascii(_line("VAT-Exempt Sales", f"{currency}{vat_exclusive}")) + b"\n")
+
     lines.append(_BOLD_ON)
     lines.append(_safe_ascii(_line("TOTAL", f"{currency}{transaction.grand_total}")) + b"\n")
     lines.append(_BOLD_OFF)
@@ -101,9 +153,9 @@ def build_escpos_receipt(transaction):
     lines.append(_safe_ascii(_line("Paid", f"{currency}{transaction.amount_tendered}")) + b"\n")
     lines.append(_safe_ascii(_line("Change", f"{currency}{transaction.change_due}")) + b"\n")
 
-    if settings_obj.receipt_footer_text:
-        lines.append(_ALIGN_CENTER)
-        lines.append(_safe_ascii("\n" + settings_obj.receipt_footer_text) + b"\n")
+    lines.append(_ALIGN_CENTER)
+    footer_lines = _required_footer_lines(settings_obj.receipt_footer_text)
+    lines.append(_safe_ascii("\n" + "\n".join(footer_lines)) + b"\n")
 
     lines.append(_FEED_LINES)
     lines.append(_CUT)
