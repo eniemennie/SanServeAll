@@ -98,7 +98,7 @@
                 <th></th>
                 <th>Batch</th>
                 <th>Product</th>
-                <th class="text-end">Qty Produced</th>
+                <th class="text-center">Qty Produced</th>
                 <th>Quality</th>
                 <th>Status</th>
                 <th class="text-end pe-1">Actions</th>
@@ -121,7 +121,7 @@
                 </td>
                 <td>#{{ record.pk }}</td>
                 <td>{{ record.product.name }}</td>
-                <td class="text-end">{{ record.quantity_produced }}</td>
+                <td class="text-center">{{ record.quantity_produced }}</td>
                 <td>
                     <span class="jc-badge {% if record.quality == 'PASS' %}jc-badge-adequate{% elif record.quality == 'FAIL' %}jc-badge-critical{% else %}jc-badge-low{% endif %}">
                         {{ record.get_quality_display }}
