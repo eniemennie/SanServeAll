@@ -682,6 +682,112 @@ class TestBranchPerformance:
         assert rows[branch.pk]["revenue"] == pytest.approx(400.00)
 
 
+class TestSyntheticAndHistoricalImportRevenueHandling:
+    """Client review (2026-11-10): "Synthetic Backfill Bot" and
+    "historical_import_<branch>" were both showing up as ordinary
+    cashiers. Confirmed those two need OPPOSITE handling: the bot's
+    rows are forecast-only test data and must never count toward any
+    revenue/units/order total (see services._exclude_synthetic_
+    transactions); the historical_import rows are real, migrated sales
+    and must count exactly like a normal sale."""
+
+    @pytest.fixture
+    def bot(self):
+        role, _ = Role.objects.get_or_create(name=Role.OWNER_ADMIN)
+        return User.objects.create_user(
+            username=User.SYNTHETIC_BACKFILL_BOT_USERNAME, role=role, branch=None
+        )
+
+    @pytest.fixture
+    def historical_importer(self, branch):
+        role, _ = Role.objects.get_or_create(name=Role.BRANCH_STAFF)
+        return User.objects.create_user(
+            username="historical_import_lipa", role=role, branch=branch, is_active=False
+        )
+
+    def test_sales_summary_excludes_the_synthetic_bot(self, branch, cashier, bot, latte):
+        _completed_sale(
+            branch, cashier, latte, quantity=1, unit_price="125.00", amount_tendered="125.00"
+        )
+        _completed_sale(
+            branch, bot, latte, quantity=1, unit_price="125.00", amount_tendered="125.00"
+        )
+
+        summary = services.get_sales_summary(branch=branch)
+        assert summary["total_revenue"] == pytest.approx(125.00)
+        assert summary["total_transactions"] == 1
+        assert summary["total_units_sold"] == 1
+
+    def test_sales_summary_includes_real_historical_import_rows(
+        self, branch, cashier, historical_importer, latte
+    ):
+        _completed_sale(
+            branch, cashier, latte, quantity=1, unit_price="125.00", amount_tendered="125.00"
+        )
+        _completed_sale(
+            branch,
+            historical_importer,
+            latte,
+            quantity=1,
+            unit_price="125.00",
+            amount_tendered="125.00",
+        )
+
+        summary = services.get_sales_summary(branch=branch)
+        assert summary["total_revenue"] == pytest.approx(250.00)
+        assert summary["total_transactions"] == 2
+
+    def test_branch_performance_excludes_the_synthetic_bot(self, branch, cashier, bot, latte):
+        _completed_sale(
+            branch, cashier, latte, quantity=2, unit_price="125.00", amount_tendered="250.00"
+        )
+        _completed_sale(
+            branch, bot, latte, quantity=10, unit_price="125.00", amount_tendered="1250.00"
+        )
+
+        rows = {r["branch"].pk: r for r in services.get_branch_performance()}
+        assert rows[branch.pk]["revenue"] == pytest.approx(250.00)
+        assert rows[branch.pk]["units_sold"] == 2
+        assert rows[branch.pk]["orders"] == 1
+
+    def test_branch_performance_includes_real_historical_import_rows(
+        self, branch, historical_importer, latte
+    ):
+        _completed_sale(
+            branch,
+            historical_importer,
+            latte,
+            quantity=3,
+            unit_price="125.00",
+            amount_tendered="375.00",
+        )
+
+        rows = {r["branch"].pk: r for r in services.get_branch_performance()}
+        assert rows[branch.pk]["revenue"] == pytest.approx(375.00)
+        assert rows[branch.pk]["units_sold"] == 3
+
+    def test_top_products_excludes_the_synthetic_bot(self, branch, cashier, bot, latte):
+        _completed_sale(
+            branch, cashier, latte, quantity=1, unit_price="125.00", amount_tendered="125.00"
+        )
+        _completed_sale(
+            branch, bot, latte, quantity=50, unit_price="125.00", amount_tendered="6250.00"
+        )
+
+        top = {row["product__id"]: row for row in services.get_top_products(branch=branch)}
+        assert top[latte.pk]["units_sold"] == 1
+
+    def test_total_units_sold_excludes_the_synthetic_bot(self, branch, cashier, bot, latte):
+        _completed_sale(
+            branch, cashier, latte, quantity=1, unit_price="125.00", amount_tendered="125.00"
+        )
+        _completed_sale(
+            branch, bot, latte, quantity=50, unit_price="125.00", amount_tendered="6250.00"
+        )
+
+        assert services.get_total_units_sold(branch=branch) == 1
+
+
 class TestSalesSummaryWithToggles:
     """Dashboard Home batch: the three real Total Revenue toggles."""
 
