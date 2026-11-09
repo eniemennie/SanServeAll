@@ -3,14 +3,18 @@
 {% block admin_content %}
 
 {% comment %}
-  UI/UX review (2026-11-05): "New Supplier" now opens from a button
-  instead of always occupying half the screen -- the form itself,
-  field-for-field, is unchanged. It auto-expands when there's a
-  validation error to show, or when there are no suppliers yet, so
-  nothing that used to be immediately visible becomes harder to find.
-  A lightweight client-side status filter (All / Active / Inactive) was
-  also added above the table -- it only shows/hides rows already in the
-  page; the query behind `suppliers` is untouched.
+  Client review (2026-11-09), Suppliers page layout improvement:
+  "New Supplier" moved from an always-reachable collapse panel into a
+  true Bootstrap modal, so the supplier list is the page's main
+  content. The list gained Materials Supplied (count) and Phone/Email
+  columns plus View/Edit/Deactivate actions; View and Edit are also
+  modals (no new pages). A search box was added alongside the existing
+  client-side status filter -- both only show/hide rows already in the
+  page; the `suppliers` queryset itself (now annotated with
+  materials_supplied_count/purchase_order_count -- see
+  views._build_supplier_list_context) is otherwise untouched, and
+  nothing here changes PurchaseOrder logic or existing supplier
+  records.
 {% endcomment %}
 
 <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
@@ -22,12 +26,12 @@
         </p>
     </div>
     <button type="button" class="btn btn-sm flex-shrink-0" style="background: var(--jc-orange); color: #fff;"
-            data-bs-toggle="collapse" data-bs-target="#newSupplierForm" aria-expanded="{% if error or not suppliers %}true{% else %}false{% endif %}" aria-controls="newSupplierForm">
+            data-bs-toggle="modal" data-bs-target="#newSupplierModal">
         + Add Supplier
     </button>
 </div>
 
-{% if error %}
+{% if error and not edit_error_supplier_id %}
 <div class="alert alert-danger py-2">{{ error }}</div>
 {% endif %}
 
@@ -35,69 +39,36 @@
 <div class="alert alert-success py-2">Supplier <strong>{{ created_name }}</strong> added.</div>
 {% endif %}
 
-<div class="collapse mb-4{% if error or not suppliers %} show{% endif %}" id="newSupplierForm">
-    <div class="jc-card p-4" style="max-width: 560px;">
-        <h2 class="h6 mb-3">New Supplier</h2>
-        <form method="post">
-            {% csrf_token %}
-            <div class="mb-3">
-                <label class="form-label small fw-semibold">Name</label>
-                <input type="text" name="name" class="form-control" required autofocus>
-            </div>
-            <div class="mb-3">
-                <label class="form-label small fw-semibold">Contact Person</label>
-                <input type="text" name="contact_person" class="form-control">
-            </div>
-            <div class="row g-2 mb-3">
-                <div class="col-6">
-                    <label class="form-label small fw-semibold">Phone Number</label>
-                    <input type="text" name="phone_number" class="form-control">
-                </div>
-                <div class="col-6">
-                    <label class="form-label small fw-semibold">Email</label>
-                    <input type="email" name="email" class="form-control">
-                </div>
-            </div>
-            <div class="mb-3">
-                <label class="form-label small fw-semibold">Address</label>
-                <input type="text" name="address" class="form-control">
-            </div>
-            <div class="mb-4">
-                <label class="form-label small fw-semibold">Notes</label>
-                <textarea name="notes" class="form-control" rows="2" placeholder="Payment terms, lead times, etc."></textarea>
-            </div>
-            <button type="submit" class="btn" style="background: var(--jc-orange); color: #fff;">
-                Add Supplier
-            </button>
-        </form>
-    </div>
-</div>
-
 <div class="jc-card p-0">
-    <div class="d-flex align-items-center gap-2 p-3 pb-0" role="group" aria-label="Filter suppliers by status">
+    <div class="d-flex align-items-center gap-2 p-3 pb-0 flex-wrap" role="group" aria-label="Filter and search suppliers">
         <span class="text-muted small fw-semibold me-1">Show:</span>
         <button type="button" class="btn btn-sm btn-outline-secondary jc-supplier-filter-btn active" data-filter="all">All</button>
         <button type="button" class="btn btn-sm btn-outline-secondary jc-supplier-filter-btn" data-filter="active">Active</button>
         <button type="button" class="btn btn-sm btn-outline-secondary jc-supplier-filter-btn" data-filter="inactive">Inactive</button>
+        <input type="search" id="jc-supplier-search" class="form-control form-control-sm ms-auto" style="max-width: 220px;"
+               placeholder="Search suppliers...">
     </div>
     <table class="table mb-0" id="jc-supplier-table">
         <thead>
             <tr>
-                <th>Name</th>
-                <th>Contact</th>
+                <th>Supplier Name</th>
+                <th>Contact Person</th>
                 <th>Phone</th>
                 <th>Email</th>
+                <th>Materials Supplied</th>
                 <th>Status</th>
-                <th></th>
+                <th class="text-end">Actions</th>
             </tr>
         </thead>
         <tbody>
             {% for supplier in suppliers %}
-            <tr data-status="{% if supplier.is_active %}active{% else %}inactive{% endif %}">
+            <tr data-status="{% if supplier.is_active %}active{% else %}inactive{% endif %}"
+                data-search="{{ supplier.name|lower }} {{ supplier.contact_person|lower }} {{ supplier.email|lower }}">
                 <td>{{ supplier.name }}</td>
                 <td>{{ supplier.contact_person|default:"&mdash;" }}</td>
                 <td>{{ supplier.phone_number|default:"&mdash;" }}</td>
                 <td>{{ supplier.email|default:"&mdash;" }}</td>
+                <td>{{ supplier.materials_supplied_count }}</td>
                 <td>
                     {% if supplier.is_active %}
                     <span class="jc-badge jc-badge-adequate">Active</span>
@@ -106,25 +77,204 @@
                     {% endif %}
                 </td>
                 <td class="text-end">
-                    <form method="post" action="{% url 'purchasing:supplier_toggle_active' supplier.pk %}">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-sm btn-outline-secondary">
-                            {% if supplier.is_active %}Deactivate{% else %}Reactivate{% endif %}
+                    <div class="d-inline-flex gap-1">
+                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                data-bs-toggle="modal" data-bs-target="#viewSupplierModal{{ supplier.pk }}">
+                            View
                         </button>
-                    </form>
+                        <button type="button" class="btn btn-sm btn-outline-secondary"
+                                data-bs-toggle="modal" data-bs-target="#editSupplierModal{{ supplier.pk }}">
+                            Edit
+                        </button>
+                        <form method="post" action="{% url 'purchasing:supplier_toggle_active' supplier.pk %}">
+                            {% csrf_token %}
+                            <button type="submit" class="btn btn-sm btn-outline-secondary">
+                                {% if supplier.is_active %}Deactivate{% else %}Reactivate{% endif %}
+                            </button>
+                        </form>
+                    </div>
                 </td>
             </tr>
             {% empty %}
             <tr>
-                <td colspan="6" class="text-muted text-center py-4">No suppliers yet.</td>
+                <td colspan="7" class="text-center py-5">
+                    <div class="text-muted mb-2" style="font-size: 2rem;" aria-hidden="true">&#128230;</div>
+                    <p class="text-muted mb-3">No suppliers yet. Add the businesses you buy materials from.</p>
+                    <button type="button" class="btn btn-sm" style="background: var(--jc-orange); color: #fff;"
+                            data-bs-toggle="modal" data-bs-target="#newSupplierModal">
+                        Add your first supplier
+                    </button>
+                </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
     <p class="text-muted small text-center py-3 mb-0 d-none" id="jc-supplier-filter-empty">
-        No suppliers match this filter.
+        No suppliers match this filter or search.
     </p>
 </div>
+
+<!-- New Supplier modal (client review, 2026-11-09): same fields/validation
+     as before, now opened from a modal instead of an always-reachable
+     collapse panel. Auto-reopens on a create validation error. -->
+<div class="modal fade{% if error and not edit_error_supplier_id %} show d-block{% endif %}" id="newSupplierModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form method="post">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title">New Supplier</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    {% if error and not edit_error_supplier_id %}
+                    <div class="alert alert-danger py-2">{{ error }}</div>
+                    {% endif %}
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Name</label>
+                        <input type="text" name="name" class="form-control" required autofocus>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Contact Person</label>
+                        <input type="text" name="contact_person" class="form-control">
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label small fw-semibold">Phone Number</label>
+                            <input type="text" name="phone_number" class="form-control">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small fw-semibold">Email</label>
+                            <input type="email" name="email" class="form-control">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Address</label>
+                        <input type="text" name="address" class="form-control">
+                    </div>
+                    <div class="mb-0">
+                        <label class="form-label small fw-semibold">Notes</label>
+                        <textarea name="notes" class="form-control" rows="2" placeholder="Payment terms, lead times, etc."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn" style="background: var(--jc-orange); color: #fff;">
+                        Add Supplier
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{% for supplier in suppliers %}
+<!-- View Supplier modal: read-only detail, no new page/URL. -->
+<div class="modal fade" id="viewSupplierModal{{ supplier.pk }}" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">{{ supplier.name }}</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <dl class="row mb-0 small">
+                    <dt class="col-5 text-muted">Contact Person</dt>
+                    <dd class="col-7">{{ supplier.contact_person|default:"&mdash;" }}</dd>
+                    <dt class="col-5 text-muted">Phone</dt>
+                    <dd class="col-7">{{ supplier.phone_number|default:"&mdash;" }}</dd>
+                    <dt class="col-5 text-muted">Email</dt>
+                    <dd class="col-7">{{ supplier.email|default:"&mdash;" }}</dd>
+                    <dt class="col-5 text-muted">Address</dt>
+                    <dd class="col-7">{{ supplier.address|default:"&mdash;" }}</dd>
+                    <dt class="col-5 text-muted">Notes</dt>
+                    <dd class="col-7">{{ supplier.notes|default:"&mdash;" }}</dd>
+                    <dt class="col-5 text-muted">Status</dt>
+                    <dd class="col-7">
+                        {% if supplier.is_active %}
+                        <span class="jc-badge jc-badge-adequate">Active</span>
+                        {% else %}
+                        <span class="jc-badge jc-badge-critical">Inactive</span>
+                        {% endif %}
+                    </dd>
+                    <dt class="col-5 text-muted">Purchase Orders Placed</dt>
+                    <dd class="col-7">{{ supplier.purchase_order_count }}</dd>
+                    <dt class="col-5 text-muted">Materials Supplied</dt>
+                    <dd class="col-7">
+                        {% if supplier.materials_supplied_names %}
+                        {{ supplier.materials_supplied_names|join:", " }}
+                        {% else %}
+                        &mdash;
+                        {% endif %}
+                    </dd>
+                </dl>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Supplier modal: same fields/validation as New Supplier, reusing
+     this list-and-edit-on-one-page convention. Reopens with the
+     submitted values preserved if the edit itself had an error. -->
+<div class="modal fade{% if edit_error_supplier_id == supplier.pk %} show d-block{% endif %}" id="editSupplierModal{{ supplier.pk }}" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form method="post" action="{% url 'purchasing:supplier_edit' supplier.pk %}">
+                {% csrf_token %}
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit {{ supplier.name }}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    {% if edit_error_supplier_id == supplier.pk %}
+                    <div class="alert alert-danger py-2">{{ error }}</div>
+                    {% endif %}
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Name</label>
+                        <input type="text" name="name" class="form-control" required
+                               value="{% if edit_error_supplier_id == supplier.pk %}{{ edit_form_values.name }}{% else %}{{ supplier.name }}{% endif %}">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Contact Person</label>
+                        <input type="text" name="contact_person" class="form-control"
+                               value="{% if edit_error_supplier_id == supplier.pk %}{{ edit_form_values.contact_person }}{% else %}{{ supplier.contact_person }}{% endif %}">
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-6">
+                            <label class="form-label small fw-semibold">Phone Number</label>
+                            <input type="text" name="phone_number" class="form-control"
+                                   value="{% if edit_error_supplier_id == supplier.pk %}{{ edit_form_values.phone_number }}{% else %}{{ supplier.phone_number }}{% endif %}">
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small fw-semibold">Email</label>
+                            <input type="email" name="email" class="form-control"
+                                   value="{% if edit_error_supplier_id == supplier.pk %}{{ edit_form_values.email }}{% else %}{{ supplier.email }}{% endif %}">
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Address</label>
+                        <input type="text" name="address" class="form-control"
+                               value="{% if edit_error_supplier_id == supplier.pk %}{{ edit_form_values.address }}{% else %}{{ supplier.address }}{% endif %}">
+                    </div>
+                    <div class="mb-0">
+                        <label class="form-label small fw-semibold">Notes</label>
+                        <textarea name="notes" class="form-control" rows="2">{% if edit_error_supplier_id == supplier.pk %}{{ edit_form_values.notes }}{% else %}{{ supplier.notes }}{% endif %}</textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn" style="background: var(--jc-orange); color: #fff;">
+                        Save Changes
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endfor %}
 
 {% endblock %}
 
@@ -134,26 +284,39 @@
   (function () {
     var buttons = document.querySelectorAll('.jc-supplier-filter-btn');
     var rows = document.querySelectorAll('#jc-supplier-table tbody tr[data-status]');
+    var searchInput = document.getElementById('jc-supplier-search');
     var emptyMessage = document.getElementById('jc-supplier-filter-empty');
-    if (!buttons.length || !rows.length) return;
+    if (!rows.length) return;
+
+    var activeFilter = 'all';
+
+    function applyFilters() {
+      var query = (searchInput && searchInput.value || '').trim().toLowerCase();
+      var visibleCount = 0;
+      rows.forEach(function (row) {
+        var matchesStatus = activeFilter === 'all' || row.getAttribute('data-status') === activeFilter;
+        var matchesSearch = !query || (row.getAttribute('data-search') || '').indexOf(query) !== -1;
+        var show = matchesStatus && matchesSearch;
+        row.classList.toggle('d-none', !show);
+        if (show) visibleCount += 1;
+      });
+      if (emptyMessage) {
+        emptyMessage.classList.toggle('d-none', visibleCount !== 0);
+      }
+    }
 
     buttons.forEach(function (button) {
       button.addEventListener('click', function () {
         buttons.forEach(function (b) { b.classList.remove('active'); });
         button.classList.add('active');
-
-        var filter = button.getAttribute('data-filter');
-        var visibleCount = 0;
-        rows.forEach(function (row) {
-          var show = filter === 'all' || row.getAttribute('data-status') === filter;
-          row.classList.toggle('d-none', !show);
-          if (show) visibleCount += 1;
-        });
-        if (emptyMessage) {
-          emptyMessage.classList.toggle('d-none', visibleCount !== 0);
-        }
+        activeFilter = button.getAttribute('data-filter');
+        applyFilters();
       });
     });
+
+    if (searchInput) {
+      searchInput.addEventListener('input', applyFilters);
+    }
   })();
 </script>
 {% endblock %}
