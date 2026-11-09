@@ -680,9 +680,9 @@ class TestProductManagementView:
         assert product.unit_of_measure == Product.UnitOfMeasure.KILOGRAM
 
     def test_owner_can_add_a_new_packaging_material_directly(self, owner_client, branch):
-        """Client review (2026-11-09): Packaging Material is now its own
-        choice in the Type dropdown -- adding one straight from this form
-        no longer needs a separate Category field or tag."""
+        """Client review (2026-11-09): Packaging Material is its own
+        choice in the Add Product form's Category dropdown -- adding one
+        straight from this form no longer needs a separate category tag."""
         response = owner_client.post(
             reverse("inventory:product_management"),
             {
@@ -696,6 +696,90 @@ class TestProductManagementView:
         product = Product.objects.get(name="Cling Wrap")
         assert product.product_type == Product.ProductType.PACKAGING
         assert product.category == ""
+
+    def test_add_product_category_dropdown_matches_the_tabs_exactly(self, owner_client):
+        """Client review (2026-11-09): the Add Product form's single
+        "Category" dropdown must offer exactly the same three options,
+        with exactly the same values, as the page's own tabs -- both are
+        now built from the one shared services.PRODUCT_AVAILABILITY_TABS
+        list, so they structurally cannot disagree."""
+        response = owner_client.get(reverse("inventory:product_management"))
+        assert list(response.context["tab_choices"]) == [
+            ("", "Finished Products"),
+            ("MATERIAL", "Raw Materials"),
+            ("PACKAGING", "Packaging Materials"),
+        ]
+
+        content = response.content.decode()
+        # The dropdown has exactly one <select name="product_type"> --
+        # the old separate "Type" dropdown is gone.
+        assert content.count('<select name="product_type"') == 1
+
+    def test_add_product_category_defaults_to_the_current_tab(self, owner_client):
+        """Client review (2026-11-09): opening the Add Product form from
+        the Packaging Materials tab should default its Category dropdown
+        to Packaging Materials, not silently fall back to Finished
+        Products -- avoids a click adding the wrong type by accident."""
+        response = owner_client.get(reverse("inventory:product_management"), {"type": "PACKAGING"})
+        content = response.content.decode()
+        select_start = content.index('<select name="product_type"')
+        select_html = content[select_start:].split("</select>")[0] + "</option>"
+        options = re.findall(r'<option value="([^"]*)"([^>]*)>([^<]*)</option>', select_html)
+        selected = {value for value, attrs, _ in options if "selected" in attrs}
+        assert selected == {"PACKAGING"}
+
+    def test_posting_a_blank_category_creates_a_finished_product(self, owner_client, branch):
+        """Client review (2026-11-09): the Category dropdown's Finished
+        Products option submits product_type="" (matching the tabs' own
+        ?type= convention) -- this must still resolve to a real
+        FINISHED_GOOD product, not an empty/invalid product_type."""
+        response = owner_client.post(
+            reverse("inventory:product_management"),
+            {
+                "name": "Blueberry Muffin",
+                "price": "65.00",
+                "product_type": "",
+                "branches": [branch.pk],
+            },
+        )
+        assert response.status_code == 302
+        product = Product.objects.get(name="Blueberry Muffin")
+        assert product.product_type == Product.ProductType.FINISHED_GOOD
+
+    def test_rejects_an_unrecognized_product_type_from_a_tampered_form(self, owner_client, branch):
+        """Defense-in-depth (client review, 2026-11-09): with the old
+        separate Type dropdown gone, a bad product_type can now only
+        reach create_product through a hand-edited/tampered POST -- it
+        must be rejected with a clear error rather than silently saved,
+        the same as an unrecognized unit_of_measure already is."""
+        response = owner_client.post(
+            reverse("inventory:product_management"),
+            {
+                "name": "Mystery Item",
+                "price": "10.00",
+                "product_type": "NOT_A_REAL_TYPE",
+                "branches": [branch.pk],
+            },
+        )
+        assert response.status_code == 200
+        assert not Product.objects.filter(name="Mystery Item").exists()
+        assert "not a recognized product type" in response.context["error"]
+
+    def test_add_product_form_stays_open_after_a_rejected_submission(self, owner_client, branch):
+        """The Add Product section is collapsed by default (client
+        review, 2026-11-09) -- but a failed submission must re-open it
+        along with the error, not hide both behind a closed toggle the
+        owner has to know to click again."""
+        response = owner_client.post(
+            reverse("inventory:product_management"),
+            {"name": "", "price": "10.00", "product_type": "", "branches": [branch.pk]},
+        )
+        content = response.content.decode()
+        assert response.context["error"]
+        tag_start = content.rindex("<div", 0, content.index('id="add-product-form"'))
+        tag_end = content.index(">", tag_start)
+        opening_tag = content[tag_start:tag_end]
+        assert "show" in opening_tag
 
     def test_adding_a_product_provisions_it_only_at_the_selected_branch(
         self, owner_client, branch, other_branch
@@ -1181,6 +1265,58 @@ class TestProductAvailabilityEnhancements:
         assert product_names == {"Cling Wrap"}
         assert response.context["active_tab"] == "packaging"
         assert b"Packaging Materials" in response.content
+
+    def test_packaging_item_label_shows_packaging_material_not_raw_material(
+        self, owner_client, branch, other_branch
+    ):
+        """Client review (2026-11-09): items like "8x8x2 Blue Box" and
+        "Kraft Paper Bag" were seen on the Packaging Materials tab still
+        labeled "Raw Material · 2 branches". The label is driven
+        entirely by get_product_type_display() on the item's real
+        product_type (see the template), so once a product genuinely has
+        product_type=PACKAGING (as the 0022 data migration ensures for
+        every pre-existing item this tab shows), the label is correct by
+        construction -- this locks that in across more than one branch,
+        the exact shape the live report described."""
+        blue_box = Product.objects.create(
+            name="8x8x2 Blue Box", price="22.00", product_type=Product.ProductType.PACKAGING
+        )
+        Inventory.objects.create(branch=branch, product=blue_box, quantity_on_hand=50)
+        Inventory.objects.create(branch=other_branch, product=blue_box, quantity_on_hand=30)
+
+        response = owner_client.get(reverse("inventory:product_management"), {"type": "PACKAGING"})
+        content = response.content.decode()
+        assert "Packaging Material &middot;" in content or "Packaging Material ·" in content
+        assert "Raw Material &middot;" not in content
+        assert "Raw Material ·" not in content
+
+    def test_total_products_card_and_item_count_use_the_same_definition(
+        self, owner_client, branch, other_branch
+    ):
+        """Client review (2026-11-09): "Total Products" and the small
+        count next to the Filter button must agree -- both now count
+        distinct products (product_groups), not one per branch-level
+        Inventory row, so a product stocked at two branches (a very
+        common shape for Packaging Materials) doesn't make the two
+        numbers on this page look inconsistent with each other."""
+        blue_box = Product.objects.create(
+            name="8x8x2 Blue Box", price="22.00", product_type=Product.ProductType.PACKAGING
+        )
+        kraft_bag = Product.objects.create(
+            name="Kraft Paper Bag", price="3.00", product_type=Product.ProductType.PACKAGING
+        )
+        # Two Inventory rows for the same product (two branches) --
+        # if the item count were still per-branch-row, it would read 3
+        # while Total Products reads 2.
+        Inventory.objects.create(branch=branch, product=blue_box, quantity_on_hand=50)
+        Inventory.objects.create(branch=other_branch, product=blue_box, quantity_on_hand=30)
+        Inventory.objects.create(branch=branch, product=kraft_bag, quantity_on_hand=100)
+
+        response = owner_client.get(reverse("inventory:product_management"), {"type": "PACKAGING"})
+        assert response.context["stats"]["total_products"] == 2
+        content = response.content.decode()
+        assert "2 products" in content
+        assert "3 item" not in content
 
     def test_packaging_materials_tab_link_is_marked_active(self, owner_client, branch):
         response = owner_client.get(reverse("inventory:product_management"), {"type": "PACKAGING"})

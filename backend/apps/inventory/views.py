@@ -72,10 +72,25 @@ def product_management(request):
                 raise services.InventoryServiceError(
                     "Select at least one branch to add this product to."
                 )
+            # Client review (2026-11-09): the Add Product form's single
+            # "Category" dropdown reuses the same `product_type` POST
+            # field name the old "Type" dropdown used, and the same
+            # empty-string-means-Finished-Products convention the page's
+            # own tabs already use (see PRODUCT_AVAILABILITY_TABS) -- an
+            # explicitly empty value is "Finished Products", not "no
+            # value was submitted", so `.get(..., default)` alone
+            # wouldn't apply the default here (a <select> always submits
+            # some value). `or` handles both that and a genuinely missing
+            # field the same way, and existing callers that already post
+            # a real value (FINISHED_GOOD/MATERIAL/PACKAGING) are
+            # unaffected either way.
+            submitted_product_type = request.POST.get("product_type") or (
+                Product.ProductType.FINISHED_GOOD
+            )
             services.create_product(
                 name=request.POST.get("name"),
                 price=request.POST.get("price") or 0,
-                product_type=request.POST.get("product_type", Product.ProductType.FINISHED_GOOD),
+                product_type=submitted_product_type,
                 reorder_threshold=request.POST.get("reorder_threshold") or 0,
                 branch_ids=branch_ids,
                 unit_of_measure=request.POST.get("unit_of_measure"),
@@ -128,10 +143,21 @@ def product_management(request):
     # Raw Materials any more.
     if effective_product_type == Product.ProductType.PACKAGING:
         active_tab = "packaging"
+        selected_tab_value = Product.ProductType.PACKAGING
     elif effective_product_type == Product.ProductType.MATERIAL:
         active_tab = "materials"
+        selected_tab_value = Product.ProductType.MATERIAL
     else:
+        # Client review (2026-11-09): any value that isn't one of the
+        # other two tabs -- including a missing/empty `type`, or an
+        # unrecognized one from a hand-edited query string -- falls
+        # back to the Finished Products tab (see effective_product_type
+        # above), so its own tab value ("") is what should read as
+        # selected here too, not the raw (possibly garbage) `type`
+        # param -- this is also what the Add Product form's Category
+        # dropdown defaults to below.
         active_tab = "finished"
+        selected_tab_value = ""
 
     # Task #148 (client review, 2026-11-04): category options depend on
     # which type tab is active -- a finished-goods category (Coffee,
@@ -150,6 +176,7 @@ def product_management(request):
             "selected_type": product_type,
             "selected_category": category,
             "active_tab": active_tab,
+            "selected_tab_value": selected_tab_value,
             "category_choices": category_choices,
             "search": search,
             "items": availability["items"],
@@ -161,7 +188,12 @@ def product_management(request):
             "stats": availability["stats"],
             "quick_sale_amounts": [1, 2, 5],
             "error": error,
-            "product_types": Product.ProductType.choices,
+            # Client review (2026-11-09): the page's own three tabs and
+            # the Add Product form's "Category" dropdown are now built
+            # from this exact same list (see its own docstring in
+            # services.py), so they can't drift apart the way the old
+            # separate "Type" + "Category" dropdowns did.
+            "tab_choices": services.PRODUCT_AVAILABILITY_TABS,
             "unit_choices": Product.UnitOfMeasure.choices,
         },
     )

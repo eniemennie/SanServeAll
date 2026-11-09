@@ -7,6 +7,22 @@ from decimal import Decimal, InvalidOperation
 
 from apps.inventory.models import Inventory, InventoryTransaction, Product
 
+# Client review (2026-11-09): the single source of truth for the three
+# Product Availability tabs (Finished Products/Raw Materials/Packaging
+# Materials) -- both the page's own tab links AND the Add Product form's
+# "Category" dropdown are built from this exact list, so the two can
+# never drift apart again the way the old separate "Type" dropdown and
+# "Category" (Raw Material (Food)/Packaging) dropdown did. The empty
+# string for Finished Products matches the tabs' own long-standing
+# ?type= convention (an empty/missing `type` query param means the
+# Finished Products tab -- see product_management's own
+# effective_product_type comment).
+PRODUCT_AVAILABILITY_TABS = (
+    ("", "Finished Products"),
+    (Product.ProductType.MATERIAL, "Raw Materials"),
+    (Product.ProductType.PACKAGING, "Packaging Materials"),
+)
+
 
 def get_product_availability(branch=None, product_type=None, category=None, search=""):
     """Product Availability screen (Fig. 3-34), enhanced beyond the bare
@@ -381,6 +397,17 @@ def create_product(
     # IntegrityError the view's except clause doesn't catch.
     if Product.objects.filter(name__iexact=name, is_active=True).exists():
         raise InventoryServiceError(f"A product named '{name}' already exists.")
+
+    # Client review (2026-11-09): the Add Product form's "Category"
+    # dropdown is now the single, direct source of product_type (see
+    # PRODUCT_AVAILABILITY_TABS) -- there's no longer a second "Type"
+    # field that could disagree with it, but this still guards against
+    # an unrecognized value reaching here some other way (a hand-edited
+    # form POST, a future caller), the same defense-in-depth as the
+    # unit_of_measure check just below.
+    valid_product_types = {choice.value for choice in Product.ProductType}
+    if product_type not in valid_product_types:
+        raise InventoryServiceError(f"'{product_type}' is not a recognized product type.")
 
     if unit_of_measure:
         valid_units = {choice.value for choice in Product.UnitOfMeasure}

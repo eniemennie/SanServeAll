@@ -47,14 +47,13 @@
 </div>
 
 <div class="d-flex gap-2 mb-3">
-    <a href="?type=" class="btn btn-sm {% if active_tab == 'finished' %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">Finished Products</a>
-    <!-- Client review (2026-11-09): Packaging Material is now its own
-         product_type (promoted from a category tag on a Raw Material
-         row), so each tab here is simply its own explicit ?type= --
-         there's no longer a category sentinel needed to tell Raw
-         Materials and Packaging Materials apart. -->
-    <a href="?type=MATERIAL" class="btn btn-sm {% if active_tab == 'materials' %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">Raw Materials</a>
-    <a href="?type=PACKAGING" class="btn btn-sm {% if active_tab == 'packaging' %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">Packaging Materials</a>
+    <!-- Client review (2026-11-09): built from tab_choices (see
+         services.PRODUCT_AVAILABILITY_TABS) rather than three separate
+         hand-written links, so this list and the Add Product form's
+         "Category" dropdown below can never drift apart again. -->
+    {% for value, label in tab_choices %}
+    <a href="?type={{ value }}" class="btn btn-sm {% if selected_tab_value == value %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">{{ label }}</a>
+    {% endfor %}
 </div>
 
 <div class="jc-card p-3 p-md-4 mb-4">
@@ -85,7 +84,14 @@
             <button type="submit" class="btn btn-sm btn-outline-secondary w-100">Filter</button>
         </div>
         <div class="col-md-1 text-end text-md-start">
-            <span class="text-muted small text-nowrap">{{ items|length }} item{{ items|length|pluralize }}</span>
+            <!-- Client review (2026-11-09): matches "Total Products"
+                 above -- one count per distinct Product, not one per
+                 branch-level Inventory row (product_groups), so the two
+                 numbers on this page never look inconsistent with each
+                 other on a multi-branch tab. Labeled explicitly as
+                 "product(s)" (not the ambiguous "item(s)" the per-
+                 branch-row count used) for the same reason. -->
+            <span class="text-muted small text-nowrap">{{ product_groups|length }} product{{ product_groups|length|pluralize }}</span>
         </div>
     </form>
 </div>
@@ -187,51 +193,83 @@
 </div>
 
 <div class="jc-card p-3 p-md-4">
-    <div class="fw-semibold mb-2">Add Product</div>
-    <form method="post" class="row g-2 align-items-end">
-        {% csrf_token %}
-        <div class="col-md-3">
-            <label class="form-label small">Name</label>
-            <input type="text" name="name" class="form-control form-control-sm" required>
-        </div>
-        <div class="col-md-2">
-            <label class="form-label small">Price</label>
-            <input type="number" name="price" step="0.01" min="0" class="form-control form-control-sm" required>
-        </div>
-        <div class="col-md-2">
-            <label class="form-label small">Type</label>
-            <select name="product_type" class="form-select form-select-sm">
-                {% for value, label in product_types %}
-                <option value="{{ value }}">{{ label }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        <div class="col-md-2">
-            <label class="form-label small">Unit</label>
-            <select name="unit_of_measure" class="form-select form-select-sm">
-                {% for value, label in unit_choices %}
-                <option value="{{ value }}">{{ label }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        <div class="col-md-2">
-            <label class="form-label small">Reorder At</label>
-            <input type="number" name="reorder_threshold" min="0" step="0.01" value="0" class="form-control form-control-sm">
-        </div>
-        <div class="col-12">
-            <label class="form-label small d-block">Available at</label>
-            {% for b in branches %}
-            <div class="form-check form-check-inline">
-                <input class="form-check-input" type="checkbox" name="branches" value="{{ b.pk }}" id="branch-{{ b.pk }}">
-                <label class="form-check-label small" for="branch-{{ b.pk }}">{{ b.name }}</label>
+    <!-- Client review (2026-11-09): collapsed by default -- Add Product
+         is an occasional action, not something that needs to stay open
+         and take up space every time someone just wants to look at the
+         table above. The toggle mirrors the exact same Bootstrap
+         data-bs-toggle="collapse" pattern the per-product row grouping
+         above already uses. -->
+    <button type="button" class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1"
+            data-bs-toggle="collapse" data-bs-target="#add-product-form" aria-expanded="{% if error %}true{% else %}false{% endif %}"
+            aria-controls="add-product-form">
+        <span class="jc-attention-toggle-icon">&#9656;</span>
+        <span class="fw-semibold">+ Add Product</span>
+    </button>
+    <!-- Stays open on reload if this form's own POST just failed
+         validation (`error`) -- otherwise a rejected submission would
+         silently re-collapse the form the error is actually about,
+         hiding both the message and what was typed. -->
+    <div class="collapse mt-3 {% if error %}show{% endif %}" id="add-product-form">
+        <form method="post" class="row g-3">
+            {% csrf_token %}
+            <!-- Row 1: Name (wide) | Category -->
+            <div class="col-md-8">
+                <label class="form-label small">Name <span class="text-danger">*</span></label>
+                <input type="text" name="name" class="form-control form-control-sm" required>
             </div>
-            {% endfor %}
-            <div class="form-text">Pick at least one branch -- the product is only stocked and orderable at the branches selected here.</div>
-        </div>
-        <div class="col-md-1">
-            <button type="submit" class="btn btn-sm w-100" style="background: var(--jc-orange); color: #fff;">Add</button>
-        </div>
-    </form>
+            <div class="col-md-4">
+                <!-- Client review (2026-11-09): one "Category" dropdown,
+                     built from the exact same tab_choices the page's own
+                     tabs use above -- replaces the old separate "Type"
+                     dropdown (Finished Good/Raw Material/Packaging
+                     Material) and "Category" dropdown (Raw Material
+                     (Food)/Packaging), which didn't agree with the tabs
+                     or with each other and could save a conflicting
+                     combination (e.g. Finished Good tagged Packaging).
+                     Submits as `product_type`, same field name and same
+                     values (""/MATERIAL/PACKAGING) the tabs' own ?type=
+                     already uses, so there's exactly one type value per
+                     product and no way to mismatch it. -->
+                <label class="form-label small">Category <span class="text-danger">*</span></label>
+                <select name="product_type" class="form-select form-select-sm" required>
+                    {% for value, label in tab_choices %}
+                    <option value="{{ value }}" {% if selected_tab_value == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <!-- Row 2: Price | Unit | Reorder At -->
+            <div class="col-md-4">
+                <label class="form-label small">Price <span class="text-danger">*</span></label>
+                <input type="number" name="price" step="0.01" min="0" class="form-control form-control-sm" required>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small">Unit</label>
+                <select name="unit_of_measure" class="form-select form-select-sm">
+                    {% for value, label in unit_choices %}
+                    <option value="{{ value }}">{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small">Reorder At</label>
+                <input type="number" name="reorder_threshold" min="0" step="0.01" value="0" class="form-control form-control-sm">
+            </div>
+            <!-- Row 3: Available at -->
+            <div class="col-12">
+                <label class="form-label small d-block">Available at <span class="text-danger">*</span></label>
+                {% for b in branches %}
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="checkbox" name="branches" value="{{ b.pk }}" id="branch-{{ b.pk }}">
+                    <label class="form-check-label small" for="branch-{{ b.pk }}">{{ b.name }}</label>
+                </div>
+                {% endfor %}
+                <div class="form-text">Pick at least one branch -- the product is only stocked and orderable at the branches selected here.</div>
+            </div>
+            <div class="col-12 text-end">
+                <button type="submit" class="btn btn-sm" style="background: var(--jc-orange); color: #fff;">Add Product</button>
+            </div>
+        </form>
+    </div>
 </div>
 
 {% endblock %}
