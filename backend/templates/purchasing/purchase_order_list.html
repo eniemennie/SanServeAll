@@ -51,42 +51,105 @@
             </div>
 
             <h3 class="h6 mt-4">Items</h3>
-            <p class="text-muted small">Enter the quantity to order for each material (leave blank to skip).</p>
-            <div class="table-responsive">
-                <table class="table table-sm">
-                    <thead>
-                        <tr>
-                            <th>Material</th>
-                            <th style="width: 180px;">Quantity to Order</th>
-                            <th style="width: 180px;">Unit Cost</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for material in materials %}
-                        <tr>
-                            <td class="align-middle">
-                                <input type="hidden" name="material_id" value="{{ material.pk }}">
-                                {{ material.name }}
-                                <span class="text-muted small">({{ material.get_unit_of_measure_display }})</span>
-                            </td>
-                            <td>
-                                <input type="number" step="0.001" min="0" name="ordered_quantity"
-                                       class="form-control form-control-sm" placeholder="0">
-                            </td>
-                            <td>
-                                <input type="number" step="0.01" min="0" name="unit_cost"
-                                       class="form-control form-control-sm" placeholder="0.00">
-                            </td>
-                        </tr>
-                        {% empty %}
-                        <tr>
-                            <td colspan="3" class="text-muted text-center py-3">
-                                No raw materials in the catalog yet.
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+            <p class="text-muted small">Enter the quantity to order for each material (leave blank or 0 to skip).</p>
+
+            {% if material_groups %}
+            <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                <input type="text" id="po-material-search" class="form-control form-control-sm" style="max-width: 320px;"
+                       placeholder="Search materials by name&hellip;">
+                <!-- Optional expand/collapse-all shortcuts (client review, 2026-11-09)
+                     -- every group still starts collapsed on page load either way. -->
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="po-expand-all">Expand all</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="po-collapse-all">Collapse all</button>
+            </div>
+
+            <!-- Client review (2026-11-09): 100+ materials in one flat
+                 table was too crowded to use -- grouped here by the
+                 material's own product_type (see
+                 services.group_materials_by_type), one collapsible
+                 section per group, all collapsed by default. Hiding a
+                 group with Bootstrap's collapse only hides it visually;
+                 every material_id/ordered_quantity/unit_cost input stays
+                 in the DOM and is still submitted in document order, so
+                 a quantity typed into a collapsed group is never lost. -->
+            {% for group in material_groups %}
+            <div class="po-material-group mb-2" data-group-key="{{ group.key }}">
+                <button type="button"
+                        class="btn btn-sm btn-outline-secondary d-flex justify-content-between align-items-center w-100 text-start po-group-toggle"
+                        data-bs-toggle="collapse" data-bs-target="#po-group-{{ group.key }}"
+                        aria-expanded="false" aria-controls="po-group-{{ group.key }}">
+                    <span>
+                        <span class="po-group-chevron">&#9656;</span>
+                        {{ group.label }}
+                        <span class="text-muted">({{ group.materials|length }})</span>
+                    </span>
+                    <span class="small text-muted po-group-selected-count">0 selected</span>
+                </button>
+                <div class="collapse" id="po-group-{{ group.key }}">
+                    <div class="table-responsive mt-2">
+                        <table class="table table-sm mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Material</th>
+                                    <th style="width: 180px;">Quantity to Order</th>
+                                    <th style="width: 180px;">Unit Cost</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for material in group.materials %}
+                                <tr class="po-material-row" data-material-name="{{ material.name|lower }}">
+                                    <td class="align-middle">
+                                        <input type="hidden" name="material_id" value="{{ material.pk }}">
+                                        <span class="po-material-name">{{ material.name }}</span>
+                                        <span class="text-muted small">({{ material.get_unit_of_measure_display }})</span>
+                                    </td>
+                                    <td>
+                                        <input type="number" step="0.001" min="0" name="ordered_quantity"
+                                               class="form-control form-control-sm po-qty-input" placeholder="0"
+                                               data-material-name="{{ material.name }}"
+                                               data-material-unit="{{ material.get_unit_of_measure_display }}"
+                                               data-group-key="{{ group.key }}">
+                                    </td>
+                                    <td>
+                                        <input type="number" step="0.01" min="0" name="unit_cost"
+                                               class="form-control form-control-sm po-cost-input" placeholder="0.00">
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+            {% else %}
+            <p class="text-muted text-center py-3">No raw materials in the catalog yet.</p>
+            {% endif %}
+
+            <!-- Client review (2026-11-09): lists only the materials
+                 with a real quantity entered right now, updated live as
+                 the owner types -- a quick way to double-check an order
+                 before submitting without having to re-open every
+                 collapsed group. Purely a read-only display built from
+                 the same inputs above; it has no effect on what's
+                 actually submitted. -->
+            <div class="jc-card p-3 mb-3">
+                <div class="fw-semibold small mb-2">Selected Items</div>
+                <p class="text-muted small mb-0" id="po-selected-empty">No items selected yet -- enter a quantity above.</p>
+                <div class="table-responsive d-none" id="po-selected-table-wrap">
+                    <table class="table table-sm mb-2">
+                        <thead>
+                            <tr>
+                                <th>Material</th>
+                                <th>Quantity</th>
+                                <th>Unit Cost</th>
+                                <th>Line Total</th>
+                            </tr>
+                        </thead>
+                        <tbody id="po-selected-tbody"></tbody>
+                    </table>
+                </div>
+                <div class="text-end fw-semibold small" id="po-selected-grand-total"></div>
             </div>
 
             <div class="mb-3">
@@ -143,4 +206,144 @@
     </table>
 </div>
 
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+  (function () {
+    var searchInput = document.getElementById('po-material-search');
+    var expandAllBtn = document.getElementById('po-expand-all');
+    var collapseAllBtn = document.getElementById('po-collapse-all');
+    var groupEls = document.querySelectorAll('.po-material-group');
+    var qtyInputs = document.querySelectorAll('.po-qty-input');
+    var selectedEmpty = document.getElementById('po-selected-empty');
+    var selectedTableWrap = document.getElementById('po-selected-table-wrap');
+    var selectedTbody = document.getElementById('po-selected-tbody');
+    var selectedGrandTotal = document.getElementById('po-selected-grand-total');
+    if (!groupEls.length) return;
+
+    // Client review (2026-11-09): collapsing/expanding a group
+    // programmatically (from search or Expand/Collapse all) uses
+    // Bootstrap's own Collapse API with {toggle: false} rather than
+    // simulating a click, so it can set a group to a known state
+    // (always open, always closed) instead of just flipping whatever
+    // state it happened to already be in.
+    function collapseInstanceFor(groupEl) {
+      var collapseEl = groupEl.querySelector('.collapse');
+      return bootstrap.Collapse.getOrCreateInstance(collapseEl, { toggle: false });
+    }
+
+    function setGroupExpanded(groupEl, expanded) {
+      var instance = collapseInstanceFor(groupEl);
+      if (expanded) {
+        instance.show();
+      } else {
+        instance.hide();
+      }
+    }
+
+    function peso(amount) {
+      return '₱' + amount.toFixed(2);
+    }
+
+    function applySearch() {
+      var query = (searchInput && searchInput.value || '').trim().toLowerCase();
+      groupEls.forEach(function (groupEl) {
+        var rows = groupEl.querySelectorAll('.po-material-row');
+        var groupHasMatch = false;
+        rows.forEach(function (row) {
+          var matches = !query || row.getAttribute('data-material-name').indexOf(query) !== -1;
+          row.classList.toggle('d-none', !matches);
+          if (matches) groupHasMatch = true;
+        });
+        // A non-empty search auto-expands any group with a match, so
+        // results aren't hidden behind a collapsed header. Clearing the
+        // search box leaves groups exactly as the owner left them --
+        // it never auto-collapses a group back.
+        if (query && groupHasMatch) {
+          setGroupExpanded(groupEl, true);
+        }
+      });
+    }
+
+    function updateSummaries() {
+      var grandTotal = 0;
+      var selectedRows = [];
+
+      groupEls.forEach(function (groupEl) {
+        var groupQtyInputs = groupEl.querySelectorAll('.po-qty-input');
+        var selectedCount = 0;
+        groupQtyInputs.forEach(function (input) {
+          var qty = parseFloat(input.value) || 0;
+          if (qty > 0) selectedCount += 1;
+        });
+        var countLabel = groupEl.querySelector('.po-group-selected-count');
+        if (countLabel) {
+          countLabel.textContent = selectedCount + ' selected';
+        }
+      });
+
+      qtyInputs.forEach(function (input) {
+        var qty = parseFloat(input.value) || 0;
+        if (qty <= 0) return;
+        var row = input.closest('tr');
+        var costInput = row ? row.querySelector('.po-cost-input') : null;
+        var unitCost = (costInput && parseFloat(costInput.value)) || 0;
+        var lineTotal = qty * unitCost;
+        grandTotal += lineTotal;
+        selectedRows.push({
+          name: input.getAttribute('data-material-name'),
+          unit: input.getAttribute('data-material-unit'),
+          qty: qty,
+          unitCost: unitCost,
+          lineTotal: lineTotal
+        });
+      });
+
+      if (selectedTbody) {
+        selectedTbody.innerHTML = '';
+        selectedRows.forEach(function (entry) {
+          var tr = document.createElement('tr');
+          var qtyText = entry.qty + (entry.unit ? ' ' + entry.unit : '');
+          tr.innerHTML =
+            '<td>' + entry.name + '</td>' +
+            '<td>' + qtyText + '</td>' +
+            '<td>' + peso(entry.unitCost) + '</td>' +
+            '<td>' + peso(entry.lineTotal) + '</td>';
+          selectedTbody.appendChild(tr);
+        });
+      }
+
+      var hasSelection = selectedRows.length > 0;
+      if (selectedEmpty) selectedEmpty.classList.toggle('d-none', hasSelection);
+      if (selectedTableWrap) selectedTableWrap.classList.toggle('d-none', !hasSelection);
+      if (selectedGrandTotal) {
+        selectedGrandTotal.textContent = hasSelection ? 'Grand Total: ' + peso(grandTotal) : '';
+      }
+    }
+
+    if (searchInput) {
+      searchInput.addEventListener('input', applySearch);
+    }
+    if (expandAllBtn) {
+      expandAllBtn.addEventListener('click', function () {
+        groupEls.forEach(function (groupEl) { setGroupExpanded(groupEl, true); });
+      });
+    }
+    if (collapseAllBtn) {
+      collapseAllBtn.addEventListener('click', function () {
+        groupEls.forEach(function (groupEl) { setGroupExpanded(groupEl, false); });
+      });
+    }
+    qtyInputs.forEach(function (input) {
+      input.addEventListener('input', updateSummaries);
+    });
+    document.querySelectorAll('.po-cost-input').forEach(function (input) {
+      input.addEventListener('input', updateSummaries);
+    });
+
+    updateSummaries();
+  })();
+</script>
 {% endblock %}

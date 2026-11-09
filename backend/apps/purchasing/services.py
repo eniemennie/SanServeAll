@@ -21,6 +21,54 @@ from django.utils import timezone
 from apps.inventory.models import Inventory, InventoryTransaction, Product
 from apps.purchasing.models import PurchaseOrder, PurchaseOrderItem, Supplier
 
+# Client review (2026-11-09): the New Purchase Order form's Items section
+# was one flat, ungrouped list of 100+ materials -- grouped here by the
+# same real Product.product_type a material already carries (no new
+# field, no guessing from the name), so Raw Materials and Packaging
+# Materials can each collapse into their own section. Anything that
+# isn't one of those two (not expected given purchase_order_list's own
+# materials queryset, which is already scoped to Product.MATERIAL_TYPES
+# -- but kept as an explicit, labeled "Others" bucket rather than
+# silently dropped, in case that queryset is ever widened) falls into
+# "Others".
+MATERIAL_GROUP_LABELS = (
+    (Product.ProductType.MATERIAL, "Raw Materials"),
+    (Product.ProductType.PACKAGING, "Packaging Materials"),
+)
+OTHER_MATERIAL_GROUP_LABEL = "Others"
+
+
+def group_materials_by_type(materials):
+    """Groups an iterable of Product rows (as purchase_order_list's own
+    `materials` queryset provides) into the sections the New Purchase
+    Order form's Items list renders as collapsible groups.
+
+    Returns a list of dicts, each `{"key": <a stable string for this
+    group's DOM id>, "label": <display name>, "materials": [...]}`, in
+    the fixed order Raw Materials -> Packaging Materials -> Others.
+    Preserves each group's own relative ordering of `materials`
+    (whatever order the caller's queryset already used, e.g. .order_by
+    ("name")) -- this is a pure grouping/display reorganization, nothing
+    here changes which materials exist or their order within a group.
+    A group with no materials at all is left out entirely, rather than
+    rendered as an empty, pointless collapsible section.
+    """
+    by_type = {}
+    for material in materials:
+        by_type.setdefault(material.product_type, []).append(material)
+
+    groups = []
+    for product_type, label in MATERIAL_GROUP_LABELS:
+        items = by_type.pop(product_type, [])
+        if items:
+            groups.append({"key": product_type, "label": label, "materials": items})
+
+    leftovers = [material for items in by_type.values() for material in items]
+    if leftovers:
+        groups.append({"key": "OTHER", "label": OTHER_MATERIAL_GROUP_LABEL, "materials": leftovers})
+
+    return groups
+
 
 class PurchasingError(Exception):
     """Raised for any invalid purchasing operation (bad input, or an

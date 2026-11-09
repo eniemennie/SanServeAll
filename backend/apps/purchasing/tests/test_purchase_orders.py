@@ -5,6 +5,7 @@ Option B): the model, the service layer (create/mark-ordered/receive/
 cancel), and the views' role gating.
 """
 
+import re
 from decimal import Decimal
 
 import pytest
@@ -17,6 +18,7 @@ from apps.purchasing.services import (
     PurchasingError,
     cancel_purchase_order,
     create_purchase_order,
+    group_materials_by_type,
     mark_purchase_order_ordered,
     receive_purchase_order,
 )
@@ -115,6 +117,77 @@ class TestPurchaseOrderModel:
             unit_cost=Decimal("50.00"),
         )
         assert item.received_variance == Decimal("-2")
+
+
+class TestGroupMaterialsByType:
+    """Client review (2026-11-09): the New Purchase Order form's Items
+    list was one flat, 100+-row table -- grouped here by each
+    material's own product_type into Raw Materials/Packaging Materials/
+    Others, one collapsible section per group."""
+
+    def test_groups_raw_and_packaging_materials_separately(self, flour):
+        box = Product.objects.create(
+            name="8x8x2 Blue Box", price="22.00", product_type=Product.ProductType.PACKAGING
+        )
+        groups = group_materials_by_type([flour, box])
+        labels = {g["label"]: [m.name for m in g["materials"]] for g in groups}
+        assert labels == {
+            "Raw Materials": ["Flour"],
+            "Packaging Materials": ["8x8x2 Blue Box"],
+        }
+
+    def test_groups_are_ordered_raw_then_packaging_then_others(self):
+        box = Product.objects.create(
+            name="Box", price="22.00", product_type=Product.ProductType.PACKAGING
+        )
+        flour = Product.objects.create(
+            name="Flour", price="45.00", product_type=Product.ProductType.MATERIAL
+        )
+        odd = Product.objects.create(
+            name="Odd One Out", price="1.00", product_type=Product.ProductType.FINISHED_GOOD
+        )
+        # Passed in a deliberately scrambled order -- the function's own
+        # group ordering must not depend on input order.
+        groups = group_materials_by_type([box, odd, flour])
+        assert [g["label"] for g in groups] == ["Raw Materials", "Packaging Materials", "Others"]
+
+    def test_unexpected_product_types_fall_into_an_others_group(self):
+        """Defensive-only: purchase_order_list's own materials queryset
+        is already scoped to Product.MATERIAL_TYPES, so this shouldn't
+        happen in practice -- but a FINISHED_GOOD (or any future type)
+        reaching this function must still be grouped and shown, never
+        silently dropped from the form."""
+        odd = Product.objects.create(
+            name="Odd One Out", price="1.00", product_type=Product.ProductType.FINISHED_GOOD
+        )
+        groups = group_materials_by_type([odd])
+        assert len(groups) == 1
+        assert groups[0]["label"] == "Others"
+        assert groups[0]["materials"] == [odd]
+
+    def test_a_group_with_no_materials_is_left_out_entirely(self, flour):
+        """Only Raw Materials exist here -- no empty, pointless
+        "Packaging Materials (0)" section should be rendered."""
+        groups = group_materials_by_type([flour])
+        assert len(groups) == 1
+        assert groups[0]["label"] == "Raw Materials"
+
+    def test_preserves_the_caller_s_ordering_within_each_group(self):
+        """A pure grouping/display reorganization -- doesn't change
+        which materials exist, their data, or their relative order
+        within a group (the caller's own .order_by("name") queryset
+        ordering is kept, not re-sorted here)."""
+        zebra = Product.objects.create(
+            name="Zebra Flour", price="45.00", product_type=Product.ProductType.MATERIAL
+        )
+        apple = Product.objects.create(
+            name="Apple Flour", price="45.00", product_type=Product.ProductType.MATERIAL
+        )
+        groups = group_materials_by_type([zebra, apple])
+        assert [m.name for m in groups[0]["materials"]] == ["Zebra Flour", "Apple Flour"]
+
+    def test_empty_input_returns_no_groups(self):
+        assert group_materials_by_type([]) == []
 
 
 class TestCreatePurchaseOrder:
@@ -319,6 +392,65 @@ class TestPurchaseOrderViewsAccess:
         client.force_login(branch_staff)
         response = client.get(reverse("purchasing:purchase_order_list"))
         assert response.status_code == 403
+
+    def test_items_list_is_grouped_into_collapsible_sections(self, client, purchasing_staff, flour):
+        box = Product.objects.create(
+            name="8x8x2 Blue Box", price="22.00", product_type=Product.ProductType.PACKAGING
+        )
+        client.force_login(purchasing_staff)
+
+        response = client.get(reverse("purchasing:purchase_order_list"))
+        groups = {g["label"]: g["materials"] for g in response.context["material_groups"]}
+        assert [m.pk for m in groups["Raw Materials"]] == [flour.pk]
+        assert [m.pk for m in groups["Packaging Materials"]] == [box.pk]
+
+        text_only = re.sub(r"<[^>]+>", " ", response.content.decode())
+        normalized = " ".join(text_only.split())
+        assert "Raw Materials (1)" in normalized
+        assert "Packaging Materials (1)" in normalized
+        # `materials` (the flat, ungrouped queryset) stays in context
+        # unchanged -- nothing else that might already read it directly
+        # is affected by adding the grouped version alongside it.
+        assert list(response.context["materials"]) == [box, flour]
+
+    def test_material_groups_start_collapsed_on_page_load(self, client, purchasing_staff, flour):
+
+        client.force_login(purchasing_staff)
+        response = client.get(reverse("purchasing:purchase_order_list"))
+        content = response.content.decode()
+
+        # Each group's own <div class="..." id="po-group-<key>"> must not
+        # carry Bootstrap's "show" class -- that's what makes it visible
+        # by default, and every group must start closed.
+        collapse_divs = re.findall(r'<div class="([^"]*)" id="po-group-[^"]+">', content)
+        assert collapse_divs, "no material group collapse <div> found"
+        for class_list in collapse_divs:
+            assert "show" not in class_list.split()
+
+    def test_search_box_and_expand_collapse_controls_are_present(
+        self, client, purchasing_staff, flour
+    ):
+        client.force_login(purchasing_staff)
+        response = client.get(reverse("purchasing:purchase_order_list"))
+        content = response.content.decode()
+        assert 'id="po-material-search"' in content
+        assert 'id="po-expand-all"' in content
+        assert 'id="po-collapse-all"' in content
+
+    def test_selected_items_summary_section_is_present(self, client, purchasing_staff, flour):
+        client.force_login(purchasing_staff)
+        response = client.get(reverse("purchasing:purchase_order_list"))
+        content = response.content.decode()
+        assert "Selected Items" in content
+        assert 'id="po-selected-empty"' in content
+        assert 'id="po-selected-grand-total"' in content
+
+    def test_no_materials_at_all_shows_the_empty_state_not_a_crash(self, client, purchasing_staff):
+        client.force_login(purchasing_staff)
+        response = client.get(reverse("purchasing:purchase_order_list"))
+        assert response.status_code == 200
+        assert response.context["material_groups"] == []
+        assert "No raw materials in the catalog yet." in response.content.decode()
 
     def test_purchasing_staff_can_create_an_order_through_the_view(
         self, client, purchasing_staff, supplier, branch, flour
