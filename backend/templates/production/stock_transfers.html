@@ -42,41 +42,117 @@
     </form>
 </div>
 
+<!-- Client review (2026-11-09): status tabs replace having to scan the
+     whole table to see how many orders are in each state -- same
+     pattern as Batch Logs' own tabs (batch_management.html), including
+     "Stalled" even though it isn't a real Status value (see the view's
+     own stalled_count/is_stale_in_processing comments). -->
+<div class="d-flex gap-2 mb-3 flex-wrap">
+    <a href="?" class="btn btn-sm {% if not status_filter %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">
+        All ({{ stats.total }})
+    </a>
+    {% for value, label in status_choices %}
+    <a href="?status={{ value }}" class="btn btn-sm {% if status_filter == value %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">
+        {% if value == "PROCESSING" %}{{ label }} ({{ stats.processing }})
+        {% elif value == "IN_TRANSIT" %}{{ label }} ({{ stats.in_transit }})
+        {% elif value == "DELIVERED" %}{{ label }} ({{ stats.delivered }})
+        {% elif value == "CANCELLED" %}{{ label }} ({{ stats.cancelled }})
+        {% else %}{{ label }}{% endif %}
+    </a>
+    {% endfor %}
+    <a href="?status=STALLED" class="btn btn-sm {% if status_filter == 'STALLED' %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">
+        Stalled ({{ stats.stalled }})
+    </a>
+</div>
+
 <div class="jc-card p-3 p-md-4">
+    <form method="get" class="row g-2 align-items-end mb-3">
+        <input type="hidden" name="status" value="{{ status_filter }}">
+        <div class="col-6 col-md-2">
+            <label class="form-label small mb-1">From</label>
+            <select name="from_branch" class="form-select form-select-sm">
+                <option value="">Any</option>
+                {% for b in source_branches %}
+                <option value="{{ b.pk }}" {% if from_branch_filter == b.pk|stringformat:"s" %}selected{% endif %}>{{ b.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-6 col-md-2">
+            <label class="form-label small mb-1">To</label>
+            <select name="to_branch" class="form-select form-select-sm">
+                <option value="">Any</option>
+                {% for b in destination_branches %}
+                <option value="{{ b.pk }}" {% if to_branch_filter == b.pk|stringformat:"s" %}selected{% endif %}>{{ b.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-6 col-md-2">
+            <label class="form-label small mb-1">Dispatched from</label>
+            <input type="date" name="date_from" value="{{ date_from }}" class="form-control form-control-sm">
+        </div>
+        <div class="col-6 col-md-2">
+            <label class="form-label small mb-1">Dispatched to</label>
+            <input type="date" name="date_to" value="{{ date_to }}" class="form-control form-control-sm">
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small mb-1">Search</label>
+            <input type="text" name="search" value="{{ search }}" class="form-control form-control-sm" placeholder="Order # or product">
+        </div>
+        <div class="col-md-2 d-flex gap-2">
+            <button type="submit" class="btn btn-sm btn-outline-secondary flex-grow-1">Filter</button>
+            {% if from_branch_filter or to_branch_filter or date_from or date_to or search %}
+            <a href="?status={{ status_filter }}" class="btn btn-sm btn-outline-secondary">Clear</a>
+            {% endif %}
+        </div>
+    </form>
+    <p class="text-muted small mb-3">
+        Showing {{ orders|length }} of {{ filtered_total }} order{{ filtered_total|pluralize }}
+        {% if page_obj.paginator.num_pages > 1 %} &middot; page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}{% endif %}
+    </p>
+
     <div class="table-responsive">
     <table class="table table-sm mb-0 align-middle">
         <colgroup>
-            <col style="width: 5%;">
-            <col style="width: 13%;">
-            <col style="width: 5%;">
+            <col style="width: 4%;">
+            <col style="width: 9%;">
+            <col style="width: 22%;">
+            <col style="width: 8%;">
             <col style="width: 10%;">
-            <col style="width: 10%;">
-            <col style="width: 10%;">
-            <col style="width: 11%;">
-            <col style="width: 18%;">
-            <col style="width: 18%;">
+            <col style="width: 15%;">
+            <col style="width: 12%;">
+            <col style="width: 20%;">
         </colgroup>
         <thead>
             <tr>
+                <th></th>
                 <th>Order</th>
                 <th>Product</th>
-                <th class="text-end">Qty</th>
-                <th>From</th>
+                <th class="text-center">Qty</th>
                 <th>To</th>
                 <th>Status</th>
                 <th>Dispatched</th>
-                <th>Delivered / Cancelled</th>
                 <th></th>
             </tr>
         </thead>
         <tbody>
             {% for order in orders %}
-            <tr>
+            <!-- Collapsible row pair (client review, 2026-11-09): same
+                 compact-summary/expand-for-detail pattern as Batch Logs
+                 (batch_management.html) -- the summary row covers what's
+                 needed to scan the list, the detail row underneath
+                 carries the From/To full names and who delivered or
+                 cancelled it. -->
+            <tr class="jc-batch-row" data-bs-toggle="collapse" data-bs-target="#transfer-details-{{ order.pk }}"
+                role="button" tabindex="0" aria-expanded="false" aria-controls="transfer-details-{{ order.pk }}">
+                <td class="text-center">
+                    <svg class="jc-batch-toggle-icon" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M5 3l6 5-6 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </td>
                 <td>#{{ order.pk }}</td>
                 <td>{{ order.product.name }}</td>
-                <td class="text-end">{{ order.quantity }}</td>
-                <td>{{ order.source_branch.name }}</td>
-                <td>{{ order.destination_branch.name }}</td>
+                <td class="text-center">{{ order.quantity }}</td>
+                <td>{{ order.destination_branch.code }}</td>
                 <td>
                     <span class="jc-badge {% if order.status == 'DELIVERED' %}jc-badge-adequate{% elif order.status == 'IN_TRANSIT' %}jc-badge-info{% elif order.status == 'CANCELLED' %}jc-badge-critical{% else %}jc-badge-low{% endif %}">
                         {{ order.get_status_display }}
@@ -86,34 +162,23 @@
                     {% endif %}
                 </td>
                 <td class="small text-nowrap">{{ order.created_at|date:"M d, Y" }}<br>{{ order.created_at|date:"H:i" }}</td>
-                <td class="small text-nowrap">
-                    {% if order.status == "DELIVERED" %}
-                    {{ order.delivered_at|date:"M d, Y" }}<br>{{ order.delivered_at|date:"H:i" }}
-                    <div class="text-muted">by {% if order.delivered_by %}{{ order.delivered_by }}{% else %}&mdash;{% endif %}</div>
-                    {% elif order.status == "CANCELLED" %}
-                    {{ order.cancelled_at|date:"M d, Y" }}<br>{{ order.cancelled_at|date:"H:i" }}
-                    <div class="text-muted">by {% if order.cancelled_by %}{{ order.cancelled_by }}{% else %}&mdash;{% endif %}</div>
-                    {% else %}
-                    &mdash;
-                    {% endif %}
-                </td>
-                <td>
-                    <div class="d-flex flex-wrap gap-1">
+                <td class="text-end pe-1">
+                    <div class="d-flex flex-wrap gap-1 justify-content-end">
                     {% if order.status == "PROCESSING" %}
-                    <form method="post" action="{% url 'production:advance_stock_transfer' order.pk %}">
+                    <form method="post" action="{% url 'production:advance_stock_transfer' order.pk %}" onclick="event.stopPropagation();">
                         {% csrf_token %}
                         <input type="hidden" name="next_status" value="IN_TRANSIT">
                         <button type="submit" class="btn btn-outline-secondary btn-sm">Mark In Transit</button>
                     </form>
                     {% elif order.status == "IN_TRANSIT" %}
-                    <form method="post" action="{% url 'production:advance_stock_transfer' order.pk %}">
+                    <form method="post" action="{% url 'production:advance_stock_transfer' order.pk %}" onclick="event.stopPropagation();">
                         {% csrf_token %}
                         <input type="hidden" name="next_status" value="DELIVERED">
                         <button type="submit" class="btn btn-outline-secondary btn-sm">Mark Delivered</button>
                     </form>
                     {% endif %}
                     {% if order.status == "PROCESSING" or order.status == "IN_TRANSIT" %}
-                    <form method="post" action="{% url 'production:cancel_stock_transfer' order.pk %}"
+                    <form method="post" action="{% url 'production:cancel_stock_transfer' order.pk %}" onclick="event.stopPropagation();"
                           onsubmit="return confirm('Cancel this transfer and return the stock to the commissary?');">
                         {% csrf_token %}
                         <button type="submit" class="btn btn-outline-danger btn-sm">Cancel</button>
@@ -122,12 +187,79 @@
                     </div>
                 </td>
             </tr>
+            <tr class="collapse jc-batch-details-row" id="transfer-details-{{ order.pk }}">
+                <td></td>
+                <td colspan="7">
+                    <div class="row g-3 py-1">
+                        <div class="col-md-4">
+                            <div class="jc-batch-details-label mb-2">From</div>
+                            <div>{{ order.source_branch.name }} ({{ order.source_branch.code }})</div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="jc-batch-details-label mb-2">To</div>
+                            <div>{{ order.destination_branch.name }} ({{ order.destination_branch.code }})</div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="jc-batch-details-label mb-2">Delivered / Cancelled</div>
+                            {% if order.status == "DELIVERED" %}
+                            <div>{{ order.delivered_at|date:"M d, Y" }} {{ order.delivered_at|date:"H:i" }}</div>
+                            <div class="text-muted small">by {% if order.delivered_by %}{{ order.delivered_by }}{% else %}&mdash;{% endif %}</div>
+                            {% elif order.status == "CANCELLED" %}
+                            <div>{{ order.cancelled_at|date:"M d, Y" }} {{ order.cancelled_at|date:"H:i" }}</div>
+                            <div class="text-muted small">by {% if order.cancelled_by %}{{ order.cancelled_by }}{% else %}&mdash;{% endif %}</div>
+                            {% else %}
+                            <div class="text-muted">&mdash;</div>
+                            {% endif %}
+                        </div>
+                        <!-- No `notes` field exists on StockTransferOrder
+                             yet -- a spot for it here is the natural
+                             place to add it if that's ever introduced. -->
+                    </div>
+                </td>
+            </tr>
             {% empty %}
-            <tr><td colspan="9" class="text-center text-muted py-3">No stock transfer orders yet.</td></tr>
+            <tr><td colspan="8" class="text-center text-muted py-3">No stock transfer orders match this filter.</td></tr>
             {% endfor %}
         </tbody>
     </table>
     </div>
+
+    {% if page_obj.paginator.num_pages > 1 %}
+    <nav class="mt-3">
+        <ul class="pagination pagination-sm mb-0">
+            {% if page_obj.has_previous %}
+            <li class="page-item">
+                <a class="page-link" href="?{{ pagination_qs }}&amp;page={{ page_obj.previous_page_number }}">Previous</a>
+            </li>
+            {% endif %}
+            <li class="page-item disabled">
+                <span class="page-link">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+            </li>
+            {% if page_obj.has_next %}
+            <li class="page-item">
+                <a class="page-link" href="?{{ pagination_qs }}&amp;page={{ page_obj.next_page_number }}">Next</a>
+            </li>
+            {% endif %}
+        </ul>
+    </nav>
+    {% endif %}
 </div>
 
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+  // Same keyboard-accessibility addition as Batch Logs' own collapsible
+  // rows (batch_management.html) -- the trigger is a <tr role="button">,
+  // not a real <button>, so Enter/Space need to be wired up by hand.
+  document.querySelectorAll('.jc-batch-row').forEach(function (row) {
+    row.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        row.click();
+      }
+    });
+  });
+</script>
 {% endblock %}

@@ -680,7 +680,12 @@ class TestStockTransfersView:
         )
 
         response = commissary_client.get(reverse("production:stock_transfers"))
-        assert "Stalled" in response.content.decode()
+        # "Stalled" alone isn't specific enough any more -- the page now
+        # always has a "Stalled (N)" status tab regardless of whether any
+        # order is actually stale, so this checks for the per-row flag's
+        # own title text instead, which only renders on a stale order's
+        # own row.
+        assert "still Processing more than 2 days later" in response.content.decode()
 
     def test_fresh_processing_order_is_not_flagged(
         self, commissary_client, commissary_staff, commissary, batangas, cake
@@ -692,7 +697,7 @@ class TestStockTransfersView:
             quantity=5,
         )
         response = commissary_client.get(reverse("production:stock_transfers"))
-        assert "Stalled" not in response.content.decode()
+        assert "still Processing more than 2 days later" not in response.content.decode()
 
     def test_advance_view_moves_the_order_forward(
         self, commissary_client, commissary, commissary_staff, batangas, cake
@@ -782,6 +787,291 @@ class TestStockTransfersView:
         order.refresh_from_db()
         assert order.status == StockTransferOrder.Status.PROCESSING
 
+    def test_destination_branch_code_shown_in_the_summary_row(
+        self, commissary_client, commissary_staff, commissary, batangas, cake
+    ):
+        """Client review (2026-11-09): the compact summary row shows the
+        destination branch's short code; the full branch names (both
+        From and To) only need to appear once the row is expanded."""
+        services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+        response = commissary_client.get(reverse("production:stock_transfers"))
+        content = response.content.decode()
+        assert batangas.code in content
+        assert batangas.name in content
+        assert commissary.name in content
+
+
+class TestStockTransfersTabsFiltersPagination:
+    """Client review (2026-11-09): the 480+-row order history needed
+    status tabs with accurate counts, branch/date/search filters, and
+    pagination -- mirroring batch_management's own existing pattern
+    (apps.production.tests.test_production_module.TestBatchManagementView).
+    Dispatch/advance/cancel behavior itself is covered by the other test
+    classes above and is untouched by this feature."""
+
+    def test_status_tabs_show_counts_in_their_labels(
+        self, commissary_client, commissary_staff, batangas, cake
+    ):
+        services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+        response = commissary_client.get(reverse("production:stock_transfers"))
+        content = response.content.decode()
+        assert "Processing (1)" in content
+        assert "Delivered (0)" in content
+        assert "Cancelled (0)" in content
+
+    def test_status_filter_narrows_the_queryset(
+        self, commissary_client, commissary_staff, batangas, cake
+    ):
+        delivered_order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+        services.advance_stock_transfer_status(delivered_order, "IN_TRANSIT")
+        services.advance_stock_transfer_status(delivered_order, "DELIVERED")
+        services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+
+        response = commissary_client.get(
+            reverse("production:stock_transfers"), {"status": "DELIVERED"}
+        )
+        order_ids = {o.pk for o in response.context["orders"]}
+        assert order_ids == {delivered_order.pk}
+
+    def test_status_tab_counts_stay_correct_regardless_of_active_tab(
+        self, commissary_client, commissary_staff, batangas, cake
+    ):
+        """Same regression guard as batch_management's own status tabs:
+        the counts come from a queryset that has every OTHER filter
+        applied but not the status filter itself, so switching tabs
+        never zeroes out the other tabs' own counts."""
+        delivered_order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+        services.advance_stock_transfer_status(delivered_order, "IN_TRANSIT")
+        services.advance_stock_transfer_status(delivered_order, "DELIVERED")
+        services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+
+        response = commissary_client.get(
+            reverse("production:stock_transfers"), {"status": "DELIVERED"}
+        )
+        stats = response.context["stats"]
+        assert stats["total"] == 2
+        assert stats["delivered"] == 1
+        assert stats["processing"] == 1
+
+    def test_stalled_tab_filters_to_stale_processing_orders_only(
+        self, commissary_client, commissary_staff, batangas, cake
+    ):
+        stale_order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+        StockTransferOrder.objects.filter(pk=stale_order.pk).update(
+            created_at=timezone.now() - timedelta(days=3)
+        )
+        services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+
+        response = commissary_client.get(
+            reverse("production:stock_transfers"), {"status": "STALLED"}
+        )
+        order_ids = {o.pk for o in response.context["orders"]}
+        assert order_ids == {stale_order.pk}
+        assert response.context["stats"]["stalled"] == 1
+
+    def test_from_branch_filter_narrows_the_queryset(
+        self, commissary_client, commissary_staff, commissary, batangas, cake
+    ):
+        """There's exactly one real commissary (services.get_commissary_
+        branch), so create_stock_transfer_order always uses it -- this
+        creates a second row directly on the model (bypassing the
+        service) purely to exercise the From filter's own mechanics
+        against a second source_branch value."""
+        from_this = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+        other_commissary = Branch.objects.create(
+            name="Second Commissary", code="COMMISSARY2", is_commissary=True
+        )
+        StockTransferOrder.objects.create(
+            commissary_staff=commissary_staff,
+            source_branch=other_commissary,
+            destination_branch=batangas,
+            product=cake,
+            quantity=5,
+        )
+
+        response = commissary_client.get(
+            reverse("production:stock_transfers"), {"from_branch": commissary.pk}
+        )
+        order_ids = {o.pk for o in response.context["orders"]}
+        assert order_ids == {from_this.pk}
+
+    def test_to_branch_filter_narrows_the_queryset(
+        self, commissary_client, commissary_staff, batangas, cake
+    ):
+        laguna = Branch.objects.create(name="Laguna", code="LAGUNA")
+        Inventory.objects.create(branch=laguna, product=cake, quantity_on_hand=0)
+        to_batangas = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+        services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=laguna.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+
+        response = commissary_client.get(
+            reverse("production:stock_transfers"), {"to_branch": batangas.pk}
+        )
+        order_ids = {o.pk for o in response.context["orders"]}
+        assert order_ids == {to_batangas.pk}
+
+    def test_date_range_filter_narrows_the_queryset(
+        self, commissary_client, commissary_staff, batangas, cake
+    ):
+        old_order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+        StockTransferOrder.objects.filter(pk=old_order.pk).update(
+            created_at=timezone.now() - timedelta(days=10)
+        )
+        recent_order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+
+        today = timezone.localdate().isoformat()
+        response = commissary_client.get(
+            reverse("production:stock_transfers"), {"date_from": today}
+        )
+        order_ids = {o.pk for o in response.context["orders"]}
+        assert order_ids == {recent_order.pk}
+
+    def test_search_by_order_number_matches_the_pk(
+        self, commissary_client, commissary_staff, batangas, cake
+    ):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+        response = commissary_client.get(
+            reverse("production:stock_transfers"), {"search": str(order.pk)}
+        )
+        order_ids = {o.pk for o in response.context["orders"]}
+        assert order_ids == {order.pk}
+
+    def test_search_by_product_name_matches(
+        self, commissary_client, commissary_staff, batangas, cake
+    ):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+        response = commissary_client.get(
+            reverse("production:stock_transfers"), {"search": "chocolate"}
+        )
+        order_ids = {o.pk for o in response.context["orders"]}
+        assert order_ids == {order.pk}
+
+    def test_orders_are_paginated_25_per_page(
+        self, commissary_client, commissary_staff, batangas, cake
+    ):
+        for _ in range(30):
+            services.create_stock_transfer_order(
+                commissary_staff=commissary_staff,
+                destination_branch_id=batangas.pk,
+                product_id=cake.pk,
+                quantity=1,
+            )
+
+        response = commissary_client.get(reverse("production:stock_transfers"))
+        assert len(response.context["orders"]) == 25
+        assert response.context["page_obj"].paginator.num_pages == 2
+
+    def test_pagination_works_together_with_an_active_filter(
+        self, commissary_client, commissary_staff, batangas, cake
+    ):
+        """Verify requirement: pagination and filters work together
+        without errors -- a second page request combined with a status
+        filter must not 500 and must only return matching rows."""
+        for _ in range(30):
+            services.create_stock_transfer_order(
+                commissary_staff=commissary_staff,
+                destination_branch_id=batangas.pk,
+                product_id=cake.pk,
+                quantity=1,
+            )
+
+        response = commissary_client.get(
+            reverse("production:stock_transfers"), {"status": "PROCESSING", "page": "2"}
+        )
+        assert response.status_code == 200
+        assert len(response.context["orders"]) == 5
+        for order in response.context["orders"]:
+            assert order.status == StockTransferOrder.Status.PROCESSING
+
+    def test_collapsible_detail_row_present_for_each_order(
+        self, commissary_client, commissary_staff, batangas, cake
+    ):
+        order = services.create_stock_transfer_order(
+            commissary_staff=commissary_staff,
+            destination_branch_id=batangas.pk,
+            product_id=cake.pk,
+            quantity=5,
+        )
+        response = commissary_client.get(reverse("production:stock_transfers"))
+        content = response.content.decode()
+        assert f'id="transfer-details-{order.pk}"' in content
+
+
+class TestAdvanceAndCancelStillWorkUnchanged:
     def test_advance_view_does_not_500_on_a_bogus_status_value(
         self, commissary_client, commissary, commissary_staff, batangas, cake
     ):
