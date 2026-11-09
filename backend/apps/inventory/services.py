@@ -122,7 +122,7 @@ def get_branch_inventory(branch, product_type=None, low_stock_only=False):
     return queryset
 
 
-def get_resource_status_summary(branch=None, product_type=None):
+def get_resource_status_summary(branch=None, product_type=None, product_ids=None):
     """Stock-health snapshot for the Dashboard Home Resource Status KPI
     card (Fig. 3-19) and the Resource Monitoring list underneath it.
 
@@ -145,6 +145,21 @@ def get_resource_status_summary(branch=None, product_type=None):
     Monitoring list, Row N), typically combined with branch=<the
     commissary> since materials only ever have Inventory rows there.
 
+    product_ids=None (the default) applies no further narrowing. Client
+    review (2026-11-09): the Commissary Dashboard's "Materials Needing
+    Attention" card was showing branch-only POS menu items (Americano,
+    Carbonara, Lasagna, ...) as "out of stock" at the commissary -- the
+    commissary never produces or stocks those, so an Inventory row for
+    one there is a data artifact (e.g. a historical import that created
+    a zeroed row per product per branch), not a real shortage. Pass an
+    explicit iterable of Product ids (commissary_dashboard builds this
+    from MATERIAL products plus FINISHED_GOOD products the commissary has
+    actually produced, per ProductionRecord) to scope the summary to only
+    what that branch genuinely tracks, without changing this function's
+    default behavior for its other callers (Owner/Admin Dashboard Home,
+    Resource Consumption, the low-stock alert job, ...), which still want
+    every product type at a real sales branch.
+
     Excludes discontinued products (Product.is_active=False), same
     exclusion as get_product_availability -- a discontinued item
     shouldn't count toward or against the sufficiency percentage.
@@ -160,6 +175,8 @@ def get_resource_status_summary(branch=None, product_type=None):
         )
     if product_type is not None:
         queryset = queryset.filter(product__product_type=product_type)
+    if product_ids is not None:
+        queryset = queryset.filter(product_id__in=product_ids)
 
     items = list(queryset)
     critical_items = [i for i in items if i.is_out_of_stock]
