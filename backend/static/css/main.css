@@ -199,6 +199,34 @@ body {
   color: #fff;
 }
 
+/* Commissary Dashboard's attention-tabs buttons (client review 2026-11-09)
+   are real Bootstrap `data-bs-toggle="tab"` triggers, not the plain <a>
+   links the rule above was written for -- and they need Bootstrap's own
+   ".active" class too (see commissary_dashboard.html's extra_js comment),
+   whose ".btn.active" rule in bootstrap.min.css is two classes deep and
+   so outranks the single-class rule above regardless of file order. This
+   repeats the same declarations at matching specificity so our color
+   wins here without touching the plain-link usage elsewhere. */
+.btn.jc-filter-tab-active {
+  background-color: var(--jc-orange);
+  color: #fff;
+}
+
+/* --- Collapsible card header toggle (Commissary Dashboard's "Materials
+   Needing Attention" card, client review 2026-11-09) --- a clickable
+   header row whose chevron rotates to show the card's current
+   expand/collapse state, same rotate-on-aria-expanded idiom as
+   .jc-expand-toggle above, just for a whole-section header rather than
+   a "show more" link. */
+.jc-attention-toggle-icon {
+  display: inline-block;
+  color: var(--jc-text-muted);
+  transition: transform 0.15s ease;
+}
+[aria-expanded="true"] > .jc-attention-toggle-icon {
+  transform: rotate(90deg);
+}
+
 /* --- Category tabs (scrollable pill row, e.g. POS product catalog) ---
    cross-role consistency pass, Nov 3: was previously defined inline in
    pos_ordering.html's own extra_css. Moved here unchanged so it's the

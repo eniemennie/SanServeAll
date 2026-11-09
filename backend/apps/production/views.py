@@ -43,9 +43,22 @@ def commissary_dashboard(request):
     """
     commissary = services.get_commissary_branch()
     recent_records = ProductionRecord.objects.select_related("product").order_by("-created_at")[:5]
-    resource_status = (
-        inventory_services.get_resource_status_summary(branch=commissary) if commissary else None
-    )
+    resource_status = None
+    if commissary:
+        resource_status = inventory_services.get_resource_status_summary(
+            branch=commissary, product_ids=services.get_commissary_relevant_product_ids()
+        )
+        # Client review (2026-11-09): "sorted by urgency" -- lowest stock
+        # on hand first within each tier (a more-negative (oversold)
+        # quantity_on_hand is more urgent than a merely-empty one; a
+        # lower remaining quantity is closer to running out than one
+        # just under its reorder threshold).
+        resource_status["critical_items"] = sorted(
+            resource_status["critical_items"], key=lambda item: item.quantity_on_hand
+        )
+        resource_status["low_items"] = sorted(
+            resource_status["low_items"], key=lambda item: item.quantity_on_hand
+        )
 
     return render(
         request,

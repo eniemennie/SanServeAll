@@ -80,39 +80,119 @@
 </div>
 
 {% comment %}
-  UI/UX review (2026-11-05): previously gated on critical_items alone,
-  so a commissary with real low-stock items but zero out-of-stock ones
-  saw no warning card at all -- fixed to show whenever either list has
-  something. Critical (out-of-stock) items always render in full, since
-  they're the most urgent; low-stock items use the same
-  show-2-then-expand pattern as the Owner/Admin dashboard's Resource
-  Monitoring card, for consistent interaction across dashboards.
+  Client review (2026-11-09): reworked from one long plain bullet list
+  (31+ items, every one reading "-- out of stock", no distinction
+  between a genuinely critical raw material and a branch-only menu item
+  the commissary never touches) into:
+    - Out of Stock / Low Stock tabs (client-side, via Bootstrap's tab
+      component -- both lists are already in the response, so switching
+      tabs needs no page reload), each labeled with its own count.
+      NOTE: the "nav" class on #materialsAttentionTabs below is load-
+      bearing, not styling -- Bootstrap 5.3's Tab component resolves its
+      sibling triggers via `.closest('.nav, .list-group')` and throws
+      ("Illegal invocation") if a trigger has neither ancestor, even
+      though nothing in Bootstrap's docs calls that out as required.
+    - A compact table per tab (Item | Type | Current Stock | Status)
+      instead of bullets, color-coded via the existing jc-badge classes,
+      sorted most-urgent-first (view-level, see commissary_dashboard).
+    - A header toggle collapsing the whole card, plus the existing
+      jc-expand-toggle "Show N more" pattern inside each tab so only the
+      first 5 items show by default.
+  resource_status itself is now scoped (see
+  services.get_commissary_relevant_product_ids) to materials and
+  finished goods the commissary actually produces/uses -- branch-only
+  POS items (coffee drinks, pasta, ...) no longer appear here at all.
+  Still gated on either list having something, same as before.
 {% endcomment %}
 {% if resource_status and resource_status.critical_items or resource_status.low_items %}
 <div class="jc-card jc-card-interactive p-3 p-md-4 mt-4">
-    <h2 class="h6 mb-3" style="color: var(--jc-critical);">Materials Needing Attention</h2>
-    <ul class="mb-0">
-        {% for item in resource_status.critical_items %}
-        <li>{{ item.product.name }} -- out of stock</li>
-        {% endfor %}
-        {% for item in resource_status.low_items|slice:":2" %}
-        <li>{{ item.product.name }} -- low stock ({{ item.display_quantity }} on hand)</li>
-        {% endfor %}
-    </ul>
-    {% if resource_status.low_items|length > 2 %}
-    <div class="collapse" id="commissaryLowStockMore">
-        <ul class="mb-0 mt-0">
-            {% for item in resource_status.low_items|slice:"2:" %}
-            <li>{{ item.product.name }} -- low stock ({{ item.display_quantity }} on hand)</li>
-            {% endfor %}
-        </ul>
+    <div class="d-flex justify-content-between align-items-center" role="button" tabindex="0"
+         data-bs-toggle="collapse" data-bs-target="#materialsAttentionBody"
+         aria-expanded="true" aria-controls="materialsAttentionBody">
+        <h2 class="h6 mb-0" style="color: var(--jc-critical);">Materials Needing Attention</h2>
+        <svg class="jc-attention-toggle-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M5 3l6 5-6 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
     </div>
-    <button class="jc-expand-toggle mt-2" type="button" data-bs-toggle="collapse" data-bs-target="#commissaryLowStockMore" aria-expanded="false" aria-controls="commissaryLowStockMore">
-        <span>Show {{ resource_status.low_items|length|add:"-2" }} more</span>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-    </button>
-    {% endif %}
+
+    <div class="collapse show" id="materialsAttentionBody">
+        <div class="nav d-flex gap-2 mt-3 mb-3" id="materialsAttentionTabs">
+            <button class="btn btn-sm jc-filter-tab-active active" type="button" data-bs-toggle="tab"
+                    data-bs-target="#attnOutOfStock" aria-selected="true">
+                Out of Stock ({{ resource_status.critical_count }})
+            </button>
+            <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="tab"
+                    data-bs-target="#attnLowStock" aria-selected="false">
+                Low Stock ({{ resource_status.low_count }})
+            </button>
+        </div>
+
+        <!--
+          No "fade" class on these panes (deliberately, not an oversight):
+          Bootstrap's Tab component hides the outgoing pane only after a
+          "transitionend" event on it, which the fade/opacity CSS transition
+          is meant to fire -- but that event didn't reliably fire here (the
+          table's own layout/CSS interferes with it), leaving the old pane
+          stuck visible under the new one. Without "fade", Tab.show() swaps
+          the "show"/"active" classes synchronously instead of waiting on a
+          transition, which avoids the stuck-pane bug entirely.
+        -->
+        <div class="tab-content">
+            <div class="tab-pane show active" id="attnOutOfStock">
+                {% include "production/_attention_table.html" with items=resource_status.critical_items status="Out of Stock" badge_class="jc-badge-critical" panel_id="attnOutOfStockMore" %}
+            </div>
+            <div class="tab-pane" id="attnLowStock">
+                {% include "production/_attention_table.html" with items=resource_status.low_items status="Low Stock" badge_class="jc-badge-low" panel_id="attnLowStockMore" %}
+            </div>
+        </div>
+    </div>
 </div>
 {% endif %}
 
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+  // Client review (2026-11-09): Bootstrap's own Tab component toggles
+  // its native ".active" class on whichever button triggered it, but
+  // these tabs are styled with the app's own jc-filter-tab-active class
+  // (for visual consistency with the status/category tabs used
+  // elsewhere in the admin shell) instead -- this keeps that class in
+  // sync with Bootstrap's
+  // "shown.bs.tab" event rather than duplicating Bootstrap's own
+  // active-state logic.
+  //
+  // The initial "Out of Stock" button above still needs Bootstrap's own
+  // "active" class too (alongside jc-filter-tab-active), even though
+  // nothing here reads it for styling: Tab.show() finds "the currently
+  // active trigger" by that native class, and skips hiding the old pane
+  // entirely if it finds none -- so without it, the very first tab
+  // switch would leave both panes' content stacked on top of each other.
+  document.querySelectorAll('#materialsAttentionTabs [data-bs-toggle="tab"]').forEach(function (btn) {
+    btn.addEventListener('shown.bs.tab', function (event) {
+      document.querySelectorAll('#materialsAttentionTabs [data-bs-toggle="tab"]').forEach(function (b) {
+        b.classList.remove('jc-filter-tab-active');
+        b.classList.add('btn-outline-secondary');
+        b.setAttribute('aria-selected', 'false');
+      });
+      event.target.classList.add('jc-filter-tab-active');
+      event.target.classList.remove('btn-outline-secondary');
+      event.target.setAttribute('aria-selected', 'true');
+    });
+  });
+
+  // Keyboard support for the "Materials Needing Attention" header
+  // toggle -- it's a <div role="button">, not a real <button>, so (like
+  // the Batch Logs collapsible rows) it needs an explicit Enter/Space
+  // handler; clicks already work via data-bs-toggle="collapse".
+  document.querySelectorAll('[data-bs-target="#materialsAttentionBody"]').forEach(function (header) {
+    header.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        header.click();
+      }
+    });
+  });
+</script>
 {% endblock %}

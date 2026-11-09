@@ -626,27 +626,112 @@ class TestCommissaryDashboardView:
         assert "Sugar (kg)" in content
         assert "jc-expand-toggle" not in content
 
-    def test_more_than_two_low_stock_items_are_progressively_disclosed(
+    def test_more_than_five_low_stock_items_are_progressively_disclosed(
         self, commissary_client, commissary, flour, sugar
     ):
-        """Matches the Owner/Admin dashboard's Resource Monitoring card:
-        the first two items show directly, the rest sit behind a 'Show
-        N more' toggle rather than an unbounded list."""
-        butter = Product.objects.create(
-            name="Butter (kg)", price="80.00", product_type=Product.ProductType.MATERIAL
-        )
-        Inventory.objects.create(
-            branch=commissary, product=butter, quantity_on_hand=5, reorder_threshold=20
-        )
+        """Client review (2026-11-09): the first 5 items show directly
+        in the Low Stock tab's table, the rest sit behind a 'Show N
+        more' toggle rather than an unbounded list."""
+        extra_materials = [
+            Product.objects.create(
+                name=f"Material {i}", price="10.00", product_type=Product.ProductType.MATERIAL
+            )
+            for i in range(4)
+        ]
+        for material in extra_materials:
+            Inventory.objects.create(
+                branch=commissary, product=material, quantity_on_hand=5, reorder_threshold=20
+            )
         for material in (flour, sugar):
             inv = Inventory.objects.get(branch=commissary, product=material)
             inv.reorder_threshold = inv.quantity_on_hand + 10
             inv.save(update_fields=["reorder_threshold"])
+        # 6 low-stock items total (4 extra + flour + sugar) -- 5 show
+        # directly, 1 behind the toggle.
 
         response = commissary_client.get(reverse("production:dashboard"))
         content = response.content.decode()
         assert "jc-expand-toggle" in content
         assert "Show 1 more" in content
+
+    def test_status_tabs_show_counts(self, commissary_client, commissary, flour, sugar):
+        inv = Inventory.objects.get(branch=commissary, product=flour)
+        inv.quantity_on_hand = 0
+        inv.save(update_fields=["quantity_on_hand"])
+        inv = Inventory.objects.get(branch=commissary, product=sugar)
+        inv.reorder_threshold = inv.quantity_on_hand + 10
+        inv.save(update_fields=["reorder_threshold"])
+
+        response = commissary_client.get(reverse("production:dashboard"))
+        content = response.content.decode()
+        assert "Out of Stock (1)" in content
+        assert "Low Stock (1)" in content
+
+    def test_items_sorted_lowest_stock_first_within_each_tab(
+        self, commissary_client, commissary, flour, sugar
+    ):
+        """Client review (2026-11-09): "sorted by urgency" -- within a
+        tab, the item closest to (or furthest past) zero shows first."""
+        flour_inv = Inventory.objects.get(branch=commissary, product=flour)
+        flour_inv.reorder_threshold = flour_inv.quantity_on_hand + 10
+        flour_inv.save(update_fields=["reorder_threshold"])
+        sugar_inv = Inventory.objects.get(branch=commissary, product=sugar)
+        sugar_inv.quantity_on_hand = 1  # closer to zero than flour (50)
+        sugar_inv.reorder_threshold = 10
+        sugar_inv.save(update_fields=["quantity_on_hand", "reorder_threshold"])
+
+        response = commissary_client.get(reverse("production:dashboard"))
+        low_items = response.context["resource_status"]["low_items"]
+        assert [i.product_id for i in low_items] == [sugar.pk, flour.pk]
+
+    def test_branch_only_menu_items_are_excluded(
+        self, commissary_client, commissary, commissary_staff, cake, flour
+    ):
+        """Bug fix (client review, 2026-11-09): a branch-only POS menu
+        item (a coffee drink, say) that happens to have a zeroed
+        Inventory row at the commissary must NOT show up as something
+        the commissary needs to restock -- the commissary never
+        produces or stocks it. Only materials and finished goods the
+        commissary has actually produced belong here."""
+        coffee_drink = Product.objects.create(
+            name="Americano",
+            price="90.00",
+            product_type=Product.ProductType.FINISHED_GOOD,
+            category=Product.Category.COFFEE,
+        )
+        Inventory.objects.create(branch=commissary, product=coffee_drink, quantity_on_hand=0)
+
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 5}],
+        )
+
+        response = commissary_client.get(reverse("production:dashboard"))
+        content = response.content.decode()
+        assert "Americano" not in content
+
+    def test_commissary_produced_finished_good_is_included_when_low(
+        self, commissary_client, commissary, commissary_staff, cake, flour
+    ):
+        """The flip side of the exclusion above: a finished good the
+        commissary genuinely produces (it has real ProductionRecord
+        history) should still surface here if it's running low."""
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=3,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 5}],
+        )
+        cake_inv = Inventory.objects.get(branch=commissary, product=cake)
+        cake_inv.reorder_threshold = 10  # 3 on hand <= 10 -> low stock
+        cake_inv.save(update_fields=["reorder_threshold"])
+
+        response = commissary_client.get(reverse("production:dashboard"))
+        content = response.content.decode()
+        assert "Chocolate Cake" in content
+        assert "Low Stock (1)" in content
 
 
 class TestRoleAwareAdminShell:
