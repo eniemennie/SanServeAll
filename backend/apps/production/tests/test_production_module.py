@@ -414,7 +414,7 @@ class TestBatchManagementView:
     ):
         """Task #140 (client review, 2026-11-04): Batch Management table
         layout cleanup -- a batch with a normal, short ingredient list
-        should show every ingredient inline, with no truncation."""
+        should show every ingredient, with no truncation."""
         services.record_production(
             commissary_staff=commissary_staff,
             product_id=cake.pk,
@@ -430,14 +430,16 @@ class TestBatchManagementView:
         assert "Sugar (kg): 3" in content
         assert "more" not in content
 
-    def test_ingredients_used_truncates_long_lists_without_losing_data(
+    def test_ingredients_used_shows_the_full_list_for_long_lists_too(
         self, commissary_client, commissary_staff, cake, flour, sugar, commissary
     ):
-        """A batch using many materials shouldn't blow up the row height
-        -- only the first 4 show inline, with the rest folded into a
-        '+N more' badge whose tooltip still carries every remaining
-        ingredient's full detail (nothing is dropped, only visually
-        collapsed)."""
+        """Task (client review, 2026-11-09): rows are now collapsible, so
+        a batch with many materials no longer needs a '+N more' badge --
+        the full ingredient list (every material, not just the first 4)
+        renders in the row's expandable detail panel. Collapsed by
+        default via Bootstrap's `collapse` class, which hides content
+        with CSS only -- the full list is still present in the response
+        body, just not visible until the row is expanded."""
         extra_materials = [
             Product.objects.create(
                 name=f"Material {i}", price="10.00", product_type=Product.ProductType.MATERIAL
@@ -460,11 +462,39 @@ class TestBatchManagementView:
 
         response = commissary_client.get(reverse("production:batch_management"))
         content = response.content.decode()
-        assert "+1 more" in content
-        # The 5th material (folded away from the inline list) must still
-        # be present SOMEWHERE in the markup (the badge's tooltip) --
-        # truncation must never silently drop real data.
-        assert "Material 2" in content
+        assert "more" not in content
+        for material in extra_materials:
+            assert material.name in content
+
+    def test_batch_row_has_collapse_target_for_its_details(
+        self, commissary_client, commissary_staff, cake, flour
+    ):
+        """Task (client review, 2026-11-09): each batch row is a
+        Bootstrap collapse trigger pointing at its own detail row, so the
+        two stay correctly paired even as rows are added/removed."""
+        record = services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 5}],
+        )
+        response = commissary_client.get(reverse("production:batch_management"))
+        content = response.content.decode()
+        assert f'data-bs-target="#batch-details-{record.pk}"' in content
+        assert f'id="batch-details-{record.pk}"' in content
+
+    def test_supplier_shown_in_the_details_panel(
+        self, commissary_client, commissary_staff, cake, flour
+    ):
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 5}],
+            supplier="ABC Grains Co.",
+        )
+        response = commissary_client.get(reverse("production:batch_management"))
+        assert "ABC Grains Co." in response.content.decode()
 
 
 class TestGetTotalOutput:
@@ -570,6 +600,74 @@ class TestGetTotalOutput:
         a per-row branch tag that doesn't correspond to real data."""
         response = commissary_client.get(reverse("production:batch_management"))
         assert b"<th>Branch</th>" not in response.content
+
+    def test_status_tab_counts_stay_correct_regardless_of_active_tab(
+        self, commissary_client, commissary_staff, cake, flour
+    ):
+        """Bug fix (client review, 2026-11-09): the old stat cards were
+        computed by re-filtering the already status-narrowed `records`
+        queryset, so selecting a status in the old dropdown silently
+        zeroed out the other three counts. The status tabs need accurate
+        counts no matter which tab is active -- this is the regression
+        guard for that fix."""
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=5,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 2}],
+            status=ProductionRecord.Status.PENDING,
+        )
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 4}],
+            status=ProductionRecord.Status.COMPLETED,
+        )
+
+        response = commissary_client.get(
+            reverse("production:batch_management"), {"status": "PENDING"}
+        )
+        stats = response.context["stats"]
+        assert stats["total"] == 2
+        assert stats["pending"] == 1
+        assert stats["completed"] == 1
+
+    def test_status_tabs_show_counts_in_their_labels(
+        self, commissary_client, commissary_staff, cake, flour
+    ):
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=5,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 2}],
+            status=ProductionRecord.Status.PENDING,
+        )
+        response = commissary_client.get(reverse("production:batch_management"))
+        content = response.content.decode()
+        assert "Pending (1)" in content
+        assert "Completed (0)" in content
+
+    def test_batches_are_paginated_25_per_page(
+        self, commissary_client, commissary_staff, cake, flour
+    ):
+        """360 real batches is too many to render at once -- the row
+        list is paginated rather than loaded in full on one page."""
+        for _ in range(30):
+            services.record_production(
+                commissary_staff=commissary_staff,
+                product_id=cake.pk,
+                quantity_produced=1,
+                ingredient_rows=[{"material_id": flour.pk, "quantity_used": 1}],
+            )
+
+        response = commissary_client.get(reverse("production:batch_management"))
+        assert len(response.context["records"]) == 25
+        assert response.context["page_obj"].paginator.num_pages == 2
+        assert response.context["filtered_total"] == 30
+
+        page_two = commissary_client.get(reverse("production:batch_management"), {"page": 2})
+        assert len(page_two.context["records"]) == 5
 
 
 class TestCommissaryDashboardView:

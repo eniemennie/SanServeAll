@@ -688,6 +688,47 @@ body.jc-dark .btn-close {
   color: var(--jc-text);
 }
 
+/* --- Batch Management: collapsible batch rows (Batch Logs table,
+   client review 2026-11-09) ---
+   Each production batch collapses to one uniform-height summary row;
+   clicking it (or the disclosure arrow) expands a second row beneath
+   via Bootstrap's collapse component, showing the full ingredient list
+   and supplier -- a long ingredient list no longer stretches the row
+   or needs a "+N more" badge to stay readable. */
+.jc-batch-row {
+  cursor: pointer;
+}
+.jc-batch-row td {
+  height: 52px;
+  vertical-align: middle;
+}
+.jc-batch-row:hover {
+  background-color: var(--jc-canvas);
+}
+.jc-batch-row:focus-visible {
+  outline: 2px solid var(--jc-teal);
+  outline-offset: -2px;
+}
+.jc-batch-toggle-icon {
+  display: inline-block;
+  transition: transform 0.15s ease;
+  color: var(--jc-text-muted);
+}
+.jc-batch-row[aria-expanded="true"] .jc-batch-toggle-icon {
+  transform: rotate(90deg);
+}
+.jc-batch-details-row > td {
+  background-color: var(--jc-canvas);
+  border-top: none;
+}
+.jc-batch-details-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--jc-text-muted);
+}
+
 /* Responsive: Phase 5 spot-check. A page-header row (title + a single
    action button, both vertically centered) is reused across most
    Admin/Commissary screens -- on a phone-width screen, a longer title
