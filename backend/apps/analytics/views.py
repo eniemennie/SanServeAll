@@ -12,7 +12,9 @@ staff-facing version of these screens in this batch.
 import json
 from datetime import datetime
 
+import openpyxl
 from django.core.paginator import Paginator
+from django.http import HttpResponse
 from django.shortcuts import render
 
 from apps.accounts.models import Branch, Role
@@ -20,37 +22,12 @@ from apps.accounts.permissions import role_required
 from apps.analytics import services
 
 
-@role_required(Role.OWNER_ADMIN)
-def reports_hub(request):
-    """Reports hub. The reference design shows four tabs (Sales & Trend
-    Report / Product Performance / Resource Consumption / Operational
-    Performance), but only three real URLs exist -- Resource Consumption
-    and Operational Performance are already one combined view
-    (resource_consumption, Fig. 3-30/3-31 together). This is a NEW view
-    that assembles all four real datasets in a single request, with the
-    tabs switched client-side (see extra_js below) rather than inventing
-    a fourth URL that doesn't correspond to anything.
-
-    Named "Reports," not "Reports & Export" -- no CSV/PDF download
-    exists anywhere in this codebase (adviser compliance review flagged
-    this; rather than build a real export feature under today's time
-    constraints, the label was corrected to match what the screen
-    actually does). This view covers viewing/reporting only.
-
-    Task #146 (client review, 2026-11-04): "Users should be able to
-    select a specific date range... rather than being limited to preset
-    reporting periods." A real date_from/date_to range (same
-    YYYY-MM-DD parsing/validation pattern already proven on
-    analytics:sales_history) now takes priority over the preset `days`
-    dropdown whenever both dates are given and valid. All of Sales
-    Summary, Product Performance, Resource Consumption, and Operational
-    Performance respect it. The weekly trend CHART is a deliberate
-    exception -- it's a fixed "last 8 weeks" line chart by design, and
-    bucketing an arbitrary short range (the client's own example,
-    "November 6-7") into meaningful weekly points isn't a sensible
-    reshape of that visual; the template labels it accordingly rather
-    than silently implying it also follows the custom range.
-    """
+def _resolve_reports_hub_filters(request):
+    """Shared branch/days/date-range parsing for reports_hub and its
+    Excel export sibling (reports_hub_export) -- factored out so the
+    export always resolves the exact same filters the on-screen view
+    just used, rather than risking the two interpreting a query string
+    differently were this logic duplicated."""
     days = int(request.GET.get("days", 30))
 
     branch_id = request.GET.get("branch")
@@ -77,6 +54,59 @@ def reports_hub(request):
     effective_from = date_from if not date_error else None
     effective_to = date_to if not date_error else None
 
+    return {
+        "days": days,
+        "selected_branch": selected_branch,
+        "date_from_raw": date_from_raw,
+        "date_to_raw": date_to_raw,
+        "date_error": date_error,
+        "effective_from": effective_from,
+        "effective_to": effective_to,
+    }
+
+
+@role_required(Role.OWNER_ADMIN)
+def reports_hub(request):
+    """Reports hub. The reference design shows four tabs (Sales & Trend
+    Report / Product Performance / Resource Consumption / Operational
+    Performance), but only three real URLs exist -- Resource Consumption
+    and Operational Performance are already one combined view
+    (resource_consumption, Fig. 3-30/3-31 together). This is a NEW view
+    that assembles all four real datasets in a single request, with the
+    tabs switched client-side (see extra_js below) rather than inventing
+    a fourth URL that doesn't correspond to anything.
+
+    Previously named "Reports," not "Reports & Export" -- no CSV/PDF
+    download existed anywhere in this codebase (adviser compliance
+    review flagged this; rather than build a real export feature under
+    an earlier time constraint, the label was corrected to match what
+    the screen actually did). Client review (2026-11-09, Appendix D/
+    Fig. 4-4 screenshot-readiness assessment) surfaced that the
+    manuscript still referenced a "downloadable Excel report" -- see
+    reports_hub_export below, which is the real feature that label was
+    waiting on. This view itself still covers viewing/reporting only;
+    the export is a separate view/URL.
+
+    Task #146 (client review, 2026-11-04): "Users should be able to
+    select a specific date range... rather than being limited to preset
+    reporting periods." A real date_from/date_to range (same
+    YYYY-MM-DD parsing/validation pattern already proven on
+    analytics:sales_history) now takes priority over the preset `days`
+    dropdown whenever both dates are given and valid. All of Sales
+    Summary, Product Performance, Resource Consumption, and Operational
+    Performance respect it. The weekly trend CHART is a deliberate
+    exception -- it's a fixed "last 8 weeks" line chart by design, and
+    bucketing an arbitrary short range (the client's own example,
+    "November 6-7") into meaningful weekly points isn't a sensible
+    reshape of that visual; the template labels it accordingly rather
+    than silently implying it also follows the custom range.
+    """
+    f = _resolve_reports_hub_filters(request)
+    selected_branch = f["selected_branch"]
+    days = f["days"]
+    effective_from = f["effective_from"]
+    effective_to = f["effective_to"]
+
     sales_summary = services.get_sales_summary(
         branch=selected_branch, days=days, date_from=effective_from, date_to=effective_to
     )
@@ -99,9 +129,9 @@ def reports_hub(request):
             "branches": Branch.objects.filter(is_active=True, is_commissary=False),
             "selected_branch": selected_branch,
             "days": days,
-            "date_from": date_from_raw,
-            "date_to": date_to_raw,
-            "date_error": date_error,
+            "date_from": f["date_from_raw"],
+            "date_to": f["date_to_raw"],
+            "date_error": f["date_error"],
             "using_custom_range": bool(effective_from and effective_to),
             "sales_summary": sales_summary,
             "product_performance": product_performance_rows,
@@ -115,6 +145,133 @@ def reports_hub(request):
             ),
         },
     )
+
+
+@role_required(Role.OWNER_ADMIN)
+def reports_hub_export(request):
+    """Excel download for the Reports Hub (client review, 2026-11-09:
+    Appendix D/Fig. 4-4 screenshot-readiness assessment surfaced that
+    the manuscript references a "downloadable Excel report" that never
+    actually existed in this codebase -- reports_hub's own docstring
+    already documented that an adviser compliance review caught the
+    same gap earlier and the screen was relabeled "Reports," not
+    "Reports & Export," rather than build this under a prior time
+    constraint. This view is the real feature that label was waiting
+    on.
+
+    Resolves filters via the exact same helper reports_hub uses
+    (_resolve_reports_hub_filters) and calls the exact same service
+    functions with the exact same arguments, so the downloaded workbook
+    always matches what's currently on screen for the same branch/
+    days/date-range query string -- never a second, divergent
+    calculation of the same numbers.
+
+    One workbook, one sheet per Reports Hub tab (Sales & Trend, Product
+    Performance, Resource Consumption, Operational Performance) -- the
+    hub combines all four into one page, so the download mirrors that
+    rather than forcing four separate files.
+    """
+    f = _resolve_reports_hub_filters(request)
+    selected_branch = f["selected_branch"]
+    days = f["days"]
+    effective_from = f["effective_from"]
+    effective_to = f["effective_to"]
+
+    sales_summary = services.get_sales_summary(
+        branch=selected_branch, days=days, date_from=effective_from, date_to=effective_to
+    )
+    trend = services.get_weekly_sales_trend(branch=selected_branch)
+    product_performance_rows = services.get_product_performance(
+        branch=selected_branch, days=days, date_from=effective_from, date_to=effective_to
+    )
+    consumption = services.get_resource_consumption_summary(
+        days=days, date_from=effective_from, date_to=effective_to
+    )
+    operational = services.get_operational_performance_summary(
+        days=days, date_from=effective_from, date_to=effective_to
+    )
+
+    workbook = openpyxl.Workbook()
+    workbook.remove(workbook.active)
+
+    sheet = workbook.create_sheet("Sales & Trend")
+    sheet.append(["Metric", "Value"])
+    sheet.append(["Total Revenue", float(sales_summary["total_revenue"])])
+    sheet.append(["Average Daily Revenue", float(sales_summary["average_daily_revenue"])])
+    sheet.append(["Total Transactions", sales_summary["total_transactions"]])
+    sheet.append(["Total Units Sold", sales_summary["total_units_sold"]])
+    sheet.append([])
+    sheet.append(["Week", "Revenue"])
+    for row in trend:
+        sheet.append([row["week_label"], row["revenue"]])
+
+    sheet = workbook.create_sheet("Product Performance")
+    sheet.append(["Product", "This Period", "Previous Period", "Growth Rate (%)"])
+    for row in product_performance_rows:
+        sheet.append(
+            [
+                row["product_name"],
+                row["current_units"],
+                row["previous_units"],
+                round(row["growth_rate"], 1) if row["growth_rate"] is not None else "New",
+            ]
+        )
+
+    sheet = workbook.create_sheet("Resource Consumption")
+    sheet.append(["Material", "Unit", "Total Used", "Total Cost"])
+    for material in consumption["by_material"]:
+        sheet.append(
+            [
+                material["material__name"],
+                material["unit_display"],
+                float(material["total_used"]),
+                float(material["total_material_cost"]),
+            ]
+        )
+    sheet.append([])
+    sheet.append(["Total Material Cost", float(consumption["total_cost"])])
+    sheet.append(["Units Produced", consumption["total_produced"]])
+    sheet.append(["Cost per Unit Produced", float(consumption["cost_per_unit_produced"])])
+
+    sheet = workbook.create_sheet("Operational Performance")
+    sheet.append(["Metric", "Value"])
+    sheet.append(["Total Batches", operational["total_batches"]])
+    sheet.append(["Completed Batches", operational["completed_batches"]])
+    sheet.append(
+        [
+            "Completion Rate (%)",
+            (
+                round(operational["completion_rate"], 1)
+                if operational["completion_rate"] is not None
+                else "N/A"
+            ),
+        ]
+    )
+    sheet.append(["Passed Batches", operational["passed_batches"]])
+    sheet.append(
+        [
+            "Quality Pass Rate (%)",
+            (
+                round(operational["quality_pass_rate"], 1)
+                if operational["quality_pass_rate"] is not None
+                else "N/A"
+            ),
+        ]
+    )
+
+    branch_label = selected_branch.name if selected_branch else "AllBranches"
+    if effective_from and effective_to:
+        range_label = f"{f['date_from_raw']}_to_{f['date_to_raw']}"
+    else:
+        range_label = f"Last{days}Days"
+    filename = f"SanServeAll_Report_{branch_label}_{range_label}.xlsx".replace(" ", "")
+
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    workbook.save(response)
+    return response
 
 
 @role_required(Role.OWNER_ADMIN)

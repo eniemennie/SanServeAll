@@ -7,10 +7,13 @@ base.html directly, so the chrome is built once here rather than duplicated
 per screen (Dashboard, Batch Logs, Demand Forecasting, Resource Management,
 Reports, Product Availability, Settings).
 
-Nav label is "Reports" (not "Reports & Export") -- no CSV/PDF export
-feature exists anywhere in this codebase; "Export" was dropped from the
-label rather than left promising something unbuilt (adviser compliance
-review, item re: the Reports & Export screen's naming).
+Nav label is "Reports" -- originally not "Reports & Export" because no
+CSV/PDF export feature existed anywhere in this codebase (adviser
+compliance review, item re: the Reports & Export screen's naming); kept
+as the shorter "Reports" even now that a real Excel export exists on
+that screen (analytics:reports_hub_export, added 2026-11-09), since the
+nav label just needs to get someone to the right screen, not describe
+everything on it.
 
 Required/optional context from the view:
   active_nav      -- Owner/Admin: one of dashboard, batch, forecast,
