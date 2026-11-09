@@ -167,8 +167,11 @@ def purchase_order_list(request):
     error = None
     created_order = None
 
+    # Client review (2026-11-09): widened to Product.MATERIAL_TYPES
+    # (Raw Material + Packaging Material) -- see create_purchase_order's
+    # own service-layer lookup for why.
     materials = Product.objects.filter(
-        product_type=Product.ProductType.MATERIAL, is_active=True
+        product_type__in=Product.MATERIAL_TYPES, is_active=True
     ).order_by("name")
 
     if request.method == "POST":

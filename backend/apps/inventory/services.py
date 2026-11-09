@@ -7,17 +7,6 @@ from decimal import Decimal, InvalidOperation
 
 from apps.inventory.models import Inventory, InventoryTransaction, Product
 
-# Task #148 (client review, 2026-11-04): "Packaging vs Food" is the one
-# real distinction the client asked for among MATERIAL rows, but a raw/
-# food material's Product.category is deliberately left blank (see
-# Product.Category's own docstring) rather than given an invented "Raw
-# Material" value. This sentinel is a UI-only filter choice -- never a
-# stored category value -- meaning "MATERIAL rows that are NOT tagged
-# Packaging," so the Product Availability filter can still offer a real
-# "Raw Materials (Food)" option without the database ever claiming that
-# label is an actual category.
-RAW_MATERIAL_CATEGORY_FILTER = "RAW_MATERIAL"
-
 
 def get_product_availability(branch=None, product_type=None, category=None, search=""):
     """Product Availability screen (Fig. 3-34), enhanced beyond the bare
@@ -34,11 +23,13 @@ def get_product_availability(branch=None, product_type=None, category=None, sear
     gap assessment: a discontinued product with leftover stock was
     still showing up here as if it were a normal, orderable item.
 
-    `category` filters by Product.category (e.g. a finished-goods
-    category like COFFEE, or Product.Category.PACKAGING for materials).
-    Passing RAW_MATERIAL_CATEGORY_FILTER is the one special case: it
-    means "a MATERIAL row with no category tagged at all" (see that
-    constant's own docstring for why this isn't a real stored value).
+    `category` filters by Product.category -- a finished-goods POS
+    category like COFFEE. Client review (2026-11-09): Raw Materials and
+    Packaging Materials are now their own product_type values with no
+    category of their own, so `category` is only ever meaningful on the
+    Finished Products tab; passing it alongside a MATERIAL/PACKAGING
+    `product_type` simply matches nothing (every one of those rows has a
+    blank category), same as passing a nonexistent category would.
     """
     from apps.accounts.models import Branch
 
@@ -51,11 +42,7 @@ def get_product_availability(branch=None, product_type=None, category=None, sear
         )
     if product_type:
         queryset = queryset.filter(product__product_type=product_type)
-    if category == RAW_MATERIAL_CATEGORY_FILTER:
-        queryset = queryset.filter(
-            product__product_type=Product.ProductType.MATERIAL, product__category=""
-        )
-    elif category:
+    if category:
         queryset = queryset.filter(product__category=category)
     if search:
         queryset = queryset.filter(product__name__icontains=search)
@@ -191,8 +178,9 @@ def get_resource_status_summary(branch=None, product_type=None, product_ids=None
 
     product_type=None (the default) includes every product type, same as
     before this parameter existed -- the KPI card's "overall sufficiency"
-    is meant to cover everything tracked. Pass Product.ProductType.MATERIAL
-    to scope this to raw materials only (Dashboard Home's Resource
+    is meant to cover everything tracked. Pass a single ProductType value
+    or an iterable of them (e.g. Product.MATERIAL_TYPES, to scope this to
+    raw materials AND packaging materials -- Dashboard Home's Resource
     Monitoring list, Row N), typically combined with branch=<the
     commissary> since materials only ever have Inventory rows there.
 
@@ -225,7 +213,10 @@ def get_resource_status_summary(branch=None, product_type=None, product_ids=None
             branch__in=Branch.objects.filter(is_active=True, is_commissary=False)
         )
     if product_type is not None:
-        queryset = queryset.filter(product__product_type=product_type)
+        if isinstance(product_type, (list, tuple, set, frozenset)):
+            queryset = queryset.filter(product__product_type__in=product_type)
+        else:
+            queryset = queryset.filter(product__product_type=product_type)
     if product_ids is not None:
         queryset = queryset.filter(product_id__in=product_ids)
 
@@ -366,18 +357,15 @@ def create_product(
     (item 25): an unrecognized value should be a clear, catchable error at
     creation time, not stored silently and discovered later.
 
-    `category` (dev backlog follow-up to Task #148's Packaging Materials
-    tab, client review 2026-11-09): optional, defaults to blank like the
-    model field itself -- existing callers are unaffected. New packaging
-    items previously only arrived via the client's own bulk import
-    (import_raw_and_packaging_materials.py); this is the one new path that
-    lets the Add Product form tag a MATERIAL product Packaging directly.
-    Deliberately narrow in scope, matching the form field it backs: the
-    only value accepted here is Product.Category.PACKAGING, and only for
-    a MATERIAL product (see the Category enum's own docstring -- every
-    other Category value is a FINISHED_GOOD/POS concept this function
-    doesn't touch). A FINISHED_GOOD's own category assignment stays out
-    of scope for this change.
+    `category` is a POS category-tab concept (COFFEE, PASTA, ...) that
+    only ever means anything for a FINISHED_GOOD -- optional, defaults to
+    blank like the model field itself. Client review (2026-11-09): this
+    used to also accept Product.Category.PACKAGING to tag a MATERIAL
+    product Packaging (the Add Product form's old "Category" field,
+    dev backlog follow-up to Task #148's Packaging Materials tab) --
+    Packaging is now its own Product.ProductType.PACKAGING value, passed
+    as `product_type` directly like any other type, so that tagging
+    path and its validation no longer exist here.
     """
     from apps.accounts.models import Branch
 
@@ -400,11 +388,6 @@ def create_product(
             raise InventoryServiceError(f"'{unit_of_measure}' is not a recognized unit of measure.")
 
     category = (category or "").strip()
-    if category:
-        if category != Product.Category.PACKAGING:
-            raise InventoryServiceError(f"'{category}' is not a recognized category.")
-        if product_type != Product.ProductType.MATERIAL:
-            raise InventoryServiceError("Only Raw Material products can be tagged Packaging.")
 
     product = Product.objects.create(
         name=name,

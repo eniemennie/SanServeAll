@@ -1,3 +1,4 @@
+{% load sanserveall_filters %}
 {% comment %}
 Shared partial for one "Materials Needing Attention" tab's content
 (commissary_dashboard.html). Takes:
@@ -32,12 +33,12 @@ already uses, just applied per-row instead of per-bullet.
         {% for item in items|slice:":5" %}
         <tr>
             <td>{{ item.product.name }}</td>
-            <td>
-                {% if item.product.product_type == "MATERIAL" %}
-                    {% if item.product.category == "PACKAGING" %}Packaging{% else %}Raw Material{% endif %}
-                {% else %}Finished Good{% endif %}
-            </td>
-            <td>{{ item.display_quantity }} {{ item.product.get_unit_of_measure_display }}</td>
+            <!-- Client review (2026-11-09): Packaging Material is now its
+                 own product_type, so its own display label reads directly
+                 off get_product_type_display rather than a category check
+                 nested inside a MATERIAL check. -->
+            <td>{{ item.product.get_product_type_display }}</td>
+            <td>{{ item.display_quantity|qty:item.product.unit_of_measure }} {{ item.product.get_unit_of_measure_display }}</td>
             <td><span class="jc-badge {{ badge_class }}">{{ status }}</span></td>
         </tr>
         {% endfor %}
@@ -47,12 +48,8 @@ already uses, just applied per-row instead of per-bullet.
         {% for item in items|slice:"5:" %}
         <tr>
             <td>{{ item.product.name }}</td>
-            <td>
-                {% if item.product.product_type == "MATERIAL" %}
-                    {% if item.product.category == "PACKAGING" %}Packaging{% else %}Raw Material{% endif %}
-                {% else %}Finished Good{% endif %}
-            </td>
-            <td>{{ item.display_quantity }} {{ item.product.get_unit_of_measure_display }}</td>
+            <td>{{ item.product.get_product_type_display }}</td>
+            <td>{{ item.display_quantity|qty:item.product.unit_of_measure }} {{ item.product.get_unit_of_measure_display }}</td>
             <td><span class="jc-badge {{ badge_class }}">{{ status }}</span></td>
         </tr>
         {% endfor %}

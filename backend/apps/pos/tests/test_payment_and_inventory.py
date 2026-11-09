@@ -244,10 +244,7 @@ class TestPackagingConsumptionOnSale:
     @pytest.fixture
     def cup(self, branch):
         cup = Product.objects.create(
-            name="16oz Cup",
-            price="3.00",
-            product_type=Product.ProductType.MATERIAL,
-            category=Product.Category.PACKAGING,
+            name="16oz Cup", price="3.00", product_type=Product.ProductType.PACKAGING
         )
         Inventory.objects.create(branch=branch, product=cup, quantity_on_hand=50)
         return cup
@@ -314,10 +311,7 @@ class TestPackagingConsumptionOnSale:
         self, cashier, branch, product, cup
     ):
         lid = Product.objects.create(
-            name="Cup Lid",
-            price="1.00",
-            product_type=Product.ProductType.MATERIAL,
-            category=Product.Category.PACKAGING,
+            name="Cup Lid", price="1.00", product_type=Product.ProductType.PACKAGING
         )
         Inventory.objects.create(branch=branch, product=lid, quantity_on_hand=50)
         ProductPackaging.objects.create(finished_good=product, packaging_material=cup)

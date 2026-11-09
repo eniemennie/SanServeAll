@@ -218,11 +218,14 @@ class TestImportRawAndPackagingMaterials:
         pack_product = Product.objects.get(name__icontains="Packaging hot")
         assert pack_product.unit_of_measure == Product.UnitOfMeasure.PIECE
 
-    def test_packaging_file_rows_are_tagged_with_the_packaging_category(self, branches, tmp_path):
-        """Task #148 (client review, 2026-11-04): 'Packaging vs Food'
-        filtering needs a real, persisted signal -- the source file
-        itself (never unit_of_measure, which packaging and raw-material
-        rows both use e.g. PIECE/PACK/BOX)."""
+    def test_packaging_file_rows_are_tagged_with_the_packaging_product_type(
+        self, branches, tmp_path
+    ):
+        """Task #148 (client review, 2026-11-04), promoted (client
+        review, 2026-11-09) from a category tag to its own product_type:
+        'Packaging vs Food' filtering needs a real, persisted signal --
+        the source file itself (never unit_of_measure, which packaging
+        and raw-material rows both use e.g. PIECE/PACK/BOX)."""
         pack_path = tmp_path / "packaging.xlsx"
         _write_workbook(
             pack_path, [("Cling wrap", "Shopee", "roll", 50.0, 12, 3, "COMMISSARY", True)]
@@ -230,23 +233,31 @@ class TestImportRawAndPackagingMaterials:
         call_command("import_raw_and_packaging_materials", packaging_materials=str(pack_path))
 
         product = Product.objects.get(name="Cling wrap")
-        assert product.category == Product.Category.PACKAGING
+        assert product.product_type == Product.ProductType.PACKAGING
+        assert product.category == ""
 
-    def test_raw_materials_file_rows_are_left_with_a_blank_category(self, branches, tmp_path):
+    def test_raw_materials_file_rows_are_tagged_with_the_material_product_type(
+        self, branches, tmp_path
+    ):
         raw_path = tmp_path / "raw.xlsx"
         _write_workbook(
             raw_path, [("White sugar", "Juan Store", "kg", 82.0, 113.9, 37.3, "COMMISSARY", True)]
         )
         call_command("import_raw_and_packaging_materials", raw_materials=str(raw_path))
 
-        assert Product.objects.get(name="White sugar").category == ""
+        product = Product.objects.get(name="White sugar")
+        assert product.product_type == Product.ProductType.MATERIAL
+        assert product.category == ""
 
-    def test_rerun_backfills_category_onto_an_already_imported_product(self, branches, tmp_path):
-        """A product imported before `category` was tracked here (or
-        before this task existed at all) gets the right category the
-        next time this command runs against the same file -- category
-        is catalog metadata, kept in sync on every run just like price/
-        supplier/unit, unrelated to the --force/Inventory-quantity rule."""
+    def test_rerun_backfills_product_type_onto_an_already_imported_product(
+        self, branches, tmp_path
+    ):
+        """A product imported before `product_type` distinguished
+        Packaging from Raw Material (or before this task existed at
+        all) gets the right product_type the next time this command
+        runs against the same file -- product_type is catalog metadata
+        here, kept in sync on every run just like price/supplier/unit,
+        unrelated to the --force/Inventory-quantity rule."""
         pack_path = tmp_path / "packaging.xlsx"
         _write_workbook(
             pack_path, [("Cling wrap", "Shopee", "roll", 50.0, 12, 3, "COMMISSARY", True)]
@@ -256,13 +267,13 @@ class TestImportRawAndPackagingMaterials:
             price="40.00",
             product_type=Product.ProductType.MATERIAL,
             unit_of_measure=Product.UnitOfMeasure.ROLL,
-            category="",  # simulates a pre-task-#148 import
+            category="",  # simulates a pre-promotion import
         )
 
         call_command("import_raw_and_packaging_materials", packaging_materials=str(pack_path))
 
         product.refresh_from_db()
-        assert product.category == Product.Category.PACKAGING
+        assert product.product_type == Product.ProductType.PACKAGING
 
     def test_missing_file_raises_a_clear_error(self, branches):
         with pytest.raises(CommandError, match="File not found"):

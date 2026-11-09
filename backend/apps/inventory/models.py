@@ -19,6 +19,29 @@ class Product(models.Model):
     class ProductType(models.TextChoices):
         FINISHED_GOOD = "FINISHED_GOOD", "Finished Good"
         MATERIAL = "MATERIAL", "Raw Material"
+        # Client review (2026-11-09): "Packaging vs Food" used to be
+        # recorded as Product.category == Category.PACKAGING on an
+        # otherwise-MATERIAL row (see the now-removed Category.PACKAGING
+        # and import_raw_and_packaging_materials.py's old docstring) --
+        # a real, first-class distinction the client treats as its own
+        # item type (its own tab, its own spreadsheet), not a sub-tag of
+        # Raw Material. Promoted to its own ProductType value so the
+        # Product Availability tabs, the Add Product form, and every
+        # "what counts as a material" query read directly from
+        # product_type instead of a type+category combination.
+        PACKAGING = "PACKAGING", "Packaging Material"
+
+    # Product types that represent a stocked input/material (consumed by
+    # production or by selling a finished good) rather than something
+    # sold directly through POS. Every place that used to mean "any kind
+    # of material" by filtering product_type == MATERIAL alone -- back
+    # when Packaging was just a MATERIAL row tagged with
+    # category == Category.PACKAGING -- now filters on this tuple
+    # instead, so Packaging keeps behaving like a material everywhere
+    # Raw Material already did (purchasing, production ingredient
+    # usage/recipe deduction, restocking risk, the commissary dashboard's
+    # "Materials Needing Attention").
+    MATERIAL_TYPES = (ProductType.MATERIAL, ProductType.PACKAGING)
 
     class UnitOfMeasure(models.TextChoices):
         """Backend gap assessment item 28: quantities everywhere else in
@@ -54,20 +77,19 @@ class Product(models.Model):
         DESSERTS = "DESSERTS", "Desserts"
         CAKES = "CAKES", "Cakes"
         BAKERY = "BAKERY", "Bakery & Pasalubong"
-        # Task #148 (client review, 2026-11-04): the only Category value
-        # that applies to a MATERIAL row, not a sellable FINISHED_GOOD --
-        # every choice above this line is a POS category-tab concept
-        # (Row 3 redesign) and stays finished-goods-only. A raw/food
-        # material (flour, sugar, ice, ...) is deliberately left with a
-        # BLANK category rather than inventing a "Raw Material" value for
-        # it: the only real distinction the client asked for is
-        # "Packaging vs Food", and food materials already read clearly as
-        # "not Packaging" without a second label. See
-        # import_raw_and_packaging_materials.py, which tags this from
-        # Packaging_Materials.xlsx specifically -- it is never guessed
-        # from unit_of_measure (packaging items aren't reliably ROLL; many
-        # are PIECE/PACK/BOX, the same units raw materials also use).
-        PACKAGING = "PACKAGING", "Packaging"
+        # Every Category value is a POS category-tab concept (Row 3
+        # redesign) and stays finished-goods-only. A MATERIAL or
+        # PACKAGING row is deliberately left with a BLANK category --
+        # categories aren't browsed on either of those tabs.
+        #
+        # Client review (2026-11-09): there used to be a PACKAGING value
+        # here too (task #148), tagging a MATERIAL row as packaging
+        # rather than food -- that's now Product.ProductType.PACKAGING,
+        # a real item type of its own instead of a category on top of
+        # Raw Material. Removed from here rather than kept as a second,
+        # now-redundant way to say the same thing; see the data
+        # migration that moved every row carrying the old
+        # category == "PACKAGING" tag onto the new product_type.
 
     name = models.CharField(max_length=150)
     price = models.DecimalField(max_digits=10, decimal_places=2)
@@ -167,9 +189,9 @@ class ProductPackaging(models.Model):
     not per production batch. (Packaging that genuinely is consumed per
     batch, e.g. takeout boxes assembled at the commissary, can already
     be logged as an ordinary IngredientUsage row today -- its `material`
-    FK only requires product_type=MATERIAL, which every packaging
-    Product already is; see import_raw_and_packaging_materials.py.
-    That's a separate, already-working path, not this one.)
+    FK accepts any Product.MATERIAL_TYPES product, which includes every
+    packaging Product; see import_raw_and_packaging_materials.py. That's
+    a separate, already-working path, not this one.)
 
     No mapping exists until someone (Owner/Admin or Purchasing) adds one
     here -- deliberately opt-in rather than guessed, since not every
@@ -186,7 +208,7 @@ class ProductPackaging(models.Model):
         "inventory.Product",
         on_delete=models.PROTECT,
         related_name="used_as_packaging_for",
-        limit_choices_to={"category": "PACKAGING"},
+        limit_choices_to={"product_type": "PACKAGING"},
     )
     quantity_per_unit = models.DecimalField(
         max_digits=12,

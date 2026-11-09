@@ -44,8 +44,23 @@ def compute_average_daily_demand(branch, product, days_history=30):
     would always read zero demand regardless of real consumption, making
     every material look artificially "safe." Each product type reads
     from the data source that actually reflects how it leaves inventory.
+
+    Packaging Material (client review, 2026-11-09, promoted from a
+    MATERIAL row tagged category=PACKAGING to its own product_type) is
+    never a SalesItem either -- a cup or lid is never its own line item
+    -- so it would hit the same "always zero" problem as a raw material
+    if it fell into the `else` branch below. Unlike a raw material
+    though, it isn't only consumed through IngredientUsage: most of it
+    is deducted per sold finished good via ProductPackaging (see
+    apps.pos.services._deduct_inventory_for_sale), logged as its own
+    PACKAGING_CONSUMPTION InventoryTransaction at the branch that sold
+    it; some may also be used directly in a production batch (e.g.
+    takeout boxes assembled at the commissary), logged as
+    PRODUCTION_CONSUMPTION. Summing both, branch-scoped, is the honest
+    "how much of this did this branch actually use" figure -- the same
+    real audit trail driving find_ledger_discrepancies, not a guess.
     """
-    from apps.inventory.models import Product
+    from apps.inventory.models import InventoryTransaction, Product
 
     since = timezone.now() - timedelta(days=days_history)
 
@@ -61,6 +76,21 @@ def compute_average_daily_demand(branch, product, days_history=30):
             material=product,
         ).values_list("quantity_used", flat=True)
         total = sum(total_used)
+    elif product.product_type == Product.ProductType.PACKAGING:
+        consumption_types = [
+            InventoryTransaction.MovementType.PACKAGING_CONSUMPTION,
+            InventoryTransaction.MovementType.PRODUCTION_CONSUMPTION,
+        ]
+        # quantity_change is negative for a deduction -- negate the sum
+        # to get a positive "amount consumed", same sign convention
+        # compute_features expects from the MATERIAL/SalesItem branches.
+        total_consumed = InventoryTransaction.objects.filter(
+            branch=branch,
+            product=product,
+            movement_type__in=consumption_types,
+            created_at__gte=since,
+        ).values_list("quantity_change", flat=True)
+        total = -sum(total_consumed)
     else:
         total_sold = SalesItem.objects.filter(
             transaction__branch=branch,

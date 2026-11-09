@@ -576,9 +576,14 @@ def get_resource_management_dashboard_data(days=30):
 
     consumption = get_resource_consumption_summary(days=days)
 
+    # Client review (2026-11-09): widened from Product.ProductType.MATERIAL
+    # alone to Product.MATERIAL_TYPES -- Packaging Material is now its own
+    # product_type (not a MATERIAL row tagged category=PACKAGING), and a
+    # packaging restocking risk belongs in this materials-wide list just
+    # as much as a food-material one does.
     material_alerts = []
     for score in get_latest_risk_scores(branch=None).filter(
-        risk_level__in=["HIGH", "MEDIUM"], product__product_type=Product.ProductType.MATERIAL
+        risk_level__in=["HIGH", "MEDIUM"], product__product_type__in=Product.MATERIAL_TYPES
     ):
         material_alerts.append(
             {

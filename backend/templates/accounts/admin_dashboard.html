@@ -158,7 +158,7 @@
                 <div class="fw-semibold">Resource Monitoring</div>
                 <a href="{% url 'forecasting:resource_management_dashboard' %}" class="small text-decoration-none" style="color: var(--jc-teal);">View all &rarr;</a>
             </div>
-            <div class="text-muted small mb-2">Raw materials &middot; commissary stock only</div>
+            <div class="text-muted small mb-2">Raw materials &amp; packaging materials &middot; commissary stock only</div>
             {% if material_resource_status %}
             {% with items=material_resource_status.items %}
             {% for item in items|slice:":2" %}
@@ -166,7 +166,7 @@
                 <div>
                     <div class="fw-semibold">{{ item.product.name }}</div>
                     <div class="text-muted small">
-                        {{ item.display_quantity }} on hand &middot; reorder at {{ item.reorder_threshold }}
+                        {{ item.display_quantity|qty:item.product.unit_of_measure }} on hand &middot; reorder at {{ item.reorder_threshold|qty:item.product.unit_of_measure }}
                     </div>
                 </div>
                 {% if item.is_out_of_stock %}
@@ -187,7 +187,7 @@
                     <div>
                         <div class="fw-semibold">{{ item.product.name }}</div>
                         <div class="text-muted small">
-                            {{ item.display_quantity }} on hand &middot; reorder at {{ item.reorder_threshold }}
+                            {{ item.display_quantity|qty:item.product.unit_of_measure }} on hand &middot; reorder at {{ item.reorder_threshold|qty:item.product.unit_of_measure }}
                         </div>
                     </div>
                     {% if item.is_out_of_stock %}

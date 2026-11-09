@@ -62,8 +62,13 @@ def create_purchase_order(created_by, supplier_id, branch_id, items, notes=""):
     cleaned_items = []
     for raw in items:
         try:
+            # Client review (2026-11-09): widened from
+            # Product.ProductType.MATERIAL alone -- a supplier can be
+            # ordered from for packaging materials too, now their own
+            # ProductType.PACKAGING instead of a MATERIAL row tagged
+            # category=PACKAGING.
             material = Product.objects.get(
-                pk=raw["material_id"], product_type=Product.ProductType.MATERIAL
+                pk=raw["material_id"], product_type__in=Product.MATERIAL_TYPES
             )
         except (Product.DoesNotExist, ValueError, TypeError, KeyError):
             raise PurchasingError("One of the selected materials does not exist.")

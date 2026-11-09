@@ -8,8 +8,11 @@ reorder_threshold/quantity_on_hand as Decimal, UnitOfMeasure.ROLL) landed
 in two earlier PRs.
 
 Each file is one flat table: Item No., Name, Supplier, Product Type
-(always MATERIAL), Unit of Measure, Unit Cost, Quantity on Hand, Reorder
-Threshold, Branch Code, Is Active. A material repeats once per branch
+(the file's own "Product Type" column is always "MATERIAL" in the
+client's raw data; this command derives the real Product.product_type
+-- Raw Material vs Packaging Material -- from which file the row came
+from instead, see below), Unit of Measure, Unit Cost, Quantity on Hand,
+Reorder Threshold, Branch Code, Is Active. A material repeats once per branch
 that stocks it (e.g. "White sugar" has 3 rows: COMMISSARY/LIPA/BATANGAS),
 but its catalog-level facts -- Supplier, Unit Cost, Unit of Measure, Is
 Active -- are identical across every one of its rows in the client's own
@@ -26,17 +29,20 @@ through the same Decimal-safe path for one consistent importer.
 
 Idempotency:
   - Product fields (price=Unit Cost, supplier, unit_of_measure, is_active,
-    category) are always kept in sync via update_or_create keyed by name
-    -- safe to re-run, same convention as scripts/seed_menu_catalog.py,
+    product_type) are always kept in sync via update_or_create keyed by
+    name -- safe to re-run, same convention as scripts/seed_menu_catalog.py,
     since these are catalog metadata the client's file is the source of
-    truth for. `category` is set to Product.Category.PACKAGING for every
-    row from Packaging_Materials.xlsx (task #148, client review,
-    2026-11-04 -- "Packaging vs Food" filtering) and left blank for
-    Raw_Materials.xlsx rows. Re-running this command against both files
-    after upgrading is the supported way to backfill `category` onto
-    products that were already imported before this field existed here --
-    it only touches catalog metadata, never quantity_on_hand/
-    reorder_threshold on an existing Inventory row (see below).
+    truth for. `product_type` is Product.ProductType.PACKAGING for every
+    row from Packaging_Materials.xlsx and Product.ProductType.MATERIAL for
+    Raw_Materials.xlsx rows (task #148, client review, 2026-11-04 --
+    "Packaging vs Food" filtering; client review, 2026-11-09 -- promoted
+    from a category tag on a MATERIAL row to its own product_type). Both
+    files' rows always get a blank `category` -- that field is a POS
+    category-tab concept neither Raw Material nor Packaging Material rows
+    are ever browsed by. Re-running this command against both files is
+    the supported way to correct a product's type/category -- it only
+    touches catalog metadata, never quantity_on_hand/reorder_threshold on
+    an existing Inventory row (see below).
   - Inventory rows are get_or_create'd per (branch, product): a row's
     quantity_on_hand/reorder_threshold is set ONLY the first time that
     row is created. A second run (accidental re-import, or run again
@@ -153,14 +159,18 @@ class Command(BaseCommand):
         with transaction.atomic():
             for label, rows in all_rows.items():
                 # Task #148 (client review, 2026-11-04): the client's two
-                # files ARE the one honest signal for "Packaging vs Food"
-                # -- every row from Packaging_Materials.xlsx is tagged
-                # Product.Category.PACKAGING; Raw_Materials.xlsx rows are
-                # left with a blank category (see Product.Category's own
-                # docstring for why no "Raw Material" value is invented).
-                category = Product.Category.PACKAGING if label == "Packaging Materials" else ""
+                # files ARE the one honest signal for "Packaging vs Food".
+                # Client review (2026-11-09): that signal now sets
+                # product_type directly (Packaging Material vs Raw
+                # Material) instead of tagging category=PACKAGING on a
+                # MATERIAL row -- category stays blank either way.
+                product_type = (
+                    Product.ProductType.PACKAGING
+                    if label == "Packaging Materials"
+                    else Product.ProductType.MATERIAL
+                )
                 for row in rows:
-                    product, created = self._upsert_product(row, category)
+                    product, created = self._upsert_product(row, product_type)
                     products_created += created
                     products_updated += not created
 
@@ -253,16 +263,16 @@ class Command(BaseCommand):
 
     # -- import ---------------------------------------------------------
 
-    def _upsert_product(self, row, category):
+    def _upsert_product(self, row, product_type):
         product, created = Product.objects.update_or_create(
             name=row["name"],
             defaults={
                 "price": row["unit_cost"],
-                "product_type": Product.ProductType.MATERIAL,
+                "product_type": product_type,
                 "unit_of_measure": row["unit"],
                 "supplier": row["supplier"],
                 "is_active": row["is_active"],
-                "category": category,
+                "category": "",
             },
         )
         return product, created
