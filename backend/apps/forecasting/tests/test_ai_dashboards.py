@@ -675,6 +675,358 @@ class TestForecastingDashboardView:
         content = response.content.decode()
         assert "Units/day" in content
 
+    def test_latest_forecast_detail_groups_by_product_collapsed_by_default(
+        self, owner_client, branch, latte
+    ):
+        """Client review (2026-11-09): 378 flat rows (one per
+        product/branch/day) was unusable -- the table now groups by
+        product, one collapsible section per product, collapsed by
+        default (no "show" class on the collapse target)."""
+        for offset in range(3):
+            Forecast.objects.create(
+                branch=branch,
+                product=latte,
+                forecast_date=timezone.now().date() + timedelta(days=offset),
+                predicted_quantity=8.0,
+                model_used="HoltWinters(seasonal=7)",
+            )
+
+        response = owner_client.get(
+            reverse("forecasting:forecasting_dashboard"), {"branch": branch.pk}
+        )
+        content = response.content.decode()
+        # The product name appears twice: once as a <option> in the new
+        # Product filter dropdown, once as the group header -- not once
+        # per row (x3) the way the old flat table repeated it.
+        assert content.count("Spanish Latte") == 2
+        assert "3 predictions, Statistical Model" in content
+        assert '<div class="collapse" id="forecastGroup' in content
+        assert '<div class="collapse show" id="forecastGroup' not in content
+
+    def test_mixed_model_group_is_labeled_mixed(self, owner_client, branch, latte):
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=timezone.now().date(),
+            predicted_quantity=8.0,
+            model_used="HoltWinters(seasonal=7)",
+        )
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=timezone.now().date() + timedelta(days=1),
+            predicted_quantity=0.5,
+            model_used="NAIVE_AVERAGE",
+        )
+
+        response = owner_client.get(
+            reverse("forecasting:forecasting_dashboard"), {"branch": branch.pk}
+        )
+        content = response.content.decode()
+        assert "Statistical Model &amp; Simple Average mixed" in content
+
+    def test_summary_chip_counts_products_per_model_not_predictions(
+        self, owner_client, branch, latte
+    ):
+        """The chip counts PRODUCTS in each model bucket, distinct from
+        summary['model_count']/['naive_count'] which count individual
+        predictions and still drive the existing KPI cards/banner
+        untouched."""
+        cake = Product.objects.create(name="Cake", price="140.00")
+        # Latte: 2 statistical predictions (1 product, all-model).
+        for offset in range(2):
+            Forecast.objects.create(
+                branch=branch,
+                product=latte,
+                forecast_date=timezone.now().date() + timedelta(days=offset),
+                predicted_quantity=8.0,
+                model_used="HoltWinters(seasonal=7)",
+            )
+        # Cake: 1 naive prediction (1 product, all-naive).
+        Forecast.objects.create(
+            branch=branch,
+            product=cake,
+            forecast_date=timezone.now().date(),
+            predicted_quantity=0.5,
+            model_used="NAIVE_AVERAGE",
+        )
+
+        response = owner_client.get(
+            reverse("forecasting:forecasting_dashboard"), {"branch": branch.pk}
+        )
+        content = response.content.decode()
+        assert "2</strong> products forecasted" in content
+        assert "1 using Statistical Model" in content
+        assert "1 using Simple Average" in content
+
+    def test_rows_within_a_group_are_sorted_by_date_ascending(self, owner_client, branch, latte):
+        today = timezone.now().date()
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=today + timedelta(days=2),
+            predicted_quantity=5.0,
+            model_used="HoltWinters(seasonal=7)",
+        )
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=today,
+            predicted_quantity=3.0,
+            model_used="HoltWinters(seasonal=7)",
+        )
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=today + timedelta(days=1),
+            predicted_quantity=4.0,
+            model_used="HoltWinters(seasonal=7)",
+        )
+
+        response = owner_client.get(
+            reverse("forecasting:forecasting_dashboard"), {"branch": branch.pk}
+        )
+        group = response.context["forecast_groups"][0]
+        assert [r.forecast_date for r in group["rows"]] == [
+            today,
+            today + timedelta(days=1),
+            today + timedelta(days=2),
+        ]
+
+    def test_product_branch_model_filter_controls_are_present(self, owner_client, branch, latte):
+        """Confirms the three filter controls render, and that each
+        row/group carries the data attributes the client-side JS
+        filters against -- the actual show/hide behavior is JS, which
+        isn't exercised by a Django test client, but the markup it
+        depends on must be correct."""
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=timezone.now().date(),
+            predicted_quantity=8.0,
+            model_used="HoltWinters(seasonal=7)",
+        )
+
+        response = owner_client.get(
+            reverse("forecasting:forecasting_dashboard"), {"branch": branch.pk}
+        )
+        content = response.content.decode()
+        assert 'id="forecastProductFilter"' in content
+        assert 'id="forecastModelFilter"' in content
+        assert 'name="branch"' in content
+        assert f'data-product-id="{latte.pk}"' in content
+        assert 'data-model="model"' in content
+
+    def test_more_than_ten_predictions_in_a_group_are_progressively_disclosed(
+        self, owner_client, branch, latte
+    ):
+        """Pagination-within-a-group (client decision, 2026-11-09):
+        first 10 rows show directly, the rest sit behind a 'Show N
+        more' toggle -- same jc-expand-toggle pattern the Commissary
+        Dashboard's attention table already uses."""
+        today = timezone.now().date()
+        for offset in range(12):
+            Forecast.objects.create(
+                branch=branch,
+                product=latte,
+                forecast_date=today + timedelta(days=offset),
+                predicted_quantity=5.0,
+                model_used="HoltWinters(seasonal=7)",
+            )
+
+        response = owner_client.get(
+            reverse("forecasting:forecasting_dashboard"), {"branch": branch.pk}
+        )
+        content = response.content.decode()
+        assert "jc-expand-toggle" in content
+        assert "Show 2 more" in content
+
+    def test_ten_or_fewer_predictions_in_a_group_show_no_pagination_control(
+        self, owner_client, branch, latte
+    ):
+        for offset in range(3):
+            Forecast.objects.create(
+                branch=branch,
+                product=latte,
+                forecast_date=timezone.now().date() + timedelta(days=offset),
+                predicted_quantity=5.0,
+                model_used="HoltWinters(seasonal=7)",
+            )
+
+        response = owner_client.get(
+            reverse("forecasting:forecasting_dashboard"), {"branch": branch.pk}
+        )
+        content = response.content.decode()
+        assert "jc-expand-toggle" not in content
+
+    def test_grouping_does_not_change_forecast_values_or_model_or_mae(
+        self, owner_client, branch, latte
+    ):
+        """Display-only: confirms the underlying Forecast rows (values,
+        model_used, mae) are byte-for-byte what was stored, not
+        recomputed or altered by the grouping/filtering reorganization."""
+        forecast = Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=timezone.now().date(),
+            predicted_quantity=7.25,
+            model_used="HoltWinters(seasonal=7)",
+            mae=1.5,
+        )
+
+        owner_client.get(reverse("forecasting:forecasting_dashboard"), {"branch": branch.pk})
+
+        forecast.refresh_from_db()
+        assert forecast.predicted_quantity == 7.25
+        assert forecast.model_used == "HoltWinters(seasonal=7)"
+        assert forecast.mae == 1.5
+
+
+class TestGroupForecastsByProduct:
+    """services.group_forecasts_by_product -- the pure grouping function
+    behind Latest Forecast Detail's collapsible table (client review,
+    2026-11-09)."""
+
+    def test_empty_input_returns_empty_list(self):
+        assert services.group_forecasts_by_product([]) == []
+
+    def test_groups_by_product_sorted_by_date_within_group(self, branch, latte):
+        today = timezone.now().date()
+        f2 = Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=today + timedelta(days=1),
+            predicted_quantity=4.0,
+            model_used="HoltWinters(seasonal=7)",
+        )
+        f1 = Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=today,
+            predicted_quantity=3.0,
+            model_used="HoltWinters(seasonal=7)",
+        )
+
+        groups = services.group_forecasts_by_product(Forecast.objects.filter(product=latte))
+
+        assert len(groups) == 1
+        assert groups[0]["rows"] == [f1, f2]
+        assert groups[0]["prediction_count"] == 2
+
+    def test_groups_are_sorted_by_product_name(self, branch):
+        zebra = Product.objects.create(name="Zebra Cake", price="100.00")
+        apple = Product.objects.create(name="Apple Tart", price="90.00")
+        Forecast.objects.create(
+            branch=branch,
+            product=zebra,
+            forecast_date=timezone.now().date(),
+            predicted_quantity=1.0,
+            model_used="HoltWinters(seasonal=7)",
+        )
+        Forecast.objects.create(
+            branch=branch,
+            product=apple,
+            forecast_date=timezone.now().date(),
+            predicted_quantity=1.0,
+            model_used="HoltWinters(seasonal=7)",
+        )
+
+        groups = services.group_forecasts_by_product(Forecast.objects.all())
+
+        assert [g["product"].name for g in groups] == ["Apple Tart", "Zebra Cake"]
+
+    def test_all_statistical_model_bucket(self, branch, latte):
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=timezone.now().date(),
+            predicted_quantity=5.0,
+            model_used="HoltWinters(seasonal=7)",
+        )
+        groups = services.group_forecasts_by_product(Forecast.objects.all())
+        assert groups[0]["all_model"] is True
+        assert groups[0]["all_naive"] is False
+        assert groups[0]["mixed"] is False
+        assert groups[0]["model_summary"] == "Statistical Model"
+
+    def test_all_simple_average_bucket(self, branch, latte):
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=timezone.now().date(),
+            predicted_quantity=0.5,
+            model_used="NAIVE_AVERAGE",
+        )
+        groups = services.group_forecasts_by_product(Forecast.objects.all())
+        assert groups[0]["all_naive"] is True
+        assert groups[0]["all_model"] is False
+        assert groups[0]["mixed"] is False
+        assert groups[0]["model_summary"] == "Simple Average"
+
+    def test_mixed_bucket(self, branch, latte):
+        today = timezone.now().date()
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=today,
+            predicted_quantity=5.0,
+            model_used="HoltWinters(seasonal=7)",
+        )
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=today + timedelta(days=1),
+            predicted_quantity=0.5,
+            model_used="NAIVE_AVERAGE",
+        )
+        groups = services.group_forecasts_by_product(Forecast.objects.all())
+        assert groups[0]["mixed"] is True
+        assert groups[0]["all_model"] is False
+        assert groups[0]["all_naive"] is False
+
+
+class TestGetForecastModelBreakdown:
+    """services.get_forecast_model_breakdown -- the product-level
+    counts behind the Latest Forecast Detail summary chip."""
+
+    def test_counts_each_bucket(self, branch, latte):
+        cake = Product.objects.create(name="Cake", price="140.00")
+        croissant = Product.objects.create(name="Croissant", price="60.00")
+        today = timezone.now().date()
+        Forecast.objects.create(
+            branch=branch,
+            product=latte,
+            forecast_date=today,
+            predicted_quantity=5.0,
+            model_used="HoltWinters(seasonal=7)",
+        )
+        Forecast.objects.create(
+            branch=branch,
+            product=cake,
+            forecast_date=today,
+            predicted_quantity=0.5,
+            model_used="NAIVE_AVERAGE",
+        )
+        Forecast.objects.create(
+            branch=branch,
+            product=croissant,
+            forecast_date=today,
+            predicted_quantity=5.0,
+            model_used="HoltWinters(seasonal=7)",
+        )
+        Forecast.objects.create(
+            branch=branch,
+            product=croissant,
+            forecast_date=today + timedelta(days=1),
+            predicted_quantity=0.5,
+            model_used="NAIVE_AVERAGE",
+        )
+
+        groups = services.group_forecasts_by_product(Forecast.objects.all())
+        breakdown = services.get_forecast_model_breakdown(groups)
+
+        assert breakdown == {"all_model_count": 1, "all_naive_count": 1, "mixed_count": 1}
+
 
 class TestResourceManagementDashboardView:
     def test_owner_can_view(self, owner_client):

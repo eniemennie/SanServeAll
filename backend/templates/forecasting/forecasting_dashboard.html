@@ -95,41 +95,139 @@
         <a href="{% url 'forecasting:decision_support' %}">AI Insights &amp; Decision Support</a> page
         use a separate trailing 30-day actual-sales average instead.
     </p>
-    <div class="table-responsive">
-    <table class="table table-sm mb-0">
-        <thead><tr><th>Product</th><th>Branch</th><th>Date</th><th>Predicted Qty</th><th>Model</th><th>MAE</th></tr></thead>
-        <tbody>
-            {% for f in forecasts %}
-            <tr>
-                <td>{{ f.product.name }}</td>
-                <td>{{ f.branch.name }}</td>
-                <td>{{ f.forecast_date }}</td>
-                <td>
-                    {% if f.predicted_quantity == 0 %}
-                    <span class="text-muted" title="The model genuinely predicts zero demand for this day, not a missing value.">No demand expected</span>
-                    {% else %}
-                    {{ f.predicted_quantity|floatformat:1 }}
-                    {% endif %}
-                </td>
-                <td>
-                    {% if f.model_used == "NAIVE_AVERAGE" %}
-                    <span class="jc-badge jc-badge-low" title="Not enough sales history yet for the full model -- this is a plain average of recent days.">Simple Average</span>
-                    {% else %}
-                    <span class="jc-badge jc-badge-info" title="{{ f.model_used }}">Statistical Model</span>
-                    {% endif %}
-                </td>
-                <td>{% if f.mae is not None %}{{ f.mae }}{% else %}&mdash;{% endif %}</td>
-            </tr>
-            {% empty %}
-            <tr><td colspan="6" class="text-center text-muted py-3">
-                No forecasts yet for this selection. Forecasting needs recorded, per-product sales history
-                (not just a daily revenue total) -- check back once more itemized transactions have come
-                in through the point of sale.
-            </td></tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    {% if forecast_groups %}
+    <div class="jc-card p-2 px-3 mb-3 small" style="background: var(--jc-canvas); border: none;">
+        <strong>{{ summary.products_forecasted }}</strong> product{{ summary.products_forecasted|pluralize }} forecasted
+        &mdash; {{ forecast_model_breakdown.all_model_count }} using Statistical Model,
+        {{ forecast_model_breakdown.all_naive_count }} using Simple Average{% if forecast_model_breakdown.mixed_count > 0 %},
+        {{ forecast_model_breakdown.mixed_count }} mixed{% endif %}.
     </div>
+
+    <!-- Client review (2026-11-09): Product and Model filter here as
+         client-side show/hide over the already-rendered groups/rows
+         below -- every row this page needs is already on the page
+         (378 at this data scale is small), so filtering doesn't need a
+         new endpoint or to touch how forecasts are generated. Branch
+         stays a real GET param + page reload, same as the page-header
+         selector above (and every other branch filter in this app) --
+         it genuinely re-scopes which forecast run's rows were fetched,
+         not just which of the already-fetched rows are shown. -->
+    <div class="row g-2 mb-3">
+        <div class="col-sm-4">
+            <select id="forecastProductFilter" class="form-select form-select-sm">
+                <option value="">All Products</option>
+                {% for group in forecast_groups %}
+                <option value="{{ group.product.pk }}">{{ group.product.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="col-sm-4">
+            <form method="get">
+                <select name="branch" class="form-select form-select-sm" onchange="this.form.submit()">
+                    <option value="">All Branches</option>
+                    {% for b in branches %}
+                    <option value="{{ b.pk }}" {% if selected_branch.pk == b.pk %}selected{% endif %}>{{ b.name }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+        </div>
+        <div class="col-sm-4">
+            <select id="forecastModelFilter" class="form-select form-select-sm">
+                <option value="">All Models</option>
+                <option value="model">Statistical Model</option>
+                <option value="naive">Simple Average</option>
+            </select>
+        </div>
+    </div>
+
+    <div id="forecastGroups">
+        {% for group in forecast_groups %}
+        <div class="jc-card jc-card-interactive mb-2 jc-forecast-group" data-product-id="{{ group.product.pk }}">
+            <div class="d-flex justify-content-between align-items-center p-2 px-3" role="button" tabindex="0"
+                 data-bs-toggle="collapse" data-bs-target="#forecastGroup{{ group.product.pk }}"
+                 aria-expanded="false" aria-controls="forecastGroup{{ group.product.pk }}">
+                <span class="small">
+                    <span class="fw-semibold">{{ group.product.name }}</span>
+                    &mdash; {{ group.prediction_count }} prediction{{ group.prediction_count|pluralize }}, {{ group.model_summary }}
+                </span>
+                <svg class="jc-attention-toggle-icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M5 3l6 5-6 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+            </div>
+            <div class="collapse" id="forecastGroup{{ group.product.pk }}">
+                <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th>Branch</th><th>Date</th><th>Predicted Qty</th><th>Model</th><th>MAE</th></tr></thead>
+                    <tbody>
+                        {% for f in group.rows|slice:":10" %}
+                        <tr data-model="{% if f.model_used == 'NAIVE_AVERAGE' %}naive{% else %}model{% endif %}">
+                            <td>{{ f.branch.name }}</td>
+                            <td>{{ f.forecast_date }}</td>
+                            <td>
+                                {% if f.predicted_quantity == 0 %}
+                                <span class="text-muted" title="The model genuinely predicts zero demand for this day, not a missing value.">No demand expected</span>
+                                {% else %}
+                                {{ f.predicted_quantity|floatformat:1 }}
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if f.model_used == "NAIVE_AVERAGE" %}
+                                <span class="jc-badge jc-badge-low" title="Not enough sales history yet for the full model -- this is a plain average of recent days.">Simple Average</span>
+                                {% else %}
+                                <span class="jc-badge jc-badge-info" title="{{ f.model_used }}">Statistical Model</span>
+                                {% endif %}
+                            </td>
+                            <td>{% if f.mae is not None %}{{ f.mae }}{% else %}&mdash;{% endif %}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    {% if group.rows|length > 10 %}
+                    <tbody class="collapse" id="forecastGroupMore{{ group.product.pk }}">
+                        {% for f in group.rows|slice:"10:" %}
+                        <tr data-model="{% if f.model_used == 'NAIVE_AVERAGE' %}naive{% else %}model{% endif %}">
+                            <td>{{ f.branch.name }}</td>
+                            <td>{{ f.forecast_date }}</td>
+                            <td>
+                                {% if f.predicted_quantity == 0 %}
+                                <span class="text-muted" title="The model genuinely predicts zero demand for this day, not a missing value.">No demand expected</span>
+                                {% else %}
+                                {{ f.predicted_quantity|floatformat:1 }}
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if f.model_used == "NAIVE_AVERAGE" %}
+                                <span class="jc-badge jc-badge-low" title="Not enough sales history yet for the full model -- this is a plain average of recent days.">Simple Average</span>
+                                {% else %}
+                                <span class="jc-badge jc-badge-info" title="{{ f.model_used }}">Statistical Model</span>
+                                {% endif %}
+                            </td>
+                            <td>{% if f.mae is not None %}{{ f.mae }}{% else %}&mdash;{% endif %}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    {% endif %}
+                </table>
+                </div>
+                {% if group.rows|length > 10 %}
+                <button class="jc-expand-toggle m-2" type="button" data-bs-toggle="collapse"
+                        data-bs-target="#forecastGroupMore{{ group.product.pk }}" aria-expanded="false"
+                        aria-controls="forecastGroupMore{{ group.product.pk }}">
+                    <span>Show {{ group.rows|length|add:"-10" }} more</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                </button>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+    <p id="forecastNoMatches" class="text-muted small text-center py-3" style="display: none;">No forecasts match your filters.</p>
+    {% else %}
+    <p class="text-center text-muted py-3">
+        No forecasts yet for this selection. Forecasting needs recorded, per-product sales history
+        (not just a daily revenue total) -- check back once more itemized transactions have come
+        in through the point of sale.
+    </p>
+    {% endif %}
 </div>
 
 {% endblock %}
@@ -158,5 +256,64 @@ new Chart(document.getElementById("demandPatternChart"), {
         }
     }
 });
+
+// Client review (2026-11-09): Product/Model filters over the already-
+// rendered Latest Forecast Detail groups -- pure show/hide, no row is
+// ever removed from the DOM, so a filter can't drop data, only hide it.
+(function () {
+  var productFilter = document.getElementById("forecastProductFilter");
+  var modelFilter = document.getElementById("forecastModelFilter");
+  var groups = document.querySelectorAll(".jc-forecast-group");
+  var noMatches = document.getElementById("forecastNoMatches");
+
+  function applyForecastFilters() {
+    var productId = productFilter ? productFilter.value : "";
+    var modelValue = modelFilter ? modelFilter.value : "";
+    var anyGroupVisible = false;
+
+    groups.forEach(function (group) {
+      var matchesProduct = !productId || group.dataset.productId === productId;
+      var rows = group.querySelectorAll("tr[data-model]");
+      var groupHasVisibleRow = false;
+
+      rows.forEach(function (row) {
+        var matchesModel = !modelValue || row.dataset.model === modelValue;
+        var visible = matchesProduct && matchesModel;
+        row.style.display = visible ? "" : "none";
+        if (visible) {
+          groupHasVisibleRow = true;
+        }
+      });
+
+      group.style.display = groupHasVisibleRow ? "" : "none";
+      if (groupHasVisibleRow) {
+        anyGroupVisible = true;
+      }
+    });
+
+    if (noMatches) {
+      noMatches.style.display = anyGroupVisible ? "none" : "";
+    }
+  }
+
+  if (productFilter) {
+    productFilter.addEventListener("change", applyForecastFilters);
+  }
+  if (modelFilter) {
+    modelFilter.addEventListener("change", applyForecastFilters);
+  }
+
+  // Keyboard support for each product group's collapsible header -- it's
+  // a <div role="button">, not a real <button>, same pattern as the
+  // Commissary Dashboard's "Materials Needing Attention" header.
+  document.querySelectorAll(".jc-forecast-group [data-bs-toggle='collapse']").forEach(function (header) {
+    header.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        header.click();
+      }
+    });
+  });
+})();
 </script>
 {% endblock %}

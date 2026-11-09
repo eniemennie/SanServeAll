@@ -59,6 +59,13 @@ def forecasting_dashboard(request):
     summary = services.get_forecasting_dashboard_summary(branch)
     weekly_pattern = services.get_weekly_demand_pattern(branch)
     latest_batch = services.get_latest_forecast_batch(branch)
+    forecasts = latest_batch.order_by("product__name", "forecast_date")
+    # Client review (2026-11-09): "Latest Forecast Detail" grouped by
+    # product (collapsed by default) instead of one flat 378-row table --
+    # see group_forecasts_by_product's own docstring. Display-only; the
+    # forecast rows themselves, and `summary` above (predictions_made,
+    # avg_mae, avg_confidence_pct, model_count/naive_count), are untouched.
+    forecast_groups = services.group_forecasts_by_product(forecasts)
 
     return render(
         request,
@@ -68,7 +75,9 @@ def forecasting_dashboard(request):
             "summary": summary,
             "pattern_labels_json": json.dumps([p["date"] for p in weekly_pattern]),
             "pattern_values_json": json.dumps([p["predicted_total"] for p in weekly_pattern]),
-            "forecasts": latest_batch.order_by("product__name", "forecast_date"),
+            "forecasts": forecasts,
+            "forecast_groups": forecast_groups,
+            "forecast_model_breakdown": services.get_forecast_model_breakdown(forecast_groups),
             "branches": Branch.objects.filter(is_active=True, is_commissary=False),
             "selected_branch": branch,
         },
