@@ -388,6 +388,67 @@ def get_latest_forecast_batch(branch=None):
     return queryset.filter(generated_at__gte=window_start)
 
 
+def group_forecasts_by_product(forecasts):
+    """Latest Forecast Detail reorganization (client review, 2026-11-09):
+    the flat table (one row per product/branch/day -- 378 rows at this
+    data scale) was unusable. Groups the already-fetched forecast rows
+    (get_latest_forecast_batch's queryset) by Product, sorted by
+    forecast_date ascending within each group, with a per-product model
+    summary string for the group's collapsed header line.
+
+    Pure display reorganization -- doesn't touch model_used,
+    predicted_quantity, mae, or any Forecast row; grouping and sorting
+    only. Groups are returned sorted by product name for a stable,
+    predictable order regardless of the input queryset's own ordering.
+    """
+    groups_by_product = {}
+    for row in forecasts:
+        group = groups_by_product.setdefault(row.product_id, {"product": row.product, "rows": []})
+        group["rows"].append(row)
+
+    result = []
+    for group in groups_by_product.values():
+        rows = sorted(group["rows"], key=lambda r: r.forecast_date)
+        has_model = any(r.model_used != "NAIVE_AVERAGE" for r in rows)
+        has_naive = any(r.model_used == "NAIVE_AVERAGE" for r in rows)
+        if has_model and has_naive:
+            model_summary = "Statistical Model & Simple Average mixed"
+        elif has_model:
+            model_summary = "Statistical Model"
+        else:
+            model_summary = "Simple Average"
+
+        result.append(
+            {
+                "product": group["product"],
+                "rows": rows,
+                "prediction_count": len(rows),
+                "model_summary": model_summary,
+                "all_model": has_model and not has_naive,
+                "all_naive": has_naive and not has_model,
+                "mixed": has_model and has_naive,
+            }
+        )
+
+    result.sort(key=lambda g: g["product"].name)
+    return result
+
+
+def get_forecast_model_breakdown(forecast_groups):
+    """Product-level counts for the Latest Forecast Detail summary chip
+    (client review, 2026-11-09), e.g. "22 products forecasted -- 10
+    using Statistical Model, 12 using Simple Average". Deliberately
+    counts PRODUCTS in each bucket (from group_forecasts_by_product's
+    output), not individual predictions -- that's what
+    summary['model_count']/['naive_count'] already cover, and those stay
+    untouched for the existing KPI cards and fallback banner."""
+    return {
+        "all_model_count": sum(1 for g in forecast_groups if g["all_model"]),
+        "all_naive_count": sum(1 for g in forecast_groups if g["all_naive"]),
+        "mixed_count": sum(1 for g in forecast_groups if g["mixed"]),
+    }
+
+
 def get_forecasting_dashboard_summary(branch=None):
     """Model accuracy, data points, predictions made, and an approximate
     confidence level (Fig. 3-25) -- all derived honestly from the latest
