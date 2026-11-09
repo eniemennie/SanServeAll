@@ -174,6 +174,29 @@
             </select>
         </div>
         <div class="col-md-2">
+            <!-- Dev backlog follow-up to the Packaging Materials tab
+                 (client review 2026-11-09): new packaging items used to
+                 only arrive via the client's own bulk import -- this is
+                 the one new field that lets this form tag a Raw Material
+                 product Packaging directly. Deliberately only the two
+                 values Raw Material products actually distinguish (see
+                 Product.Category's own docstring); a Finished Good's
+                 category assignment is a separate, out-of-scope concern
+                 this field doesn't touch, so it's ignored for that type. -->
+            <!-- Named new_product_category, not category -- "category"
+                 is already the GET filter field's name elsewhere on this
+                 page (the dropdown above the table, and the hidden input
+                 on the Packaging tab); a second field sharing that name
+                 would collide with it inside this same <form method="post">
+                 markup even though they serve different requests. -->
+            <label class="form-label small">Category</label>
+            <select name="new_product_category" class="form-select form-select-sm">
+                <option value="">Raw Material (Food)</option>
+                <option value="PACKAGING">Packaging</option>
+            </select>
+            <div class="form-text">Raw Material products only -- ignored for Finished Goods.</div>
+        </div>
+        <div class="col-md-2">
             <label class="form-label small">Reorder At</label>
             <input type="number" name="reorder_threshold" min="0" step="0.01" value="0" class="form-control form-control-sm">
         </div>

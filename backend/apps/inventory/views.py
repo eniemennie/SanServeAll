@@ -79,6 +79,7 @@ def product_management(request):
                 reorder_threshold=request.POST.get("reorder_threshold") or 0,
                 branch_ids=branch_ids,
                 unit_of_measure=request.POST.get("unit_of_measure"),
+                category=request.POST.get("new_product_category"),
             )
             return redirect("inventory:product_management")
         except (services.InventoryServiceError, ValueError, TypeError) as exc:
