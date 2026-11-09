@@ -1,0 +1,71 @@
+{% comment %}
+Shared partial for one "Materials Needing Attention" tab's content
+(commissary_dashboard.html). Takes:
+  items       -- list of Inventory rows (already sorted by urgency)
+  status      -- "Out of Stock" / "Low Stock" (shown in the badge)
+  badge_class -- jc-badge-critical / jc-badge-low
+  panel_id    -- unique id for the "Show N more" collapse target, since
+                 both tabs render this partial on the same page
+Only the first 5 items show by default (client review, 2026-11-09:
+"show only the first few items with a Show all option") -- the rest sit
+in a second <tbody>, same show-more pattern the rest of this dashboard
+already uses, just applied per-row instead of per-bullet.
+{% endcomment %}
+{% if items %}
+<div class="table-responsive">
+<table class="table table-sm mb-0 align-middle">
+    <colgroup>
+        <col style="width: 38%;">
+        <col style="width: 22%;">
+        <col style="width: 22%;">
+        <col style="width: 18%;">
+    </colgroup>
+    <thead>
+        <tr>
+            <th>Item</th>
+            <th>Type</th>
+            <th>Current Stock</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for item in items|slice:":5" %}
+        <tr>
+            <td>{{ item.product.name }}</td>
+            <td>
+                {% if item.product.product_type == "MATERIAL" %}
+                    {% if item.product.category == "PACKAGING" %}Packaging{% else %}Raw Material{% endif %}
+                {% else %}Finished Good{% endif %}
+            </td>
+            <td>{{ item.display_quantity }} {{ item.product.get_unit_of_measure_display }}</td>
+            <td><span class="jc-badge {{ badge_class }}">{{ status }}</span></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+    {% if items|length > 5 %}
+    <tbody class="collapse" id="{{ panel_id }}">
+        {% for item in items|slice:"5:" %}
+        <tr>
+            <td>{{ item.product.name }}</td>
+            <td>
+                {% if item.product.product_type == "MATERIAL" %}
+                    {% if item.product.category == "PACKAGING" %}Packaging{% else %}Raw Material{% endif %}
+                {% else %}Finished Good{% endif %}
+            </td>
+            <td>{{ item.display_quantity }} {{ item.product.get_unit_of_measure_display }}</td>
+            <td><span class="jc-badge {{ badge_class }}">{{ status }}</span></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+    {% endif %}
+</table>
+</div>
+{% if items|length > 5 %}
+<button class="jc-expand-toggle mt-2" type="button" data-bs-toggle="collapse" data-bs-target="#{{ panel_id }}" aria-expanded="false" aria-controls="{{ panel_id }}">
+    <span>Show {{ items|length|add:"-5" }} more</span>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+</button>
+{% endif %}
+{% else %}
+<p class="text-muted small mb-0">No {{ status|lower }} items.</p>
+{% endif %}

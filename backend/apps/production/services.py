@@ -33,6 +33,40 @@ def get_commissary_branch():
     return Branch.objects.filter(is_commissary=True).first()
 
 
+def get_commissary_relevant_product_ids():
+    """Which products the commissary actually produces or uses -- the
+    Commissary Dashboard's "Materials Needing Attention" card (client
+    review, 2026-11-09) needs this to stop showing branch-only POS menu
+    items (Americano, Carbonara, Lasagna, ...) as if they were something
+    the commissary stocks. Without this filter, get_resource_status_summary
+    returns every Inventory row at the commissary branch, including rows
+    for products the commissary never produces -- an artifact of every
+    product getting an Inventory row per branch (including the commissary)
+    somewhere upstream, not a real shortage.
+
+    Two groups count as "relevant":
+      - Every MATERIAL product (raw food materials + packaging) -- these
+        are the production inputs; per get_resource_status_summary's own
+        docstring, materials only ever have real Inventory rows at the
+        commissary in the first place.
+      - FINISHED_GOOD products the commissary has actually produced at
+        least once (i.e. appear in ProductionRecord) -- its own baked-
+        goods output waiting to be distributed to branches. Deliberately
+        derived from real production history rather than a hardcoded
+        category list (Cakes/Desserts/Bakery today could change), so this
+        stays correct as the catalog evolves.
+    """
+    material_ids = Product.objects.filter(product_type=Product.ProductType.MATERIAL).values_list(
+        "pk", flat=True
+    )
+    produced_finished_good_ids = (
+        ProductionRecord.objects.filter(product__product_type=Product.ProductType.FINISHED_GOOD)
+        .values_list("product_id", flat=True)
+        .distinct()
+    )
+    return list(material_ids) + list(produced_finished_good_ids)
+
+
 def get_total_output(days=30):
     """Total units produced across all completed runs in the window --
     the Dashboard Home Production Output KPI card (Fig. 3-19).
