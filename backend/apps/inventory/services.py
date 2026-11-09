@@ -278,7 +278,13 @@ def adjust_stock(inventory, delta, reason="", user=None):
 
 
 def create_product(
-    name, price, product_type, reorder_threshold=0, branch_ids=None, unit_of_measure=None
+    name,
+    price,
+    product_type,
+    reorder_threshold=0,
+    branch_ids=None,
+    unit_of_measure=None,
+    category="",
 ):
     """Product Inventory Management (Row 6.2): adds a new item to the
     catalog. Kept separate from POS's own catalog-reading logic -- this is
@@ -308,6 +314,19 @@ def create_product(
     status validation fix in production.services.advance_stock_transfer_status
     (item 25): an unrecognized value should be a clear, catchable error at
     creation time, not stored silently and discovered later.
+
+    `category` (dev backlog follow-up to Task #148's Packaging Materials
+    tab, client review 2026-11-09): optional, defaults to blank like the
+    model field itself -- existing callers are unaffected. New packaging
+    items previously only arrived via the client's own bulk import
+    (import_raw_and_packaging_materials.py); this is the one new path that
+    lets the Add Product form tag a MATERIAL product Packaging directly.
+    Deliberately narrow in scope, matching the form field it backs: the
+    only value accepted here is Product.Category.PACKAGING, and only for
+    a MATERIAL product (see the Category enum's own docstring -- every
+    other Category value is a FINISHED_GOOD/POS concept this function
+    doesn't touch). A FINISHED_GOOD's own category assignment stays out
+    of scope for this change.
     """
     from apps.accounts.models import Branch
 
@@ -329,10 +348,18 @@ def create_product(
         if unit_of_measure not in valid_units:
             raise InventoryServiceError(f"'{unit_of_measure}' is not a recognized unit of measure.")
 
+    category = (category or "").strip()
+    if category:
+        if category != Product.Category.PACKAGING:
+            raise InventoryServiceError(f"'{category}' is not a recognized category.")
+        if product_type != Product.ProductType.MATERIAL:
+            raise InventoryServiceError("Only Raw Material products can be tagged Packaging.")
+
     product = Product.objects.create(
         name=name,
         price=price,
         product_type=product_type,
+        category=category,
         **({"unit_of_measure": unit_of_measure} if unit_of_measure else {}),
     )
 

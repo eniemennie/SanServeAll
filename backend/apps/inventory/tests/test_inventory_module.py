@@ -468,6 +468,40 @@ class TestCreateProduct:
                 unit_of_measure="BOGUS",
             )
 
+    def test_defaults_to_blank_category_when_omitted(self):
+        """Backward-compatible default, matching the model field's own
+        default: existing callers that don't pass category at all must
+        be unaffected."""
+        product = services.create_product("New Item", "10.00", Product.ProductType.FINISHED_GOOD)
+        assert product.category == ""
+
+    def test_accepts_packaging_category_for_a_material(self):
+        product = services.create_product(
+            "Receipt Tape Roll",
+            "15.00",
+            Product.ProductType.MATERIAL,
+            category=Product.Category.PACKAGING,
+        )
+        assert product.category == Product.Category.PACKAGING
+
+    def test_rejects_packaging_category_for_a_finished_good(self):
+        with pytest.raises(services.InventoryServiceError, match="Only Raw Material"):
+            services.create_product(
+                "Mislabeled Latte",
+                "100.00",
+                Product.ProductType.FINISHED_GOOD,
+                category=Product.Category.PACKAGING,
+            )
+
+    def test_rejects_an_unrecognized_category(self):
+        with pytest.raises(services.InventoryServiceError, match="not a recognized category"):
+            services.create_product(
+                "Flour",
+                "45.00",
+                Product.ProductType.MATERIAL,
+                category="BOGUS",
+            )
+
     def test_rejects_a_duplicate_name_among_active_products(self):
         """Task #111: a real duplicate pair ("Seasalt Latte") was found
         live, with nothing stopping it. create_product's own pre-check
@@ -659,6 +693,40 @@ class TestProductManagementView:
         assert response.status_code == 302
         product = Product.objects.get(name="Sugar")
         assert product.unit_of_measure == Product.UnitOfMeasure.KILOGRAM
+
+    def test_owner_can_tag_a_new_material_as_packaging(self, owner_client, branch):
+        """Dev backlog follow-up to Task #148's Packaging Materials tab
+        (client review 2026-11-09): new packaging items used to only
+        arrive via the client's own bulk import, with no way to add one
+        straight from this form."""
+        response = owner_client.post(
+            reverse("inventory:product_management"),
+            {
+                "name": "Cling Wrap",
+                "price": "35.00",
+                "product_type": Product.ProductType.MATERIAL,
+                "new_product_category": Product.Category.PACKAGING,
+                "branches": [branch.pk],
+            },
+        )
+        assert response.status_code == 302
+        product = Product.objects.get(name="Cling Wrap")
+        assert product.category == Product.Category.PACKAGING
+
+    def test_packaging_category_on_a_finished_good_shows_a_clear_error(self, owner_client, branch):
+        response = owner_client.post(
+            reverse("inventory:product_management"),
+            {
+                "name": "Mislabeled Latte",
+                "price": "100.00",
+                "product_type": Product.ProductType.FINISHED_GOOD,
+                "new_product_category": Product.Category.PACKAGING,
+                "branches": [branch.pk],
+            },
+        )
+        assert response.status_code == 200
+        assert "Only Raw Material" in response.content.decode()
+        assert not Product.objects.filter(name="Mislabeled Latte").exists()
 
     def test_adding_a_product_provisions_it_only_at_the_selected_branch(
         self, owner_client, branch, other_branch
