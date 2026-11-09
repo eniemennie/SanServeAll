@@ -11,6 +11,11 @@ urlpatterns = [
         views.supplier_toggle_active,
         name="supplier_toggle_active",
     ),
+    path(
+        "suppliers/<int:supplier_id>/edit/",
+        views.supplier_edit,
+        name="supplier_edit",
+    ),
     path("orders/", views.purchase_order_list, name="purchase_order_list"),
     path("orders/<int:order_id>/", views.purchase_order_detail, name="purchase_order_detail"),
     path(
