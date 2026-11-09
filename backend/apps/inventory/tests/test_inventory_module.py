@@ -1207,6 +1207,33 @@ class TestProductAvailabilityEnhancements:
         product_names = {i.product.name for i in response.context["items"]}
         assert product_names == {"Spanish Latte"}
 
+    def test_finished_products_tab_excludes_raw_materials_and_packaging(self, owner_client, branch):
+        """Bug fix (client review, 2026-11-09): the Finished Products
+        tab's own link is bare "?type=" with no explicit filter value --
+        product_type="" used to be turned into product_type=None (no
+        type filter at all), so every Raw Material and Packaging row
+        was silently mixed into this supposedly Finished-Goods-only
+        view. Confirmed live on production (a "blue box" Raw Material
+        row rendered right next to a real Finished Good)."""
+        latte = Product.objects.create(name="Spanish Latte", price="125.00")
+        flour = Product.objects.create(
+            name="Flour", price="45.00", product_type=Product.ProductType.MATERIAL
+        )
+        blue_box = Product.objects.create(
+            name="Blue Box",
+            price="22.00",
+            product_type=Product.ProductType.MATERIAL,
+            category=Product.Category.PACKAGING,
+        )
+        Inventory.objects.create(branch=branch, product=latte, quantity_on_hand=10)
+        Inventory.objects.create(branch=branch, product=flour, quantity_on_hand=20)
+        Inventory.objects.create(branch=branch, product=blue_box, quantity_on_hand=30)
+
+        response = owner_client.get(reverse("inventory:product_management"))
+        product_names = {i.product.name for i in response.context["items"]}
+        assert product_names == {"Spanish Latte"}
+        assert response.context["active_tab"] == "finished"
+
     def test_category_choices_exclude_packaging_on_the_finished_products_tab(self, owner_client):
         response = owner_client.get(reverse("inventory:product_management"))
         values = [value for value, _ in response.context["category_choices"]]

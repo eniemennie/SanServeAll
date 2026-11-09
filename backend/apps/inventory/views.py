@@ -100,9 +100,23 @@ def product_management(request):
     category = request.GET.get("category", "")
     search = request.GET.get("search", "")
 
+    # Bug fix (client review, 2026-11-09): the Finished Products tab's
+    # own link is bare "?type=" (empty string) -- `product_type or None`
+    # turned that into product_type=None, which applies NO type filter
+    # at all, so Raw Materials and Packaging rows were silently mixed
+    # into what's supposed to be a Finished-Goods-only view (confirmed
+    # live on production: a "blue box" Raw Material row shown right next
+    # to "Almond (7in Square)", a real Finished Good). An empty/missing
+    # `type` query param means "the Finished Products tab", not "every
+    # type at once" -- there's no tab or control anywhere on this page
+    # that asks for an unfiltered mix of both types -- so it now
+    # resolves to an explicit FINISHED_GOOD filter, matching the Raw
+    # Materials/Packaging tabs' own always-explicit `type=MATERIAL`.
+    effective_product_type = product_type or Product.ProductType.FINISHED_GOOD
+
     availability = services.get_product_availability(
         branch=selected_branch,
-        product_type=product_type or None,
+        product_type=effective_product_type,
         category=category or None,
         search=search,
     )
