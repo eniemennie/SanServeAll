@@ -12,6 +12,8 @@ merely whether Owner/Admin is among a view's allowed roles.
 """
 
 from django.core.paginator import Paginator
+from django.db.models import CharField, Q
+from django.db.models.functions import Cast
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
@@ -241,12 +243,22 @@ def stock_transfers(request):
     Lists existing StockTransferOrders and handles creating a new one;
     advancing an order's status is its own view (advance_stock_transfer)
     below, same split as record_production/batch_management above.
+
+    Client review (2026-11-09): the order history (480+ real rows) was
+    one flat, ungrouped table -- reorganized here with status tabs,
+    branch/date/search filters, and pagination, mirroring exactly the
+    same pattern batch_management already uses for its own long list
+    (see that view's own comments). The Dispatch form above and the
+    create/advance/cancel actions below it are all untouched -- this
+    view only changes how the existing orders are queried and
+    presented for display.
     """
     error = None
     finished_goods = Product.objects.filter(
         product_type=Product.ProductType.FINISHED_GOOD, is_active=True
     )
     destination_branches = Branch.objects.filter(is_commissary=False, is_active=True)
+    source_branches = Branch.objects.filter(is_commissary=True)
 
     if request.method == "POST":
         try:
@@ -260,9 +272,69 @@ def stock_transfers(request):
         except services.StockTransferError as exc:
             error = str(exc)
 
-    orders = StockTransferOrder.objects.select_related(
+    status_filter = request.GET.get("status", "")
+    from_branch_filter = request.GET.get("from_branch", "")
+    to_branch_filter = request.GET.get("to_branch", "")
+    date_from = request.GET.get("date_from", "")
+    date_to = request.GET.get("date_to", "")
+    search = request.GET.get("search", "")
+
+    base_orders = StockTransferOrder.objects.select_related(
         "product", "source_branch", "destination_branch", "delivered_by", "cancelled_by"
     )
+
+    # Client review (2026-11-09): the branch/date/search filters narrow
+    # `base_orders` itself -- the status tab counts below are taken
+    # from this already-narrowed queryset (status filter NOT applied
+    # yet), the same "counts reflect everything but the active tab"
+    # fix batch_management's own status tabs already rely on, so
+    # switching tabs while a branch/date/search filter is active never
+    # silently zeroes out the other tabs' counts.
+    if from_branch_filter:
+        base_orders = base_orders.filter(source_branch_id=from_branch_filter)
+    if to_branch_filter:
+        base_orders = base_orders.filter(destination_branch_id=to_branch_filter)
+    if date_from:
+        base_orders = base_orders.filter(created_at__date__gte=date_from)
+    if date_to:
+        base_orders = base_orders.filter(created_at__date__lte=date_to)
+    if search:
+        # Order # search matches the order's own pk (cast to text so a
+        # partial number, e.g. "12", can match order #123) -- not a
+        # separate human-entered reference field, since StockTransferOrder
+        # has none for orders created through this form.
+        base_orders = base_orders.annotate(
+            order_number=Cast("pk", output_field=CharField())
+        ).filter(Q(product__name__icontains=search) | Q(order_number__icontains=search))
+
+    stale_cutoff = timezone.now() - StockTransferOrder.STALE_IN_PROCESSING_AFTER
+    total = base_orders.count()
+    processing_count = base_orders.filter(status=StockTransferOrder.Status.PROCESSING).count()
+    in_transit_count = base_orders.filter(status=StockTransferOrder.Status.IN_TRANSIT).count()
+    delivered_count = base_orders.filter(status=StockTransferOrder.Status.DELIVERED).count()
+    cancelled_count = base_orders.filter(status=StockTransferOrder.Status.CANCELLED).count()
+    # "Stalled" isn't a real Status value -- it's PROCESSING orders past
+    # STALE_IN_PROCESSING_AFTER (see StockTransferOrder.is_stale_in_processing).
+    # Filtered at the DB level on created_at here (not by evaluating that
+    # Python property row by row) so the tab's own count and its filtered
+    # queryset are both cheap even across hundreds of orders.
+    stalled_count = base_orders.filter(
+        status=StockTransferOrder.Status.PROCESSING, created_at__lt=stale_cutoff
+    ).count()
+
+    orders = base_orders
+    if status_filter == "STALLED":
+        orders = orders.filter(
+            status=StockTransferOrder.Status.PROCESSING, created_at__lt=stale_cutoff
+        )
+    elif status_filter:
+        orders = orders.filter(status=status_filter)
+
+    filtered_total = orders.count()
+    page_obj = Paginator(orders, 25).get_page(request.GET.get("page"))
+
+    pagination_qs = request.GET.copy()
+    pagination_qs.pop("page", None)
 
     return render(
         request,
@@ -270,10 +342,28 @@ def stock_transfers(request):
         {
             "active_nav": "transfers",
             "error": error,
-            "orders": orders,
+            "orders": page_obj,
+            "page_obj": page_obj,
+            "pagination_qs": pagination_qs.urlencode(),
             "finished_goods": finished_goods,
             "destination_branches": destination_branches,
+            "source_branches": source_branches,
             "status_choices": StockTransferOrder.Status.choices,
+            "status_filter": status_filter,
+            "from_branch_filter": from_branch_filter,
+            "to_branch_filter": to_branch_filter,
+            "date_from": date_from,
+            "date_to": date_to,
+            "search": search,
+            "filtered_total": filtered_total,
+            "stats": {
+                "total": total,
+                "processing": processing_count,
+                "in_transit": in_transit_count,
+                "delivered": delivered_count,
+                "cancelled": cancelled_count,
+                "stalled": stalled_count,
+            },
         },
     )
 
