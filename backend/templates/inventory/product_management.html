@@ -48,7 +48,16 @@
 
 <div class="d-flex gap-2 mb-3">
     <a href="?type=" class="btn btn-sm {% if active_tab == 'finished' %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">Finished Products</a>
-    <a href="?type=MATERIAL" class="btn btn-sm {% if active_tab == 'materials' %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">Raw Materials</a>
+    <!-- Client review (2026-11-09): this tab link used to be bare
+         "?type=MATERIAL", which deliberately showed packaging items
+         here too (see TestProductManagementView's older
+         test_general_materials_tab_still_shows_both_packaging_and_food)
+         -- items appearing in both this tab and the dedicated Packaging
+         Materials tab below read as duplicate data to the client, so
+         this now explicitly excludes Packaging by passing the same
+         RAW_MATERIAL_CATEGORY_FILTER sentinel the category dropdown's
+         own "Raw Materials (Food)" option already used. -->
+    <a href="?type=MATERIAL&category={{ raw_material_category_filter }}" class="btn btn-sm {% if active_tab == 'materials' %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">Raw Materials</a>
     <a href="?type=MATERIAL&category=PACKAGING" class="btn btn-sm {% if active_tab == 'packaging' %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">Packaging Materials</a>
 </div>
 

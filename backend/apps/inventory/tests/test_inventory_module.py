@@ -1091,10 +1091,16 @@ class TestProductAvailabilityEnhancements:
         assert "jc-filter-tab-active" not in raw_materials_tag
 
     def test_general_materials_tab_still_shows_both_packaging_and_food(self, owner_client, branch):
-        """The plain Raw Materials tab (no category) still shows
-        everything tagged MATERIAL, packaging included -- the dedicated
-        tab is an added shortcut, not a removal of data from the general
-        view."""
+        """type=MATERIAL on its own (no category param at all) still
+        shows everything tagged MATERIAL, packaging included -- this is
+        the underlying endpoint's own default, kept for anyone hitting
+        this URL shape directly (an old bookmark, a manually-edited
+        querystring). As of the client review below, the Raw Materials
+        TAB's own link no longer produces this URL shape -- it now
+        always includes &category=RAW_MATERIAL (see
+        test_raw_materials_tab_link_excludes_packaging) -- but the bare
+        endpoint itself still behaves this way for backward
+        compatibility."""
         cling_wrap = Product.objects.create(
             name="Cling Wrap",
             price="40.00",
@@ -1123,6 +1129,45 @@ class TestProductAvailabilityEnhancements:
         assert response.context["category_choices"] == []
         assert b'<select name="category"' not in response.content
         assert b'<input type="hidden" name="category" value="PACKAGING">' in response.content
+
+    def test_raw_materials_tab_link_excludes_packaging(self, owner_client, branch):
+        """Client review (2026-11-09): a Cling Wrap-style item used to
+        show up under BOTH the Raw Materials tab (which passed no
+        category filter at all, by design -- see
+        test_general_materials_tab_still_shows_both_packaging_and_food)
+        and the dedicated Packaging Materials tab, which read as
+        duplicate data. The Raw Materials tab's own link now carries
+        &category=RAW_MATERIAL, so clicking it (not just visiting
+        type=MATERIAL directly) excludes Packaging."""
+        cling_wrap = Product.objects.create(
+            name="Cling Wrap",
+            price="40.00",
+            product_type=Product.ProductType.MATERIAL,
+            category=Product.Category.PACKAGING,
+        )
+        flour = Product.objects.create(
+            name="Flour", price="45.00", product_type=Product.ProductType.MATERIAL
+        )
+        Inventory.objects.create(branch=branch, product=cling_wrap, quantity_on_hand=100)
+        Inventory.objects.create(branch=branch, product=flour, quantity_on_hand=20)
+
+        # First, confirm the rendered Raw Materials tab link itself now
+        # carries the category filter, not just that the right items
+        # happen to show up given the right params.
+        page = owner_client.get(reverse("inventory:product_management"), {"type": "MATERIAL"})
+        content = page.content.decode()
+        tabs = re.findall(r'<a href="([^"]*)"[^>]*>Raw Materials<', content)
+        assert tabs, "Raw Materials tab link not found on the page"
+        assert "category=RAW_MATERIAL" in tabs[0]
+
+        # Then, follow that exact link and confirm Packaging is excluded.
+        response = owner_client.get(
+            reverse("inventory:product_management"),
+            {"type": "MATERIAL", "category": "RAW_MATERIAL"},
+        )
+        product_names = {i.product.name for i in response.context["items"]}
+        assert product_names == {"Flour"}
+        assert response.context["active_tab"] == "materials"
 
     def test_category_filter_narrows_to_raw_materials_food(self, owner_client, branch):
         """The 'Raw Materials (Food)' option is the complement of

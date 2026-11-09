@@ -158,6 +158,7 @@ def product_management(request):
             "selected_category": category,
             "active_tab": active_tab,
             "category_choices": category_choices,
+            "raw_material_category_filter": services.RAW_MATERIAL_CATEGORY_FILTER,
             "search": search,
             "items": availability["items"],
             "stats": availability["stats"],
