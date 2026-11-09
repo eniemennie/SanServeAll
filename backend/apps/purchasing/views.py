@@ -11,6 +11,7 @@ from apps.purchasing.services import (
     PurchasingError,
     cancel_purchase_order,
     create_purchase_order,
+    group_materials_by_type,
     mark_purchase_order_ordered,
     receive_purchase_order,
 )
@@ -173,6 +174,15 @@ def purchase_order_list(request):
     materials = Product.objects.filter(
         product_type__in=Product.MATERIAL_TYPES, is_active=True
     ).order_by("name")
+    # Client review (2026-11-09): the Items list is now grouped into
+    # collapsible Raw Materials/Packaging Materials/Others sections
+    # (see group_materials_by_type's own docstring) -- `materials`
+    # itself stays unchanged and still drives the create_purchase_order
+    # POST handling below exactly as before, since the parallel
+    # material_id[]/ordered_quantity[]/unit_cost[] form fields are
+    # matched up by their position in the submitted form, not by which
+    # group a row's markup happens to sit in.
+    material_groups = group_materials_by_type(materials)
 
     if request.method == "POST":
         material_ids = request.POST.getlist("material_id")
@@ -204,6 +214,7 @@ def purchase_order_list(request):
             "suppliers": Supplier.objects.filter(is_active=True),
             "branches": Branch.objects.all(),
             "materials": materials,
+            "material_groups": material_groups,
             "error": error,
             "created_order": created_order,
         },
