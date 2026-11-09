@@ -99,6 +99,57 @@ def get_product_availability(branch=None, product_type=None, category=None, sear
     }
 
 
+def group_items_by_product(items):
+    """Client review (2026-11-09): the Product Availability table showed
+    the same product name once per branch (e.g. "8x8x2 Blue Box" repeated
+    for Batangas City, Lipa, Alangilan), which reads as crowded/duplicated
+    once a category has several products across several branches. Groups
+    the flat `items` list (as returned by get_product_availability, one
+    Inventory row per product/branch) into one entry per Product, with its
+    real per-branch Inventory rows nested underneath for the UI to expand.
+
+    Purely a display reorganization -- doesn't merge, sum-and-save, delete,
+    or otherwise touch any Inventory record. Each group's `branches` list
+    holds the exact same Inventory objects `items` did, in the same order,
+    so Quick Sale/Manual Adjustment (which already act on one Inventory pk
+    at a time) are completely unaffected by grouping.
+
+    Preserves `items`' own ordering (get_product_availability already
+    orders by product name) -- a product's first appearance determines
+    where its group sorts.
+    """
+    groups = {}
+    for item in items:
+        group = groups.setdefault(item.product_id, {"product": item.product, "branches": []})
+        group["branches"].append(item)
+
+    result = []
+    for group in groups.values():
+        branches = group["branches"]
+        # Severity order matches status_label's own: Out of Stock is more
+        # urgent than Low Stock, which is more urgent than Available -- a
+        # collapsed group must never read as fine when one of its real
+        # branches genuinely isn't, so it always shows its worst branch.
+        if any(b.is_out_of_stock for b in branches):
+            worst_status, worst_badge = "Out of Stock", "jc-badge-critical"
+        elif any(b.is_low_stock for b in branches):
+            worst_status, worst_badge = "Low Stock", "jc-badge-low"
+        else:
+            worst_status, worst_badge = "Available", "jc-badge-adequate"
+
+        result.append(
+            {
+                "product": group["product"],
+                "branches": branches,
+                "branch_count": len(branches),
+                "total_stock": sum(b.display_quantity for b in branches),
+                "worst_status": worst_status,
+                "worst_badge": worst_badge,
+            }
+        )
+    return result
+
+
 def get_branch_inventory(branch, product_type=None, low_stock_only=False):
     """Returns Inventory rows for a branch, optionally filtered by product
     type (Fig. 3-32 Finished Goods vs. Fig. 3-33 Materials share one

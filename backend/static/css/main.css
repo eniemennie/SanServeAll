@@ -227,6 +227,23 @@ body {
   transform: rotate(90deg);
 }
 
+/* --- Product Availability: collapsible product groups (client review,
+   2026-11-09) -- a product repeated once per branch (e.g. "8x8x2 Blue
+   Box" x3 for Batangas/Lipa/Alangilan) now collapses to one row with its
+   branches nested underneath. Reuses .jc-attention-toggle-icon above
+   directly for the caret rather than duplicating the rotate-on-expand
+   rule -- same interaction pattern, just triggering a nested
+   branch-rows table instead of a whole card. */
+.jc-group-toggle {
+  cursor: pointer;
+}
+.jc-group-subtable {
+  background-color: var(--jc-canvas);
+}
+.jc-group-subtable td {
+  border-top: 1px solid #EEF0F2;
+}
+
 /* --- Category tabs (scrollable pill row, e.g. POS product catalog) ---
    cross-role consistency pass, Nov 3: was previously defined inline in
    pos_ordering.html's own extra_css. Moved here unchanged so it's the
