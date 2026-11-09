@@ -175,6 +175,11 @@ def product_management(request):
             "raw_material_category_filter": services.RAW_MATERIAL_CATEGORY_FILTER,
             "search": search,
             "items": availability["items"],
+            # Client review (2026-11-09): collapsible product grouping --
+            # the table renders from this, `items` stays in context
+            # unchanged (existing tests/filters read it directly) and
+            # un-grouped as the source of truth for stats above.
+            "product_groups": services.group_items_by_product(availability["items"]),
             "stats": availability["stats"],
             "quick_sale_amounts": [1, 2, 5],
             "error": error,

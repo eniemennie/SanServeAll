@@ -767,6 +767,182 @@ class TestProductManagementView:
         assert response.status_code == 200
         assert not Product.objects.filter(price="10.00").exists()
 
+    def test_same_product_across_branches_renders_as_one_collapsible_group(
+        self, owner_client, branch, other_branch
+    ):
+        """Client review (2026-11-09): "8x8x2 Blue Box" used to print one
+        full row per branch it's stocked at -- the grouped table now
+        renders its name once, with a collapsible detail section (built
+        from services.group_items_by_product) holding the per-branch
+        rows underneath."""
+        product = Product.objects.create(
+            name="8x8x2 Blue Box", price="22.00", product_type=Product.ProductType.MATERIAL
+        )
+        Inventory.objects.create(branch=branch, product=product, quantity_on_hand=65)
+        Inventory.objects.create(branch=other_branch, product=product, quantity_on_hand=56)
+
+        response = owner_client.get(reverse("inventory:product_management"), {"type": "MATERIAL"})
+        content = response.content.decode()
+
+        # The product name appears exactly once as a group header -- not
+        # once per branch the way the old flat table repeated it.
+        assert content.count("8x8x2 Blue Box") == 1
+        assert "2 branches" in content
+        assert branch.name in content
+        assert other_branch.name in content
+        group = next(g for g in response.context["product_groups"] if g["product"] == product)
+        assert group["branch_count"] == 2
+        assert group["total_stock"] == 121
+
+    def test_grouping_never_merges_or_drops_the_underlying_inventory_rows(
+        self, owner_client, branch, other_branch
+    ):
+        """Grouping is purely how the table is drawn -- it must never
+        change what's actually in the database, and `items` (the flat
+        list existing filters/tests already rely on) must stay exactly
+        as it was."""
+        product = Product.objects.create(
+            name="Grouped Widget", price="10.00", product_type=Product.ProductType.FINISHED_GOOD
+        )
+        Inventory.objects.create(branch=branch, product=product, quantity_on_hand=3)
+        Inventory.objects.create(branch=other_branch, product=product, quantity_on_hand=4)
+
+        response = owner_client.get(reverse("inventory:product_management"))
+
+        assert Inventory.objects.filter(product=product).count() == 2
+        assert len(response.context["items"]) == 2
+        assert len(response.context["product_groups"]) == 1
+
+    def test_worst_branch_status_surfaces_on_the_collapsed_group_row(self, owner_client, branch):
+        """A group must never read as fine (Available) when one of its
+        real branches is out of stock -- the collapsed row shows the
+        worst status among its branches, not just the first one."""
+        other = Branch.objects.create(name="Alangilan", code="ALANGILAN")
+        product = Product.objects.create(
+            name="Mixed Status Product",
+            price="20.00",
+            product_type=Product.ProductType.FINISHED_GOOD,
+        )
+        Inventory.objects.create(branch=branch, product=product, quantity_on_hand=50)
+        Inventory.objects.create(branch=other, product=product, quantity_on_hand=0)
+
+        response = owner_client.get(reverse("inventory:product_management"))
+
+        group = next(g for g in response.context["product_groups"] if g["product"] == product)
+        assert group["worst_status"] == "Out of Stock"
+        assert "Out of Stock" in response.content.decode()
+
+    def test_single_branch_filter_still_renders_as_a_group(self, owner_client, branch):
+        """Client decision (2026-11-09): keep the same collapsible-group
+        shape even when the Branch filter narrows results to one
+        Inventory row per product, for visual consistency with the
+        all-branches view."""
+        product = Product.objects.create(
+            name="Single Branch Item", price="15.00", product_type=Product.ProductType.FINISHED_GOOD
+        )
+        Inventory.objects.create(branch=branch, product=product, quantity_on_hand=12)
+
+        response = owner_client.get(reverse("inventory:product_management"), {"branch": branch.pk})
+
+        assert response.status_code == 200
+        groups = response.context["product_groups"]
+        group = next(g for g in groups if g["product"] == product)
+        assert group["branch_count"] == 1
+        assert 'data-bs-toggle="collapse"' in response.content.decode()
+
+    def test_quick_sale_and_manual_adjustment_still_target_one_branchs_inventory(
+        self, owner_client, branch, other_branch
+    ):
+        """Grouping must not change what Quick Sale/Manual Adjustment
+        actually act on -- each still posts to its own Inventory pk, so
+        decrementing one branch's row never touches the other."""
+        product = Product.objects.create(
+            name="Actionable Item", price="40.00", product_type=Product.ProductType.FINISHED_GOOD
+        )
+        inv_a = Inventory.objects.create(branch=branch, product=product, quantity_on_hand=10)
+        inv_b = Inventory.objects.create(branch=other_branch, product=product, quantity_on_hand=10)
+
+        owner_client.post(
+            reverse("inventory:quick_sale", args=[inv_a.pk]),
+            {"amount": 2, "next": reverse("inventory:product_management")},
+        )
+
+        inv_a.refresh_from_db()
+        inv_b.refresh_from_db()
+        assert inv_a.quantity_on_hand == 8
+        assert inv_b.quantity_on_hand == 10
+
+
+class TestGroupItemsByProduct:
+    """services.group_items_by_product -- the pure grouping function
+    behind Product Availability's collapsible table (client review,
+    2026-11-09). Exercised directly against get_product_availability's
+    real `items` output rather than hand-built objects, so it's tested
+    against the same shape the view actually passes it."""
+
+    def test_empty_items_returns_empty_groups(self):
+        assert services.group_items_by_product([]) == []
+
+    def test_groups_by_product_preserving_branch_rows(self, branch, other_branch):
+        product = Product.objects.create(name="Croissant", price="55.00")
+        Inventory.objects.create(branch=branch, product=product, quantity_on_hand=5)
+        Inventory.objects.create(branch=other_branch, product=product, quantity_on_hand=7)
+
+        items = services.get_product_availability()["items"]
+        groups = services.group_items_by_product(items)
+
+        assert len(groups) == 1
+        assert groups[0]["product"] == product
+        assert groups[0]["branch_count"] == 2
+        assert {b.branch for b in groups[0]["branches"]} == {branch, other_branch}
+        assert groups[0]["total_stock"] == 12
+
+    def test_distinct_products_form_distinct_groups(self, branch):
+        croissant = Product.objects.create(name="Croissant", price="55.00")
+        muffin = Product.objects.create(name="Muffin", price="45.00")
+        Inventory.objects.create(branch=branch, product=croissant, quantity_on_hand=5)
+        Inventory.objects.create(branch=branch, product=muffin, quantity_on_hand=3)
+
+        items = services.get_product_availability()["items"]
+        groups = services.group_items_by_product(items)
+
+        assert len(groups) == 2
+        assert {g["product"] for g in groups} == {croissant, muffin}
+
+    def test_worst_status_is_out_of_stock_when_any_branch_is(self, branch, other_branch):
+        product = Product.objects.create(name="Danish", price="60.00")
+        Inventory.objects.create(branch=branch, product=product, quantity_on_hand=20)
+        Inventory.objects.create(branch=other_branch, product=product, quantity_on_hand=0)
+
+        groups = services.group_items_by_product(services.get_product_availability()["items"])
+
+        assert groups[0]["worst_status"] == "Out of Stock"
+        assert groups[0]["worst_badge"] == "jc-badge-critical"
+
+    def test_worst_status_is_low_stock_when_no_branch_is_out_but_one_is_low(
+        self, branch, other_branch
+    ):
+        product = Product.objects.create(name="Bagel", price="40.00")
+        Inventory.objects.create(
+            branch=branch, product=product, quantity_on_hand=20, reorder_threshold=50
+        )
+        Inventory.objects.create(branch=other_branch, product=product, quantity_on_hand=100)
+
+        groups = services.group_items_by_product(services.get_product_availability()["items"])
+
+        assert groups[0]["worst_status"] == "Low Stock"
+        assert groups[0]["worst_badge"] == "jc-badge-low"
+
+    def test_worst_status_is_available_when_every_branch_is_fine(self, branch, other_branch):
+        product = Product.objects.create(name="Scone", price="35.00")
+        Inventory.objects.create(branch=branch, product=product, quantity_on_hand=20)
+        Inventory.objects.create(branch=other_branch, product=product, quantity_on_hand=30)
+
+        groups = services.group_items_by_product(services.get_product_availability()["items"])
+
+        assert groups[0]["worst_status"] == "Available"
+        assert groups[0]["worst_badge"] == "jc-badge-adequate"
+
 
 class TestProductAvailabilityStockValuePrecision:
     """Task #137 (client review): currency/number formatting
