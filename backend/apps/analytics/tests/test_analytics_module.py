@@ -1178,3 +1178,125 @@ class TestResolveReportWindowAndServicesWithExplicitDateRange:
             {"unit": "PIECE", "unit_display": "pc", "total": 5}
         ]
         assert summary["total_produced"] == 10
+
+
+class TestReportsHubExportView:
+    """Excel download for the Reports Hub (client review, 2026-11-09:
+    the manuscript referenced a "downloadable Excel report" that never
+    existed in this codebase -- see reports_hub_export's own docstring).
+    Verifies the response is a real, openable workbook whose numbers
+    match what the corresponding service functions return for the same
+    filters, not just that *a* response came back."""
+
+    def test_owner_can_download(self, owner_client):
+        response = owner_client.get(reverse("analytics:reports_hub_export"))
+        assert response.status_code == 200
+        assert response["Content-Type"] == (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        assert "attachment" in response["Content-Disposition"]
+        assert ".xlsx" in response["Content-Disposition"]
+
+    def test_non_owner_cannot_download(self, client, cashier):
+        client.force_login(cashier)
+        response = client.get(reverse("analytics:reports_hub_export"))
+        assert response.status_code == 403
+
+    def test_workbook_has_one_sheet_per_reports_hub_tab(self, owner_client):
+        import io
+
+        import openpyxl
+
+        response = owner_client.get(reverse("analytics:reports_hub_export"))
+        workbook = openpyxl.load_workbook(io.BytesIO(response.content))
+
+        assert workbook.sheetnames == [
+            "Sales & Trend",
+            "Product Performance",
+            "Resource Consumption",
+            "Operational Performance",
+        ]
+
+    def test_sales_sheet_matches_the_same_service_function_the_page_uses(
+        self, owner_client, branch, cashier, latte
+    ):
+        import io
+
+        import openpyxl
+
+        _completed_sale(
+            branch, cashier, latte, quantity=2, unit_price="125.00", amount_tendered="300.00"
+        )
+
+        response = owner_client.get(reverse("analytics:reports_hub_export"), {"branch": branch.pk})
+        workbook = openpyxl.load_workbook(io.BytesIO(response.content))
+        sheet = workbook["Sales & Trend"]
+        rows = {row[0]: row[1] for row in sheet.iter_rows(min_row=2, max_row=5, values_only=True)}
+
+        expected = services.get_sales_summary(branch=branch)
+        assert rows["Total Revenue"] == float(expected["total_revenue"])
+        assert rows["Total Units Sold"] == expected["total_units_sold"]
+
+    def test_filename_reflects_branch_and_range(self, owner_client, branch):
+        response = owner_client.get(reverse("analytics:reports_hub_export"), {"branch": branch.pk})
+        disposition = response["Content-Disposition"]
+        assert branch.name.replace(" ", "") in disposition
+        assert "Last30Days" in disposition
+
+    def test_custom_date_range_is_honored_same_as_the_page(
+        self, owner_client, branch, cashier, latte
+    ):
+        in_range = _completed_sale(
+            branch,
+            cashier,
+            latte,
+            quantity=1,
+            unit_price="125.00",
+            amount_tendered="125.00",
+            when=timezone.make_aware(datetime(2026, 11, 6, 10, 0)),
+        )
+        _completed_sale(
+            branch,
+            cashier,
+            latte,
+            quantity=5,
+            unit_price="125.00",
+            amount_tendered="625.00",
+            when=timezone.make_aware(datetime(2026, 10, 1, 10, 0)),
+        )
+
+        import io
+
+        import openpyxl
+
+        response = owner_client.get(
+            reverse("analytics:reports_hub_export"),
+            {"branch": branch.pk, "date_from": "2026-11-06", "date_to": "2026-11-07"},
+        )
+        workbook = openpyxl.load_workbook(io.BytesIO(response.content))
+        sheet = workbook["Sales & Trend"]
+        rows = {row[0]: row[1] for row in sheet.iter_rows(min_row=2, max_row=5, values_only=True)}
+
+        assert rows["Total Units Sold"] == 1
+        assert rows["Total Revenue"] == float(in_range.grand_total)
+
+    def test_product_performance_sheet_marks_new_products_without_crashing(
+        self, owner_client, branch, cashier, latte
+    ):
+        """growth_rate is None for a brand-new product (see
+        get_product_performance) -- the sheet must render "New" for
+        that row rather than erroring on round(None, 1)."""
+        import io
+
+        import openpyxl
+
+        _completed_sale(
+            branch, cashier, latte, quantity=3, unit_price="125.00", amount_tendered="375.00"
+        )
+
+        response = owner_client.get(reverse("analytics:reports_hub_export"), {"branch": branch.pk})
+        workbook = openpyxl.load_workbook(io.BytesIO(response.content))
+        sheet = workbook["Product Performance"]
+        data_rows = list(sheet.iter_rows(min_row=2, values_only=True))
+
+        assert ("Spanish Latte", 3, 0, "New") in data_rows
