@@ -25,11 +25,19 @@
 {% if insights %}
 <div class="mb-4">
     {% for insight in insights %}
+    {% comment %}
+    Client review (2026-11-09): hide the "Template" badge entirely -- it
+    read as exposing internal implementation detail rather than useful
+    information. AI-Generated insights still get their badge;
+    template-based ones now show no badge at all, not a relabeled
+    "AI-Generated" one. Display-only -- insight.generated_by_ai
+    (apps/forecasting/models.py) is untouched, still real data.
+    {% endcomment %}
     <div class="jc-card p-3 mb-2 d-flex justify-content-between align-items-start" style="border-left: 4px solid var(--jc-teal);">
         <span class="small">{{ insight.message }}</span>
-        <span class="jc-badge {% if insight.generated_by_ai %}jc-badge-adequate{% else %}jc-badge-low{% endif %} ms-2">
-            {% if insight.generated_by_ai %}AI-Generated{% else %}Template{% endif %}
-        </span>
+        {% if insight.generated_by_ai %}
+        <span class="jc-badge jc-badge-adequate ms-2">AI-Generated</span>
+        {% endif %}
     </div>
     {% endfor %}
 </div>
@@ -74,7 +82,15 @@
                     <tr>
                         <td>{{ score.product.name }}</td>
                         <td>{{ score.branch.name }}</td>
-                        <td>{{ score.avg_daily_demand|floatformat:2 }}/day</td>
+                        {% comment %}
+                        Client review (2026-11-09): whole numbers only
+                        (e.g. "1/day", not two decimal places) --
+                        display-only, avg_daily_demand itself (the
+                        trailing 30-day actual-sales average the reorder
+                        math is driven by, see services.py) is still
+                        stored and calculated at full precision.
+                        {% endcomment %}
+                        <td>{{ score.avg_daily_demand|floatformat:0 }}/day</td>
                     </tr>
                     {% empty %}
                     <tr><td colspan="3" class="text-center text-muted py-3">Not enough data yet.</td></tr>
