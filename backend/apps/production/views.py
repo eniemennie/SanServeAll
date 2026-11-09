@@ -80,7 +80,10 @@ def record_production(request):
     ingredient usages, atomically deducting materials and crediting the
     finished good's stock at the commissary."""
     error = None
-    materials = Product.objects.filter(product_type=Product.ProductType.MATERIAL, is_active=True)
+    # Client review (2026-11-09): widened to Product.MATERIAL_TYPES
+    # (Raw Material + Packaging Material) -- see record_production's
+    # own service-layer lookup for why.
+    materials = Product.objects.filter(product_type__in=Product.MATERIAL_TYPES, is_active=True)
     finished_goods = Product.objects.filter(
         product_type=Product.ProductType.FINISHED_GOOD, is_active=True
     )

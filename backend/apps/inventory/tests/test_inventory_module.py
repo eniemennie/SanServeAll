@@ -475,32 +475,17 @@ class TestCreateProduct:
         product = services.create_product("New Item", "10.00", Product.ProductType.FINISHED_GOOD)
         assert product.category == ""
 
-    def test_accepts_packaging_category_for_a_material(self):
+    def test_accepts_packaging_material_as_its_own_product_type(self):
+        """Client review (2026-11-09): Packaging Material is now a real
+        ProductType value, passed like any other type -- no separate
+        category tag needed any more."""
         product = services.create_product(
             "Receipt Tape Roll",
             "15.00",
-            Product.ProductType.MATERIAL,
-            category=Product.Category.PACKAGING,
+            Product.ProductType.PACKAGING,
         )
-        assert product.category == Product.Category.PACKAGING
-
-    def test_rejects_packaging_category_for_a_finished_good(self):
-        with pytest.raises(services.InventoryServiceError, match="Only Raw Material"):
-            services.create_product(
-                "Mislabeled Latte",
-                "100.00",
-                Product.ProductType.FINISHED_GOOD,
-                category=Product.Category.PACKAGING,
-            )
-
-    def test_rejects_an_unrecognized_category(self):
-        with pytest.raises(services.InventoryServiceError, match="not a recognized category"):
-            services.create_product(
-                "Flour",
-                "45.00",
-                Product.ProductType.MATERIAL,
-                category="BOGUS",
-            )
+        assert product.product_type == Product.ProductType.PACKAGING
+        assert product.category == ""
 
     def test_rejects_a_duplicate_name_among_active_products(self):
         """Task #111: a real duplicate pair ("Seasalt Latte") was found
@@ -694,39 +679,23 @@ class TestProductManagementView:
         product = Product.objects.get(name="Sugar")
         assert product.unit_of_measure == Product.UnitOfMeasure.KILOGRAM
 
-    def test_owner_can_tag_a_new_material_as_packaging(self, owner_client, branch):
-        """Dev backlog follow-up to Task #148's Packaging Materials tab
-        (client review 2026-11-09): new packaging items used to only
-        arrive via the client's own bulk import, with no way to add one
-        straight from this form."""
+    def test_owner_can_add_a_new_packaging_material_directly(self, owner_client, branch):
+        """Client review (2026-11-09): Packaging Material is now its own
+        choice in the Type dropdown -- adding one straight from this form
+        no longer needs a separate Category field or tag."""
         response = owner_client.post(
             reverse("inventory:product_management"),
             {
                 "name": "Cling Wrap",
                 "price": "35.00",
-                "product_type": Product.ProductType.MATERIAL,
-                "new_product_category": Product.Category.PACKAGING,
+                "product_type": Product.ProductType.PACKAGING,
                 "branches": [branch.pk],
             },
         )
         assert response.status_code == 302
         product = Product.objects.get(name="Cling Wrap")
-        assert product.category == Product.Category.PACKAGING
-
-    def test_packaging_category_on_a_finished_good_shows_a_clear_error(self, owner_client, branch):
-        response = owner_client.post(
-            reverse("inventory:product_management"),
-            {
-                "name": "Mislabeled Latte",
-                "price": "100.00",
-                "product_type": Product.ProductType.FINISHED_GOOD,
-                "new_product_category": Product.Category.PACKAGING,
-                "branches": [branch.pk],
-            },
-        )
-        assert response.status_code == 200
-        assert "Only Raw Material" in response.content.decode()
-        assert not Product.objects.filter(name="Mislabeled Latte").exists()
+        assert product.product_type == Product.ProductType.PACKAGING
+        assert product.category == ""
 
     def test_adding_a_product_provisions_it_only_at_the_selected_branch(
         self, owner_client, branch, other_branch
@@ -1188,42 +1157,15 @@ class TestProductAvailabilityEnhancements:
         response = owner_client.get(reverse("inventory:product_management"), {"type": "MATERIAL"})
         product_names = {i.product.name for i in response.context["items"]}
         assert product_names == {"Flour"}
+        assert response.context["active_tab"] == "materials"
 
-    def test_category_filter_narrows_to_packaging_materials(self, owner_client, branch):
-        """Task #148 (client review, 2026-11-04): 'Packaging vs Food'
-        filtering -- a packaging-tagged material shows up under the
-        Packaging filter, and a plain (blank-category) material does
-        not."""
+    def test_type_filter_narrows_to_packaging_only(self, owner_client, branch):
+        """Client review (2026-11-09): Packaging Material is now its own
+        product_type (ProductType.PACKAGING), promoted from a category
+        tag on a MATERIAL row -- the ?type=PACKAGING tab filters purely
+        on that, with no category sentinel involved at all."""
         cling_wrap = Product.objects.create(
-            name="Cling Wrap",
-            price="40.00",
-            product_type=Product.ProductType.MATERIAL,
-            category=Product.Category.PACKAGING,
-        )
-        flour = Product.objects.create(
-            name="Flour", price="45.00", product_type=Product.ProductType.MATERIAL
-        )
-        Inventory.objects.create(branch=branch, product=cling_wrap, quantity_on_hand=100)
-        Inventory.objects.create(branch=branch, product=flour, quantity_on_hand=20)
-
-        response = owner_client.get(
-            reverse("inventory:product_management"),
-            {"type": "MATERIAL", "category": "PACKAGING"},
-        )
-        product_names = {i.product.name for i in response.context["items"]}
-        assert product_names == {"Cling Wrap"}
-
-    def test_packaging_materials_tab_shows_only_packaging_items(self, owner_client, branch):
-        """Client review (2026-11-08): Packaging gets its own dedicated
-        tab (type=MATERIAL&category=PACKAGING) rather than only being
-        reachable via the Raw Materials tab's category dropdown -- the
-        client maintains and imports packaging data separately from food
-        raw materials and wants it to read as its own section."""
-        cling_wrap = Product.objects.create(
-            name="Cling Wrap",
-            price="40.00",
-            product_type=Product.ProductType.MATERIAL,
-            category=Product.Category.PACKAGING,
+            name="Cling Wrap", price="40.00", product_type=Product.ProductType.PACKAGING
         )
         flour = Product.objects.create(
             name="Flour", price="45.00", product_type=Product.ProductType.MATERIAL
@@ -1233,10 +1175,7 @@ class TestProductAvailabilityEnhancements:
         Inventory.objects.create(branch=branch, product=flour, quantity_on_hand=20)
         Inventory.objects.create(branch=branch, product=latte, quantity_on_hand=10)
 
-        response = owner_client.get(
-            reverse("inventory:product_management"),
-            {"type": "MATERIAL", "category": "PACKAGING"},
-        )
+        response = owner_client.get(reverse("inventory:product_management"), {"type": "PACKAGING"})
         assert response.status_code == 200
         product_names = {i.product.name for i in response.context["items"]}
         assert product_names == {"Cling Wrap"}
@@ -1244,44 +1183,29 @@ class TestProductAvailabilityEnhancements:
         assert b"Packaging Materials" in response.content
 
     def test_packaging_materials_tab_link_is_marked_active(self, owner_client, branch):
-        response = owner_client.get(
-            reverse("inventory:product_management"),
-            {"type": "MATERIAL", "category": "PACKAGING"},
-        )
+        response = owner_client.get(reverse("inventory:product_management"), {"type": "PACKAGING"})
         content = response.content.decode()
         tabs = re.findall(r'<a href="[^"]*"[^>]*>[^<]*</a>', content)
         packaging_tag = next(t for t in tabs if "Packaging Materials" in t)
         assert "jc-filter-tab-active" in packaging_tag
 
     def test_raw_materials_tab_not_marked_active_on_packaging_tab(self, owner_client, branch):
-        """The general Raw Materials tab and the dedicated Packaging tab
-        are mutually exclusive -- only one shows as active at a time,
-        even though both carry type=MATERIAL."""
-        response = owner_client.get(
-            reverse("inventory:product_management"),
-            {"type": "MATERIAL", "category": "PACKAGING"},
-        )
+        """The Raw Materials tab and the Packaging Materials tab are
+        mutually exclusive, distinct product_type values -- only one
+        shows as active at a time."""
+        response = owner_client.get(reverse("inventory:product_management"), {"type": "PACKAGING"})
         content = response.content.decode()
         tabs = re.findall(r'<a href="[^"]*"[^>]*>[^<]*</a>', content)
         raw_materials_tag = next(t for t in tabs if ">Raw Materials<" in t)
         assert "jc-filter-tab-active" not in raw_materials_tag
 
-    def test_general_materials_tab_still_shows_both_packaging_and_food(self, owner_client, branch):
-        """type=MATERIAL on its own (no category param at all) still
-        shows everything tagged MATERIAL, packaging included -- this is
-        the underlying endpoint's own default, kept for anyone hitting
-        this URL shape directly (an old bookmark, a manually-edited
-        querystring). As of the client review below, the Raw Materials
-        TAB's own link no longer produces this URL shape -- it now
-        always includes &category=RAW_MATERIAL (see
-        test_raw_materials_tab_link_excludes_packaging) -- but the bare
-        endpoint itself still behaves this way for backward
-        compatibility."""
+    def test_raw_materials_tab_excludes_packaging(self, owner_client, branch):
+        """Client review (2026-11-09): since Packaging is its own
+        product_type, the Raw Materials tab (?type=MATERIAL) can no
+        longer include it at all -- there's no category combination left
+        that would mix the two."""
         cling_wrap = Product.objects.create(
-            name="Cling Wrap",
-            price="40.00",
-            product_type=Product.ProductType.MATERIAL,
-            category=Product.Category.PACKAGING,
+            name="Cling Wrap", price="40.00", product_type=Product.ProductType.PACKAGING
         )
         flour = Product.objects.create(
             name="Flour", price="45.00", product_type=Product.ProductType.MATERIAL
@@ -1291,83 +1215,24 @@ class TestProductAvailabilityEnhancements:
 
         response = owner_client.get(reverse("inventory:product_management"), {"type": "MATERIAL"})
         product_names = {i.product.name for i in response.context["items"]}
-        assert product_names == {"Cling Wrap", "Flour"}
-        assert response.context["active_tab"] == "materials"
-
-    def test_category_dropdown_hidden_on_packaging_tab(self, owner_client):
-        """Already scoped to the one category, so there's nothing left
-        to filter by -- unlike Finished Products/Raw Materials, which
-        both keep their category dropdown."""
-        response = owner_client.get(
-            reverse("inventory:product_management"),
-            {"type": "MATERIAL", "category": "PACKAGING"},
-        )
-        assert response.context["category_choices"] == []
-        assert b'<select name="category"' not in response.content
-        assert b'<input type="hidden" name="category" value="PACKAGING">' in response.content
-
-    def test_raw_materials_tab_link_excludes_packaging(self, owner_client, branch):
-        """Client review (2026-11-09): a Cling Wrap-style item used to
-        show up under BOTH the Raw Materials tab (which passed no
-        category filter at all, by design -- see
-        test_general_materials_tab_still_shows_both_packaging_and_food)
-        and the dedicated Packaging Materials tab, which read as
-        duplicate data. The Raw Materials tab's own link now carries
-        &category=RAW_MATERIAL, so clicking it (not just visiting
-        type=MATERIAL directly) excludes Packaging."""
-        cling_wrap = Product.objects.create(
-            name="Cling Wrap",
-            price="40.00",
-            product_type=Product.ProductType.MATERIAL,
-            category=Product.Category.PACKAGING,
-        )
-        flour = Product.objects.create(
-            name="Flour", price="45.00", product_type=Product.ProductType.MATERIAL
-        )
-        Inventory.objects.create(branch=branch, product=cling_wrap, quantity_on_hand=100)
-        Inventory.objects.create(branch=branch, product=flour, quantity_on_hand=20)
-
-        # First, confirm the rendered Raw Materials tab link itself now
-        # carries the category filter, not just that the right items
-        # happen to show up given the right params.
-        page = owner_client.get(reverse("inventory:product_management"), {"type": "MATERIAL"})
-        content = page.content.decode()
-        tabs = re.findall(r'<a href="([^"]*)"[^>]*>Raw Materials<', content)
-        assert tabs, "Raw Materials tab link not found on the page"
-        assert "category=RAW_MATERIAL" in tabs[0]
-
-        # Then, follow that exact link and confirm Packaging is excluded.
-        response = owner_client.get(
-            reverse("inventory:product_management"),
-            {"type": "MATERIAL", "category": "RAW_MATERIAL"},
-        )
-        product_names = {i.product.name for i in response.context["items"]}
         assert product_names == {"Flour"}
         assert response.context["active_tab"] == "materials"
 
-    def test_category_filter_narrows_to_raw_materials_food(self, owner_client, branch):
-        """The 'Raw Materials (Food)' option is the complement of
-        Packaging -- a MATERIAL row with no category tagged -- not a
-        real stored category value (see
-        services.RAW_MATERIAL_CATEGORY_FILTER)."""
-        cling_wrap = Product.objects.create(
-            name="Cling Wrap",
-            price="40.00",
-            product_type=Product.ProductType.MATERIAL,
-            category=Product.Category.PACKAGING,
+    def test_category_dropdown_hidden_on_the_materials_and_packaging_tabs(self, owner_client):
+        """Product.Category is a POS-tab concept, finished-goods only --
+        neither Raw Materials nor Packaging Materials have categories of
+        their own, so neither tab offers the dropdown."""
+        materials_response = owner_client.get(
+            reverse("inventory:product_management"), {"type": "MATERIAL"}
         )
-        flour = Product.objects.create(
-            name="Flour", price="45.00", product_type=Product.ProductType.MATERIAL
-        )
-        Inventory.objects.create(branch=branch, product=cling_wrap, quantity_on_hand=100)
-        Inventory.objects.create(branch=branch, product=flour, quantity_on_hand=20)
+        assert materials_response.context["category_choices"] == []
+        assert b'<select name="category"' not in materials_response.content
 
-        response = owner_client.get(
-            reverse("inventory:product_management"),
-            {"type": "MATERIAL", "category": "RAW_MATERIAL"},
+        packaging_response = owner_client.get(
+            reverse("inventory:product_management"), {"type": "PACKAGING"}
         )
-        product_names = {i.product.name for i in response.context["items"]}
-        assert product_names == {"Flour"}
+        assert packaging_response.context["category_choices"] == []
+        assert b'<select name="category"' not in packaging_response.content
 
     def test_category_filter_narrows_finished_goods_by_category(self, owner_client, branch):
         latte = Product.objects.create(
@@ -1390,16 +1255,16 @@ class TestProductAvailabilityEnhancements:
         type filter at all), so every Raw Material and Packaging row
         was silently mixed into this supposedly Finished-Goods-only
         view. Confirmed live on production (a "blue box" Raw Material
-        row rendered right next to a real Finished Good)."""
+        row rendered right next to a real Finished Good). Packaging
+        Material is now its own product_type (ProductType.PACKAGING),
+        so "Blue Box" is created that way directly rather than via the
+        old category=PACKAGING tag on a MATERIAL row."""
         latte = Product.objects.create(name="Spanish Latte", price="125.00")
         flour = Product.objects.create(
             name="Flour", price="45.00", product_type=Product.ProductType.MATERIAL
         )
         blue_box = Product.objects.create(
-            name="Blue Box",
-            price="22.00",
-            product_type=Product.ProductType.MATERIAL,
-            category=Product.Category.PACKAGING,
+            name="Blue Box", price="22.00", product_type=Product.ProductType.PACKAGING
         )
         Inventory.objects.create(branch=branch, product=latte, quantity_on_hand=10)
         Inventory.objects.create(branch=branch, product=flour, quantity_on_hand=20)
@@ -1411,15 +1276,23 @@ class TestProductAvailabilityEnhancements:
         assert response.context["active_tab"] == "finished"
 
     def test_category_choices_exclude_packaging_on_the_finished_products_tab(self, owner_client):
+        """Product.Category no longer has a PACKAGING value at all (it
+        was promoted to its own product_type), so this simply confirms
+        the Finished Products tab's category dropdown is the normal POS
+        category list."""
         response = owner_client.get(reverse("inventory:product_management"))
         values = [value for value, _ in response.context["category_choices"]]
         assert "PACKAGING" not in values
         assert "COFFEE" in values
 
-    def test_category_choices_are_packaging_vs_raw_on_the_materials_tab(self, owner_client):
+    def test_category_choices_are_empty_on_the_materials_tab(self, owner_client):
+        """Client review (2026-11-09): category_choices is a Finished-
+        Goods-only concept (the POS category tabs) -- the Raw Materials
+        tab never offers a category dropdown at all, since Raw Material
+        and Packaging Material are now distinguished by product_type,
+        not by category."""
         response = owner_client.get(reverse("inventory:product_management"), {"type": "MATERIAL"})
-        values = [value for value, _ in response.context["category_choices"]]
-        assert values == ["PACKAGING", "RAW_MATERIAL"]
+        assert response.context["category_choices"] == []
 
     def test_search_filters_by_product_name(self, owner_client, branch):
         latte = Product.objects.create(name="Spanish Latte", price="125.00")

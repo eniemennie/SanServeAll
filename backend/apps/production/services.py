@@ -45,10 +45,10 @@ def get_commissary_relevant_product_ids():
     somewhere upstream, not a real shortage.
 
     Two groups count as "relevant":
-      - Every MATERIAL product (raw food materials + packaging) -- these
-        are the production inputs; per get_resource_status_summary's own
-        docstring, materials only ever have real Inventory rows at the
-        commissary in the first place.
+      - Every Product.MATERIAL_TYPES product (Raw Material + Packaging
+        Material) -- these are the production inputs; per
+        get_resource_status_summary's own docstring, materials only ever
+        have real Inventory rows at the commissary in the first place.
       - FINISHED_GOOD products the commissary has actually produced at
         least once (i.e. appear in ProductionRecord) -- its own baked-
         goods output waiting to be distributed to branches. Deliberately
@@ -56,7 +56,7 @@ def get_commissary_relevant_product_ids():
         category list (Cakes/Desserts/Bakery today could change), so this
         stays correct as the catalog evolves.
     """
-    material_ids = Product.objects.filter(product_type=Product.ProductType.MATERIAL).values_list(
+    material_ids = Product.objects.filter(product_type__in=Product.MATERIAL_TYPES).values_list(
         "pk", flat=True
     )
     produced_finished_good_ids = (
@@ -120,7 +120,15 @@ def record_production(commissary_staff, product_id, quantity_produced, ingredien
     resolved_rows = []
     for row in ingredient_rows:
         try:
-            material = Product.objects.get(pk=row["material_id"], product_type="MATERIAL")
+            # Client review (2026-11-09): widened from product_type="MATERIAL"
+            # alone -- a packaging item genuinely used up per batch (e.g.
+            # takeout boxes assembled at the commissary) is a valid
+            # IngredientUsage row too (see ProductPackaging's own
+            # docstring), now as its own ProductType.PACKAGING instead of
+            # a MATERIAL row tagged category=PACKAGING.
+            material = Product.objects.get(
+                pk=row["material_id"], product_type__in=Product.MATERIAL_TYPES
+            )
         except (Product.DoesNotExist, KeyError):
             raise ProductionError(f"Material with id {row.get('material_id')} not found.")
 

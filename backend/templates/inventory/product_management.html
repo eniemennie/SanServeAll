@@ -48,25 +48,18 @@
 
 <div class="d-flex gap-2 mb-3">
     <a href="?type=" class="btn btn-sm {% if active_tab == 'finished' %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">Finished Products</a>
-    <!-- Client review (2026-11-09): this tab link used to be bare
-         "?type=MATERIAL", which deliberately showed packaging items
-         here too (see TestProductManagementView's older
-         test_general_materials_tab_still_shows_both_packaging_and_food)
-         -- items appearing in both this tab and the dedicated Packaging
-         Materials tab below read as duplicate data to the client, so
-         this now explicitly excludes Packaging by passing the same
-         RAW_MATERIAL_CATEGORY_FILTER sentinel the category dropdown's
-         own "Raw Materials (Food)" option already used. -->
-    <a href="?type=MATERIAL&category={{ raw_material_category_filter }}" class="btn btn-sm {% if active_tab == 'materials' %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">Raw Materials</a>
-    <a href="?type=MATERIAL&category=PACKAGING" class="btn btn-sm {% if active_tab == 'packaging' %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">Packaging Materials</a>
+    <!-- Client review (2026-11-09): Packaging Material is now its own
+         product_type (promoted from a category tag on a Raw Material
+         row), so each tab here is simply its own explicit ?type= --
+         there's no longer a category sentinel needed to tell Raw
+         Materials and Packaging Materials apart. -->
+    <a href="?type=MATERIAL" class="btn btn-sm {% if active_tab == 'materials' %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">Raw Materials</a>
+    <a href="?type=PACKAGING" class="btn btn-sm {% if active_tab == 'packaging' %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">Packaging Materials</a>
 </div>
 
 <div class="jc-card p-3 p-md-4 mb-4">
     <form method="get" class="row g-2 align-items-end">
         <input type="hidden" name="type" value="{{ selected_type }}">
-        {% if active_tab == "packaging" %}
-        <input type="hidden" name="category" value="PACKAGING">
-        {% endif %}
         <div class="col-md-3">
             <input type="text" name="search" value="{{ search }}" class="form-control form-control-sm" placeholder="Search products...">
         </div>
@@ -81,9 +74,7 @@
         {% if category_choices %}
         <div class="col-md-3">
             <select name="category" class="form-select form-select-sm">
-                <option value="">
-                    {% if selected_type == "MATERIAL" %}All Materials{% else %}All Categories{% endif %}
-                </option>
+                <option value="">All Categories</option>
                 {% for value, label in category_choices %}
                 <option value="{{ value }}" {% if selected_category == value %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
@@ -125,7 +116,17 @@
                         <span class="jc-attention-toggle-icon mt-1">&#9656;</span>
                         <span>
                             <div class="fw-semibold">{{ group.product.name }}</div>
-                            <div class="text-muted small">{{ group.product.get_product_type_display }} &middot; {{ group.branch_count }} branch{{ group.branch_count|pluralize:"es" }}</div>
+                            <!-- Client review (2026-11-09): "[Type] · [Branch]" when the
+                                 group has exactly one real branch (the common case once a
+                                 specific branch is selected above) -- naming it directly
+                                 is more useful than "1 branch". Several branches still
+                                 show the count, preserving the collapsible-grouping
+                                 summary PR #217 added. -->
+                            <div class="text-muted small">
+                                {{ group.product.get_product_type_display }} &middot;
+                                {% if group.branch_count == 1 %}{{ group.branches.0.branch.name }}
+                                {% else %}{{ group.branch_count }} branch{{ group.branch_count|pluralize:"es" }}{% endif %}
+                            </div>
                         </span>
                     </span>
                 </td>
@@ -212,29 +213,6 @@
                 <option value="{{ value }}">{{ label }}</option>
                 {% endfor %}
             </select>
-        </div>
-        <div class="col-md-2">
-            <!-- Dev backlog follow-up to the Packaging Materials tab
-                 (client review 2026-11-09): new packaging items used to
-                 only arrive via the client's own bulk import -- this is
-                 the one new field that lets this form tag a Raw Material
-                 product Packaging directly. Deliberately only the two
-                 values Raw Material products actually distinguish (see
-                 Product.Category's own docstring); a Finished Good's
-                 category assignment is a separate, out-of-scope concern
-                 this field doesn't touch, so it's ignored for that type. -->
-            <!-- Named new_product_category, not category -- "category"
-                 is already the GET filter field's name elsewhere on this
-                 page (the dropdown above the table, and the hidden input
-                 on the Packaging tab); a second field sharing that name
-                 would collide with it inside this same <form method="post">
-                 markup even though they serve different requests. -->
-            <label class="form-label small">Category</label>
-            <select name="new_product_category" class="form-select form-select-sm">
-                <option value="">Raw Material (Food)</option>
-                <option value="PACKAGING">Packaging</option>
-            </select>
-            <div class="form-text">Raw Material products only -- ignored for Finished Goods.</div>
         </div>
         <div class="col-md-2">
             <label class="form-label small">Reorder At</label>

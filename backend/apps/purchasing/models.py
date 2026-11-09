@@ -156,7 +156,11 @@ class PurchaseOrderItem(models.Model):
     material = models.ForeignKey(
         "inventory.Product",
         on_delete=models.PROTECT,
-        limit_choices_to={"product_type": "MATERIAL"},
+        # Client review (2026-11-09): widened from product_type=MATERIAL
+        # alone -- suppliers can be ordered from for packaging materials
+        # too, which are now their own ProductType.PACKAGING rather than
+        # a MATERIAL row tagged category=PACKAGING.
+        limit_choices_to={"product_type__in": ["MATERIAL", "PACKAGING"]},
     )
     ordered_quantity = models.DecimalField(
         max_digits=12, decimal_places=3, validators=[MinValueValidator(Decimal("0.001"))]

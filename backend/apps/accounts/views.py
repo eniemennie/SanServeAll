@@ -521,9 +521,15 @@ def admin_dashboard(request):
     total_units_sold = analytics_services.get_total_units_sold(branch=selected_branch)
     forecast_label = forecasting_services.get_demand_forecast_label(branch=selected_branch)
     resource_status = inventory_services.get_resource_status_summary(branch=selected_branch)
+    # Client review (2026-11-09): widened from Product.ProductType.MATERIAL
+    # alone to Product.MATERIAL_TYPES (Raw Material + Packaging Material),
+    # now that Packaging is its own product_type instead of a MATERIAL row
+    # tagged category=PACKAGING -- this panel should still surface a
+    # packaging shortage the same way it already surfaces a food-material
+    # one.
     material_resource_status = (
         inventory_services.get_resource_status_summary(
-            branch=commissary_branch, product_type=Product.ProductType.MATERIAL
+            branch=commissary_branch, product_type=Product.MATERIAL_TYPES
         )
         if commissary_branch
         else None

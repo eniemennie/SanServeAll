@@ -79,7 +79,6 @@ def product_management(request):
                 reorder_threshold=request.POST.get("reorder_threshold") or 0,
                 branch_ids=branch_ids,
                 unit_of_measure=request.POST.get("unit_of_measure"),
-                category=request.POST.get("new_product_category"),
             )
             return redirect("inventory:product_management")
         except (services.InventoryServiceError, ValueError, TypeError) as exc:
@@ -111,7 +110,7 @@ def product_management(request):
     # type at once" -- there's no tab or control anywhere on this page
     # that asks for an unfiltered mix of both types -- so it now
     # resolves to an explicit FINISHED_GOOD filter, matching the Raw
-    # Materials/Packaging tabs' own always-explicit `type=MATERIAL`.
+    # Materials/Packaging tabs' own always-explicit `type=`.
     effective_product_type = product_type or Product.ProductType.FINISHED_GOOD
 
     availability = services.get_product_availability(
@@ -121,45 +120,25 @@ def product_management(request):
         search=search,
     )
 
-    # Client review (2026-11-08): Packaging materials (tape, boxes, cups,
-    # etc.) now get their own dedicated tab, split out of the general
-    # Raw Materials tab rather than requiring the category dropdown --
-    # the client separately maintains and uploads packaging data (its
-    # own spreadsheet) distinct from food raw materials, so it should
-    # read as its own section here too, not a filter one has to know to
-    # apply.
-    is_packaging_tab = (
-        product_type == Product.ProductType.MATERIAL and category == Product.Category.PACKAGING
-    )
-    if is_packaging_tab:
+    # Client review (2026-11-09): Packaging Materials is now its own
+    # Product.ProductType value (promoted from a category tag on a
+    # MATERIAL row -- see Product.ProductType's own docstring), so each
+    # of the three tabs here is simply its own product_type, with no
+    # category-based special-casing needed to tell Packaging apart from
+    # Raw Materials any more.
+    if effective_product_type == Product.ProductType.PACKAGING:
         active_tab = "packaging"
-    elif product_type == Product.ProductType.MATERIAL:
+    elif effective_product_type == Product.ProductType.MATERIAL:
         active_tab = "materials"
     else:
         active_tab = "finished"
 
     # Task #148 (client review, 2026-11-04): category options depend on
     # which type tab is active -- a finished-goods category (Coffee,
-    # Pasta, ...) means nothing on the Raw Materials tab, and the
-    # Packaging/Raw Materials split means nothing on the Finished
-    # Products tab. Materials' own "Raw Materials (Food)" option maps to
-    # services.RAW_MATERIAL_CATEGORY_FILTER, not a real stored category
-    # (see that constant's docstring). The dedicated Packaging tab shows
-    # no category dropdown at all -- it's already scoped to the one
-    # category, so there's nothing left to filter by.
-    if is_packaging_tab:
-        category_choices = []
-    elif product_type == Product.ProductType.MATERIAL:
-        category_choices = [
-            (Product.Category.PACKAGING, Product.Category.PACKAGING.label),
-            (services.RAW_MATERIAL_CATEGORY_FILTER, "Raw Materials (Food)"),
-        ]
-    else:
-        category_choices = [
-            (value, label)
-            for value, label in Product.Category.choices
-            if value != Product.Category.PACKAGING
-        ]
+    # Pasta, ...) means nothing on the Raw Materials or Packaging
+    # Materials tabs, which don't have categories of their own at all
+    # (Product.Category is a POS-tab concept, finished-goods-only).
+    category_choices = [] if active_tab != "finished" else list(Product.Category.choices)
 
     return render(
         request,
@@ -172,7 +151,6 @@ def product_management(request):
             "selected_category": category,
             "active_tab": active_tab,
             "category_choices": category_choices,
-            "raw_material_category_filter": services.RAW_MATERIAL_CATEGORY_FILTER,
             "search": search,
             "items": availability["items"],
             # Client review (2026-11-09): collapsible product grouping --

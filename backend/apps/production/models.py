@@ -206,7 +206,14 @@ class IngredientUsage(models.Model):
     material = models.ForeignKey(
         "inventory.Product",
         on_delete=models.PROTECT,
-        limit_choices_to={"product_type": "MATERIAL"},
+        # Client review (2026-11-09): widened from product_type=MATERIAL
+        # alone -- this already accepted packaging rows before Packaging
+        # became its own product_type (see ProductPackaging's own
+        # docstring: a batch-assembled item like a takeout box can be
+        # logged here directly), so it keeps accepting them now that
+        # they're ProductType.PACKAGING rather than a MATERIAL row
+        # tagged category=PACKAGING.
+        limit_choices_to={"product_type__in": ["MATERIAL", "PACKAGING"]},
     )
     # Decimal, 3 places: client raw-data import (Ingredient_Usage.xlsx)
     # records real consumption down to a third decimal place for some

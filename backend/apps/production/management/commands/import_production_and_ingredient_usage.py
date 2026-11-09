@@ -357,14 +357,18 @@ class Command(BaseCommand):
         output-quantity split (see module docstring)."""
         created = 0
         for usage_row in usage_rows:
+            # Client review (2026-11-09): widened to Product.MATERIAL_TYPES
+            # -- a historical usage row can legitimately name a packaging
+            # item (now ProductType.PACKAGING instead of a MATERIAL row
+            # tagged category=PACKAGING).
             material = Product.objects.filter(
-                name=usage_row["material_name"], product_type=Product.ProductType.MATERIAL
+                name=usage_row["material_name"], product_type__in=Product.MATERIAL_TYPES
             ).first()
             if material is None:
                 raise CommandError(
-                    f"Material '{usage_row['material_name']}' has no matching MATERIAL "
-                    "Product. Run import_raw_and_packaging_materials before importing "
-                    "ingredient usage."
+                    f"Material '{usage_row['material_name']}' has no matching Raw Material "
+                    "or Packaging Material Product. Run import_raw_and_packaging_materials "
+                    "before importing ingredient usage."
                 )
 
             quantity_each = usage_row["quantity_used"] / len(targets)

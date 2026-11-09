@@ -24,10 +24,7 @@ def latte():
 @pytest.fixture
 def cup():
     return Product.objects.create(
-        name="16oz Cup",
-        price="3.00",
-        product_type=Product.ProductType.MATERIAL,
-        category=Product.Category.PACKAGING,
+        name="16oz Cup", price="3.00", product_type=Product.ProductType.PACKAGING
     )
 
 
@@ -50,10 +47,7 @@ class TestProductPackagingModel:
 
     def test_one_finished_good_can_require_several_packaging_materials(self, latte, cup):
         lid = Product.objects.create(
-            name="Cup Lid",
-            price="1.00",
-            product_type=Product.ProductType.MATERIAL,
-            category=Product.Category.PACKAGING,
+            name="Cup Lid", price="1.00", product_type=Product.ProductType.PACKAGING
         )
         ProductPackaging.objects.create(finished_good=latte, packaging_material=cup)
         ProductPackaging.objects.create(finished_good=latte, packaging_material=lid)

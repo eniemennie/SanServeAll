@@ -147,6 +147,83 @@ class TestComputeAverageDailyDemand:
         avg = compute_average_daily_demand(branch, material, days_history=30)
         assert avg == 0.0
 
+    def test_packaging_demand_comes_from_packaging_consumption_transactions(self, branch):
+        """Client review (2026-11-09): Packaging Material is never sold
+        as its own SalesItem (it's deducted alongside a finished good's
+        sale via ProductPackaging, or consumed during a production
+        batch via IngredientUsage), so its demand must be read from the
+        InventoryTransaction ledger rather than SalesItem -- the same
+        class of fix as the MATERIAL branch above, but for the
+        PACKAGING_CONSUMPTION movement type."""
+        from apps.inventory.models import InventoryTransaction
+
+        cup = Product.objects.create(
+            name="16oz Cup", price="3.00", product_type=Product.ProductType.PACKAGING
+        )
+        InventoryTransaction.objects.create(
+            branch=branch,
+            product=cup,
+            movement_type=InventoryTransaction.MovementType.PACKAGING_CONSUMPTION,
+            quantity_change=-30,
+        )
+
+        avg = compute_average_daily_demand(branch, cup, days_history=30)
+        assert avg == pytest.approx(1.0)  # 30 units deducted / 30 days
+
+    def test_packaging_demand_also_counts_production_consumption(self, branch):
+        """Packaging consumed directly in a production batch (via
+        IngredientUsage, logged as PRODUCTION_CONSUMPTION) counts toward
+        the same demand figure as packaging deducted per POS sale."""
+        from apps.inventory.models import InventoryTransaction
+
+        box = Product.objects.create(
+            name="Cake Box", price="12.00", product_type=Product.ProductType.PACKAGING
+        )
+        InventoryTransaction.objects.create(
+            branch=branch,
+            product=box,
+            movement_type=InventoryTransaction.MovementType.PACKAGING_CONSUMPTION,
+            quantity_change=-10,
+        )
+        InventoryTransaction.objects.create(
+            branch=branch,
+            product=box,
+            movement_type=InventoryTransaction.MovementType.PRODUCTION_CONSUMPTION,
+            quantity_change=-20,
+        )
+
+        avg = compute_average_daily_demand(branch, box, days_history=30)
+        assert avg == pytest.approx(1.0)  # (10 + 20) units / 30 days
+
+    def test_packaging_demand_is_scoped_to_its_own_branch(self, branch):
+        """Unlike MATERIAL (commissary-wide, no branch filter), Packaging
+        demand IS branch-scoped -- packaging is consumed at the branch
+        that sells or produces with it, so a deduction logged against a
+        different branch must not count here."""
+        from apps.accounts.models import Branch
+        from apps.inventory.models import InventoryTransaction
+
+        other_branch = Branch.objects.create(name="Alangilan", code="ALANG")
+        cup = Product.objects.create(
+            name="16oz Cup", price="3.00", product_type=Product.ProductType.PACKAGING
+        )
+        InventoryTransaction.objects.create(
+            branch=other_branch,
+            product=cup,
+            movement_type=InventoryTransaction.MovementType.PACKAGING_CONSUMPTION,
+            quantity_change=-30,
+        )
+
+        avg = compute_average_daily_demand(branch, cup, days_history=30)
+        assert avg == 0.0
+
+    def test_packaging_with_no_consumption_is_zero_demand(self, branch):
+        cup = Product.objects.create(
+            name="Unused Cup", price="3.00", product_type=Product.ProductType.PACKAGING
+        )
+        avg = compute_average_daily_demand(branch, cup, days_history=30)
+        assert avg == 0.0
+
 
 class TestClassifyInventoryRows:
     def test_empty_queryset_returns_empty_list(self):
