@@ -11,6 +11,7 @@ since that enforcement is based on the actual logged-in user's role, not
 merely whether Owner/Admin is among a view's allowed roles.
 """
 
+from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
@@ -148,30 +149,58 @@ def batch_management(request):
     status_filter = request.GET.get("status", "")
     date_filter = request.GET.get("date", "")
 
-    records = ProductionRecord.objects.select_related("product").prefetch_related(
+    # Task (client review, 2026-11-09): status tabs need a count per
+    # status regardless of which tab is currently active, so the counts
+    # below are taken from `base_records` (date filter only, status
+    # filter NOT applied) rather than from the already status-filtered
+    # `records` queryset. Before this change, selecting a status in the
+    # old "All Status" dropdown would silently zero out the other three
+    # stat cards, since they were counted by re-filtering an already
+    # status-narrowed queryset -- that bug is fixed as part of this
+    # pass, not just worked around in the template.
+    base_records = ProductionRecord.objects.select_related("product").prefetch_related(
         "ingredient_usages__material"
     )
+    if date_filter == "today":
+        base_records = base_records.filter(created_at__date=timezone.now().date())
+
+    records = base_records
     if status_filter:
         records = records.filter(status=status_filter)
-    if date_filter == "today":
-        records = records.filter(created_at__date=timezone.now().date())
 
-    total = records.count()
-    completed = records.filter(status=ProductionRecord.Status.COMPLETED).count()
-    in_progress = records.filter(status=ProductionRecord.Status.IN_PROGRESS).count()
-    pending = records.filter(status=ProductionRecord.Status.PENDING).count()
+    total = base_records.count()
+    completed = base_records.filter(status=ProductionRecord.Status.COMPLETED).count()
+    in_progress = base_records.filter(status=ProductionRecord.Status.IN_PROGRESS).count()
+    pending = base_records.filter(status=ProductionRecord.Status.PENDING).count()
+
+    # Qty/quality figures reflect the currently selected status tab (and
+    # date filter), not the grand total above -- "what am I looking at"
+    # rather than "everything that exists".
+    filtered_total = records.count()
     total_quantity = sum(r.quantity_produced for r in records)
     quality_pass = records.filter(quality=ProductionRecord.Quality.PASS).count()
-    quality_rate = round((quality_pass / total) * 100) if total else 100
+    quality_rate = round((quality_pass / filtered_total) * 100) if filtered_total else 100
+
+    # Task (client review, 2026-11-09): Batch Logs table reorganized with
+    # status tabs + collapsible rows -- 360 real batches is too many to
+    # render in one page at once, so the row list itself is now paginated
+    # (25/page, same page size as Sales History's own list view).
+    page_obj = Paginator(records, 25).get_page(request.GET.get("page"))
+
+    pagination_qs = request.GET.copy()
+    pagination_qs.pop("page", None)
 
     return render(
         request,
         "production/batch_management.html",
         {
             "active_nav": "batch",
-            "records": records,
+            "records": page_obj,
+            "page_obj": page_obj,
+            "pagination_qs": pagination_qs.urlencode(),
             "status_filter": status_filter,
             "date_filter": date_filter,
+            "filtered_total": filtered_total,
             "stats": {
                 "total": total,
                 "completed": completed,

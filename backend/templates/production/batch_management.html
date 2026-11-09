@@ -48,69 +48,82 @@
     </div>
 </div>
 
+<!-- Client review (2026-11-09): status tabs replace the old "All Status"
+     dropdown -- same four groupings, but switchable in one click, each
+     labeled with its own count so there's no need to open a batch to
+     see how many are in each state. Mirrors Product Availability's own
+     tab pattern (product_management.html) rather than inventing a new
+     one. Tabs intentionally reset the date filter on click, matching
+     that same existing precedent. -->
+<div class="d-flex gap-2 mb-3 flex-wrap">
+    <a href="?" class="btn btn-sm {% if not status_filter %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">
+        All ({{ stats.total }})
+    </a>
+    {% for value, label in status_choices %}
+    <a href="?status={{ value }}" class="btn btn-sm {% if status_filter == value %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">
+        {% if value == "PENDING" %}{{ label }} ({{ stats.pending }})
+        {% elif value == "IN_PROGRESS" %}{{ label }} ({{ stats.in_progress }})
+        {% elif value == "COMPLETED" %}{{ label }} ({{ stats.completed }})
+        {% else %}{{ label }}{% endif %}
+    </a>
+    {% endfor %}
+</div>
+
 <div class="jc-card p-3 p-md-4">
     <form method="get" class="d-flex flex-wrap gap-2 mb-3">
-        <select name="status" class="form-select form-select-sm" style="max-width: 180px;" onchange="this.form.submit()">
-            <option value="">All Status</option>
-            {% for value, label in status_choices %}
-            <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
-            {% endfor %}
-        </select>
+        <input type="hidden" name="status" value="{{ status_filter }}">
         <select name="date" class="form-select form-select-sm" style="max-width: 160px;" onchange="this.form.submit()">
             <option value="">All Dates</option>
             <option value="today" {% if date_filter == "today" %}selected{% endif %}>Today</option>
         </select>
-        <span class="text-muted small align-self-center ms-auto">Showing {{ stats.total }} batch log{{ stats.total|pluralize }}</span>
+        <span class="text-muted small align-self-center ms-auto">
+            Showing {{ records|length }} of {{ filtered_total }} batch log{{ filtered_total|pluralize }}
+            {% if page_obj.paginator.num_pages > 1 %} &middot; page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}{% endif %}
+        </span>
     </form>
 
     <div class="table-responsive">
     <table class="table table-sm mb-0 align-middle">
         <colgroup>
-            <col style="width: 7%;">
-            <col style="width: 14%;">
-            <col style="width: 8%;">
-            <col style="width: 32%;">
-            <col style="width: 12%;">
+            <col style="width: 4%;">
             <col style="width: 9%;">
-            <col style="width: 10%;">
-            <col style="width: 8%;">
+            <col style="width: 27%;">
+            <col style="width: 12%;">
+            <col style="width: 14%;">
+            <col style="width: 14%;">
+            <col style="width: 20%;">
         </colgroup>
         <thead>
             <tr>
+                <th></th>
                 <th>Batch</th>
                 <th>Product</th>
                 <th class="text-end">Qty Produced</th>
-                <th>Ingredients Used</th>
-                <th>Supplier</th>
                 <th>Quality</th>
                 <th>Status</th>
-                <th></th>
+                <th class="text-end pe-1">Actions</th>
             </tr>
         </thead>
         <tbody>
             {% for record in records %}
-            <tr>
+            <!-- Collapsible row pair (client review, 2026-11-09): the
+                 summary row above stays a uniform height no matter how
+                 many ingredients a batch used; clicking it (or the
+                 arrow) expands the detail row beneath via Bootstrap's
+                 collapse component, instead of crowding the main list
+                 with ingredient chips or a truncation badge. -->
+            <tr class="jc-batch-row" data-bs-toggle="collapse" data-bs-target="#batch-details-{{ record.pk }}"
+                role="button" tabindex="0" aria-expanded="false" aria-controls="batch-details-{{ record.pk }}">
+                <td class="text-center">
+                    <svg class="jc-batch-toggle-icon" width="10" height="10" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M5 3l6 5-6 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </td>
                 <td>#{{ record.pk }}</td>
                 <td>{{ record.product.name }}</td>
                 <td class="text-end">{{ record.quantity_produced }}</td>
                 <td>
-                    {% with usages=record.ingredient_usages.all %}
-                    <div class="d-flex flex-wrap gap-1">
-                        {% for usage in usages|slice:":4" %}
-                        <span class="jc-badge jc-badge-info">{{ usage.material.name }}: {{ usage.quantity_used }} {{ usage.material.get_unit_of_measure_display }}</span>
-                        {% endfor %}
-                        {% if usages|length > 4 %}
-                        <span class="jc-badge jc-badge-low" title="{% for usage in usages|slice:'4:' %}{{ usage.material.name }}: {{ usage.quantity_used }} {{ usage.material.get_unit_of_measure_display }}{% if not forloop.last %}, {% endif %}{% endfor %}">+{{ usages|length|add:"-4" }} more</span>
-                        {% endif %}
-                        {% if not usages %}
-                        <span class="text-muted small">&mdash;</span>
-                        {% endif %}
-                    </div>
-                    {% endwith %}
-                </td>
-                <td>{{ record.supplier|default:"&mdash;" }}</td>
-                <td>
-                    <span class="jc-badge {% if record.quality == 'PASS' %}jc-badge-adequate{% else %}jc-badge-critical{% endif %}">
+                    <span class="jc-badge {% if record.quality == 'PASS' %}jc-badge-adequate{% elif record.quality == 'FAIL' %}jc-badge-critical{% else %}jc-badge-low{% endif %}">
                         {{ record.get_quality_display }}
                     </span>
                 </td>
@@ -119,16 +132,81 @@
                         {{ record.get_status_display }}
                     </span>
                 </td>
-                <td>
-                    <a href="{% url 'production:delete_record' record.pk %}" class="btn btn-outline-danger btn-sm">Delete</a>
+                <td class="text-end pe-1">
+                    <a href="{% url 'production:delete_record' record.pk %}" class="btn btn-outline-danger btn-sm" onclick="event.stopPropagation();">Delete</a>
+                </td>
+            </tr>
+            <tr class="collapse jc-batch-details-row" id="batch-details-{{ record.pk }}">
+                <td></td>
+                <td colspan="6">
+                    <div class="row g-3 py-1">
+                        <div class="col-md-8">
+                            <div class="jc-batch-details-label mb-2">Ingredients Used</div>
+                            {% with usages=record.ingredient_usages.all %}
+                            {% if usages %}
+                            <div class="d-flex flex-wrap gap-1">
+                                {% for usage in usages %}
+                                <span class="jc-badge jc-badge-info">{{ usage.material.name }}: {{ usage.quantity_used }} {{ usage.material.get_unit_of_measure_display }}</span>
+                                {% endfor %}
+                            </div>
+                            {% else %}
+                            <span class="text-muted small">No ingredients recorded.</span>
+                            {% endif %}
+                            {% endwith %}
+                        </div>
+                        <div class="col-md-4">
+                            <div class="jc-batch-details-label mb-2">Supplier</div>
+                            <div>{{ record.supplier|default:"&mdash;" }}</div>
+                        </div>
+                    </div>
                 </td>
             </tr>
             {% empty %}
-            <tr><td colspan="8" class="text-center text-muted py-3">No production batches recorded yet.</td></tr>
+            <tr><td colspan="7" class="text-center text-muted py-3">No production batches recorded yet.</td></tr>
             {% endfor %}
         </tbody>
     </table>
     </div>
+
+    {% if page_obj.paginator.num_pages > 1 %}
+    <nav class="mt-3">
+        <ul class="pagination pagination-sm mb-0">
+            {% if page_obj.has_previous %}
+            <li class="page-item">
+                <a class="page-link" href="?{{ pagination_qs }}&amp;page={{ page_obj.previous_page_number }}">Previous</a>
+            </li>
+            {% endif %}
+            <li class="page-item disabled">
+                <span class="page-link">Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+            </li>
+            {% if page_obj.has_next %}
+            <li class="page-item">
+                <a class="page-link" href="?{{ pagination_qs }}&amp;page={{ page_obj.next_page_number }}">Next</a>
+            </li>
+            {% endif %}
+        </ul>
+    </nav>
+    {% endif %}
 </div>
 
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script>
+  // Client review (2026-11-09): the collapsible batch rows are
+  // triggered via Bootstrap's own data-bs-toggle="collapse" attribute,
+  // which handles clicks automatically -- this just adds keyboard
+  // support (Enter/Space) since the trigger is a <tr role="button">,
+  // not a real <button>, and browsers don't activate those on keydown
+  // for free.
+  document.querySelectorAll('.jc-batch-row').forEach(function (row) {
+    row.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        row.click();
+      }
+    });
+  });
+</script>
 {% endblock %}
