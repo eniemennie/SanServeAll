@@ -15,7 +15,7 @@ from django.utils import timezone
 from apps.accounts.models import Branch, Role, User
 from conftest import verify_otp_for_client
 from apps.forecasting import services
-from apps.forecasting.models import Forecast, InventoryRiskScore
+from apps.forecasting.models import AIInsight, Forecast, InventoryRiskScore
 from apps.inventory.models import Product
 from apps.pos.models import SalesItem, SalesTransaction
 
@@ -404,6 +404,85 @@ class TestDecisionSupportView:
         )
         response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
         assert b"Spanish Latte" in response.content
+
+    def test_ai_generated_insight_still_shows_its_badge(self, owner_client, branch):
+        """Client review (2026-11-09): display-only change -- a real
+        AI-generated insight must keep its badge exactly as before."""
+        AIInsight.objects.create(
+            branch=branch,
+            insight_type=AIInsight.InsightType.DEMAND_SUMMARY,
+            message="Demand for Spanish Latte is trending up this week.",
+            generated_by_ai=True,
+        )
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        assert "AI-Generated" in content
+        assert "Demand for Spanish Latte is trending up this week." in content
+
+    def test_template_insight_shows_no_badge_and_is_not_relabeled(self, owner_client, branch):
+        """Client review (2026-11-09): the "Template" badge is hidden
+        entirely for a template-based insight -- it must NOT be relabeled
+        "AI-Generated" either, since it genuinely isn't one."""
+        AIInsight.objects.create(
+            branch=branch,
+            insight_type=AIInsight.InsightType.DEMAND_SUMMARY,
+            message="Spanish Latte sold steadily this week.",
+            generated_by_ai=False,
+        )
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        assert "Spanish Latte sold steadily this week." in content
+        assert "Template" not in content
+        assert "AI-Generated" not in content
+
+    def test_generated_by_ai_field_itself_is_untouched_by_the_display_change(
+        self, owner_client, branch
+    ):
+        """The badge is purely a template-level conditional on the real
+        AIInsight.generated_by_ai field -- confirms that field, not just
+        its display, is what the page still reads."""
+        insight = AIInsight.objects.create(
+            branch=branch,
+            insight_type=AIInsight.InsightType.DEMAND_SUMMARY,
+            message="Template message.",
+            generated_by_ai=False,
+        )
+        owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        insight.refresh_from_db()
+        assert insight.generated_by_ai is False
+
+    def test_avg_daily_demand_shows_a_whole_number_not_two_decimals(
+        self, owner_client, branch, latte
+    ):
+        """Client review (2026-11-09): "1/day", not "0.50/day" --
+        display-only, the stored avg_daily_demand value itself keeps its
+        real precision (confirmed in the next test)."""
+        InventoryRiskScore.objects.create(
+            branch=branch,
+            product=latte,
+            risk_level="LOW",
+            quantity_on_hand=100,
+            avg_daily_demand=0.50,
+            days_of_stock_left=200.0,
+        )
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        assert "1/day" in content
+        assert "0.50/day" not in content
+        assert "0.5/day" not in content
+
+    def test_avg_daily_demand_calculation_itself_is_unchanged(self, owner_client, branch, latte):
+        score = InventoryRiskScore.objects.create(
+            branch=branch,
+            product=latte,
+            risk_level="LOW",
+            quantity_on_hand=100,
+            avg_daily_demand=0.50,
+            days_of_stock_left=200.0,
+        )
+        owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        score.refresh_from_db()
+        assert score.avg_daily_demand == 0.50
 
 
 class TestForecastingDashboardView:
