@@ -1,0 +1,75 @@
+{% extends "admin_base.html" %}
+{% block admin_title %}Edit Supplier{% endblock %}
+{% block admin_content %}
+
+{% comment %}
+  Confidentiality (client review, 2026-11-10): editing is the one place
+  PURCHASING (and OWNER_ADMIN) sees this supplier's real name/contact
+  details -- and only this one supplier's, only while this page is open.
+  Deliberately its own page rather than a modal pre-rendered on the
+  Suppliers list for every supplier at once: that's what keeps a
+  PURCHASING user's page source for the LIST page free of every other
+  supplier's real data. Visiting this page is a deliberate, one-supplier-
+  at-a-time action, same as creating a new supplier.
+{% endcomment %}
+
+<div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
+    <div>
+        <h1 class="h5 mb-1">Edit Supplier</h1>
+        <p class="text-muted small mb-0">
+            Code: <strong>{{ supplier.code|default:"&mdash;" }}</strong>
+        </p>
+    </div>
+    <a class="btn btn-sm btn-outline-secondary flex-shrink-0"
+       href="{% url 'purchasing:supplier_management' %}">
+        Back to Suppliers
+    </a>
+</div>
+
+<div class="jc-card p-3" style="max-width: 560px;">
+    {% if error %}
+    <div class="alert alert-danger py-2">{{ error }}</div>
+    {% endif %}
+    <form method="post">
+        {% csrf_token %}
+        <div class="mb-3">
+            <label class="form-label small fw-semibold">Name</label>
+            <input type="text" name="name" class="form-control" required autofocus
+                   value="{{ form_values.name }}">
+        </div>
+        <div class="mb-3">
+            <label class="form-label small fw-semibold">Contact Person</label>
+            <input type="text" name="contact_person" class="form-control"
+                   value="{{ form_values.contact_person }}">
+        </div>
+        <div class="row g-2 mb-3">
+            <div class="col-6">
+                <label class="form-label small fw-semibold">Phone Number</label>
+                <input type="text" name="phone_number" class="form-control"
+                       value="{{ form_values.phone_number }}">
+            </div>
+            <div class="col-6">
+                <label class="form-label small fw-semibold">Email</label>
+                <input type="email" name="email" class="form-control"
+                       value="{{ form_values.email }}">
+            </div>
+        </div>
+        <div class="mb-3">
+            <label class="form-label small fw-semibold">Address</label>
+            <input type="text" name="address" class="form-control"
+                   value="{{ form_values.address }}">
+        </div>
+        <div class="mb-3">
+            <label class="form-label small fw-semibold">Notes</label>
+            <textarea name="notes" class="form-control" rows="2">{{ form_values.notes }}</textarea>
+        </div>
+        <div class="d-flex justify-content-end gap-2">
+            <a class="btn btn-outline-secondary" href="{% url 'purchasing:supplier_management' %}">Cancel</a>
+            <button type="submit" class="btn" style="background: var(--jc-orange); color: #fff;">
+                Save Changes
+            </button>
+        </div>
+    </form>
+</div>
+
+{% endblock %}

@@ -19,14 +19,20 @@ from apps.purchasing.services import (
 SUPPLIER_FORM_FIELDS = ["name", "contact_person", "phone_number", "email", "address", "notes"]
 
 
-def _build_supplier_list_context(
-    error=None, created_name=None, edit_error_supplier_id=None, edit_form_values=None
-):
-    """Shared context builder for supplier_management and supplier_edit
-    (client review, 2026-11-09, Suppliers page layout improvement) --
-    both views render the same template (list + modals), so this keeps
-    the suppliers queryset/annotations in one place rather than
-    duplicated between them.
+def _can_reveal_supplier_identity(user):
+    """Client review (2026-11-10): supplier identities are confidential
+    (see apps.purchasing.models' own module docstring) -- only OWNER_ADMIN
+    may ever see a supplier's real name/contact details. PURCHASING, who
+    also reaches every view in this module, sees only the auto-assigned
+    `code` everywhere except while actively filling out that one
+    supplier's own create/edit form (see supplier_edit)."""
+    return bool(user.role and user.role.name == Role.OWNER_ADMIN)
+
+
+def _build_supplier_list_context(request, error=None, created_name=None):
+    """Shared context builder for supplier_management (client review,
+    2026-11-09, Suppliers page layout improvement; confidentiality added
+    2026-11-10).
 
     `materials_supplied_count` (client review, 2026-11-09): "Materials
     Supplied" on the table and in the View modal is deliberately NOT
@@ -35,7 +41,13 @@ def _build_supplier_list_context(
     own module docstring) -- it's a real, honestly-derived count of
     distinct materials this supplier has actually been ordered for via
     a PurchaseOrder here, so it only ever reflects real purchasing
-    history, never an invented or unrelated number.
+    history, never an invented or unrelated number. Materials/catalog
+    names aren't supplier identity and are never masked.
+
+    `can_reveal`/`reveal`: only OWNER_ADMIN ever gets `can_reveal` --
+    PURCHASING can never flip `reveal` on, even by hand-editing the
+    "?reveal=1" query string, since `reveal` is computed here from the
+    real role check, not just echoed back from the request.
     """
     suppliers = Supplier.objects.annotate(
         materials_supplied_count=Count("purchase_orders__items__material", distinct=True),
@@ -50,13 +62,15 @@ def _build_supplier_list_context(
     for supplier in suppliers:
         supplier.materials_supplied_names = sorted(materials_by_supplier.get(supplier.id, []))
 
+    can_reveal = _can_reveal_supplier_identity(request.user)
+
     return {
         "active_nav": "suppliers",
         "suppliers": suppliers,
         "error": error,
         "created_name": created_name,
-        "edit_error_supplier_id": edit_error_supplier_id,
-        "edit_form_values": edit_form_values or {},
+        "can_reveal": can_reveal,
+        "reveal": can_reveal and request.GET.get("reveal") == "1",
     }
 
 
@@ -73,7 +87,10 @@ def supplier_management(request):
     screen PURCHASING has at all (see BranchSelectionView's redirect),
     and OWNER_ADMIN retains full visibility/control over every screen in
     the system, consistent with every other role_required call
-    elsewhere in the codebase."""
+    elsewhere in the codebase. Confidentiality (client review,
+    2026-11-10): what either role actually SEES on this page -- real
+    name/contact vs. just `code` -- is decided in
+    _build_supplier_list_context, not here."""
     error = None
     created_name = None
 
@@ -97,27 +114,37 @@ def supplier_management(request):
     return render(
         request,
         "purchasing/supplier_management.html",
-        _build_supplier_list_context(error=error, created_name=created_name),
+        _build_supplier_list_context(request, error=error, created_name=created_name),
     )
 
 
 @role_required(Role.OWNER_ADMIN, Role.PURCHASING)
 def supplier_edit(request, supplier_id):
-    """Edits an existing supplier's details (client review, 2026-11-09,
-    Suppliers page layout improvement) -- same fields and validation as
-    creating one, opened from a per-row Edit modal instead of a
-    separate page, consistent with this screen's own list-and-edit-
-    on-one-page pattern. On a validation error, re-renders the same
-    list with that supplier's Edit modal reopened and the submitted
-    (not yet saved) values preserved, rather than silently discarding
-    what was typed."""
+    """Views and edits one existing supplier's real details (client
+    review, 2026-11-09, Suppliers page layout improvement; moved from a
+    per-row modal on the list page to its own page 2026-11-10 as part of
+    the confidentiality fix below).
+
+    Confidentiality (client review, 2026-11-10): this is the one
+    deliberate exception to "PURCHASING never sees a supplier's real
+    name/contact details" -- editing requires seeing the current real
+    values to change them, so both OWNER_ADMIN and PURCHASING see this
+    one supplier's real details here, and ONLY here (never in the list,
+    the View modal, a Purchase Order, Batch Logs, or Reports). Because
+    this is its own page rather than a modal pre-rendered for every
+    supplier on the list page, visiting it is the only way any of this
+    supplier's real data reaches PURCHASING's browser at all -- loading
+    the Suppliers list itself never includes it, for any supplier."""
     supplier = get_object_or_404(Supplier, pk=supplier_id)
+    error = None
+    form_values = {field: getattr(supplier, field) for field in SUPPLIER_FORM_FIELDS}
 
     if request.method == "POST":
-        name = (request.POST.get("name") or "").strip()
         submitted = {
             field: (request.POST.get(field) or "").strip() for field in SUPPLIER_FORM_FIELDS
         }
+        form_values = submitted
+        name = submitted["name"]
 
         if not name:
             error = "Supplier name is required."
@@ -133,15 +160,16 @@ def supplier_edit(request, supplier_id):
             supplier.save()
             return redirect("purchasing:supplier_management")
 
-        return render(
-            request,
-            "purchasing/supplier_management.html",
-            _build_supplier_list_context(
-                error=error, edit_error_supplier_id=supplier.pk, edit_form_values=submitted
-            ),
-        )
-
-    return redirect("purchasing:supplier_management")
+    return render(
+        request,
+        "purchasing/supplier_edit.html",
+        {
+            "active_nav": "suppliers",
+            "supplier": supplier,
+            "error": error,
+            "form_values": form_values,
+        },
+    )
 
 
 @role_required(Role.OWNER_ADMIN, Role.PURCHASING)

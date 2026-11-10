@@ -5,7 +5,7 @@
 <div class="mb-3">
     <h1 class="h5 mb-1">Receive Purchase Order #{{ order.pk }}</h1>
     <p class="text-muted small mb-0">
-        {{ order.supplier.name }} &rarr; {{ order.branch.name }}. Quantities default to what was
+        {{ order.supplier.code|default:"&mdash;" }} &rarr; {{ order.branch.name }}. Quantities default to what was
         ordered -- edit a row if what actually arrived was short or over.
     </p>
 </div>
