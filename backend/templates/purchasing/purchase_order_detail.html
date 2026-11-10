@@ -6,7 +6,7 @@
     <div>
         <h1 class="h5 mb-1">Purchase Order #{{ order.pk }}</h1>
         <p class="text-muted small mb-0">
-            {{ order.supplier.name }} &rarr; {{ order.branch.name }}
+            {{ order.supplier.code|default:"&mdash;" }} &rarr; {{ order.branch.name }}
         </p>
     </div>
     <a href="{% url 'purchasing:purchase_order_list' %}" class="btn btn-sm btn-outline-secondary">&larr; All Orders</a>

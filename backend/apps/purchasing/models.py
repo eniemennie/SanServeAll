@@ -16,12 +16,23 @@ that -- the client's request was for a new Suppliers concept for the new
 Purchasing role to manage, not a rework of existing catalog/production
 fields. Those two fields are left exactly as they are.
 
-Confidentiality (client review, 2026-11-04): every field on a Supplier is
-treated as confidential -- visible only to OWNER_ADMIN and PURCHASING
-(apps.accounts.permissions.role_required/RoleRequiredMixin already gate
-every view in apps.purchasing to just those two roles; Branch Staff and
-Commissary Staff can't reach a Supplier record in any form, not even its
-name).
+Confidentiality (client review, 2026-11-04; tightened 2026-11-10): every
+field on a Supplier is confidential. Branch Staff and Commissary Staff
+still can't reach a Supplier record in any form at all (every view in
+apps.purchasing is gated to OWNER_ADMIN and PURCHASING only -- see
+apps.accounts.permissions.role_required/RoleRequiredMixin). As of
+2026-11-10, the identity itself is also hidden from PURCHASING: every
+Supplier has an auto-assigned, non-confidential `code` (e.g. "SUP-001"),
+and `code` is what's displayed everywhere a supplier appears in the
+system (Suppliers list for PURCHASING, Purchase Orders, Batch Logs,
+Reports) -- `name`/`contact_person`/`phone_number`/`email`/`address` are
+shown in real form only to OWNER_ADMIN, either via the Suppliers page's
+Reveal toggle or a supplier's own View (detail) modal. The one deliberate
+exception: PURCHASING still creates and edits a supplier's real details
+directly (apps.purchasing.views.supplier_edit) -- they see what they
+type while actively filling out that one supplier's form, but never see
+it again anywhere else afterward. See apps.purchasing.views for exactly
+where `code` vs. the real fields is used.
 """
 
 from decimal import Decimal
@@ -39,6 +50,15 @@ class Supplier(TimestampedModel):
     own free-text supplier fields -- see this module's docstring."""
 
     name = models.CharField(max_length=150, unique=True)
+    # Auto-assigned on creation (see save(), below) -- never confidential,
+    # this is the identifier shown everywhere a supplier appears outside
+    # the Suppliers page itself (and, on that page, to anyone who isn't
+    # OWNER_ADMIN or hasn't revealed real names). null=True purely to let
+    # a brand-new, not-yet-saved instance exist for an instant before
+    # save() assigns it -- every row that's actually reached the database
+    # has one (backfilled for pre-existing rows by this field's own
+    # migration).
+    code = models.CharField(max_length=20, unique=True, null=True, blank=True, editable=False)
     contact_person = models.CharField(max_length=150, blank=True)
     phone_number = models.CharField(max_length=20, blank=True)
     email = models.EmailField(blank=True)
@@ -56,6 +76,17 @@ class Supplier(TimestampedModel):
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        is_new = self._state.adding
+        super().save(*args, **kwargs)
+        if is_new and not self.code:
+            # Assigned from this row's own pk only once it actually has
+            # one (i.e. after the INSERT above) -- simple, collision-free
+            # by construction, and matches how pre-existing rows are
+            # backfilled (see this field's own migration).
+            self.code = f"SUP-{self.pk:03d}"
+            super().save(update_fields=["code"])
 
 
 class PurchaseOrder(TimestampedModel):

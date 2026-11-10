@@ -35,7 +35,7 @@
                     <select name="supplier_id" class="form-select" required>
                         <option value="">Select a supplier&hellip;</option>
                         {% for supplier in suppliers %}
-                        <option value="{{ supplier.pk }}">{{ supplier.name }}</option>
+                        <option value="{{ supplier.pk }}">{{ supplier.code|default:supplier.pk }}</option>
                         {% endfor %}
                     </select>
                 </div>
@@ -179,7 +179,7 @@
             {% for order in orders %}
             <tr>
                 <td>#{{ order.pk }}</td>
-                <td>{{ order.supplier.name }}</td>
+                <td>{{ order.supplier.code|default:"&mdash;" }}</td>
                 <td>{{ order.branch.name }}</td>
                 <td>
                     {% if order.status == "RECEIVED" %}

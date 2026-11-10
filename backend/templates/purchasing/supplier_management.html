@@ -7,14 +7,24 @@
   "New Supplier" moved from an always-reachable collapse panel into a
   true Bootstrap modal, so the supplier list is the page's main
   content. The list gained Materials Supplied (count) and Phone/Email
-  columns plus View/Edit/Deactivate actions; View and Edit are also
-  modals (no new pages). A search box was added alongside the existing
-  client-side status filter -- both only show/hide rows already in the
-  page; the `suppliers` queryset itself (now annotated with
+  columns plus View/Edit/Deactivate actions; View is a modal (no new
+  page). A search box was added alongside the existing client-side
+  status filter -- both only show/hide rows already in the page; the
+  `suppliers` queryset itself (now annotated with
   materials_supplied_count/purchase_order_count -- see
   views._build_supplier_list_context) is otherwise untouched, and
   nothing here changes PurchaseOrder logic or existing supplier
   records.
+
+  Confidentiality (client review, 2026-11-10): a supplier's real name
+  and contact details are shown ONLY to OWNER_ADMIN, either via the
+  "Reveal" toggle below (this table) or the View modal (the "detail
+  page" -- see its own comment further down). Everyone else, and
+  OWNER_ADMIN until they reveal, sees only `supplier.code`. `code` and
+  the masked placeholders are literally the only thing rendered into
+  the page for a non-revealing viewer -- there's no hidden real value
+  sitting in the markup for CSS to merely hide, so it can't leak
+  through page source either.
 {% endcomment %}
 
 <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
@@ -23,12 +33,21 @@
         <p class="text-muted small mb-0">
             Manage who the business buys raw materials, packaging, and other goods from.
             Visible only to Purchasing and Owner/Admin.
+            {% if can_reveal %}Real names and contact details are only ever shown to Owner/Admin.{% endif %}
         </p>
     </div>
-    <button type="button" class="btn btn-sm flex-shrink-0" style="background: var(--jc-orange); color: #fff;"
-            data-bs-toggle="modal" data-bs-target="#newSupplierModal">
-        + Add Supplier
-    </button>
+    <div class="d-flex align-items-center gap-2 flex-shrink-0">
+        {% if can_reveal %}
+        <a class="btn btn-sm btn-outline-secondary"
+           href="?{% if reveal %}reveal=0{% else %}reveal=1{% endif %}">
+            {% if reveal %}Hide real names{% else %}Reveal real names{% endif %}
+        </a>
+        {% endif %}
+        <button type="button" class="btn btn-sm" style="background: var(--jc-orange); color: #fff;"
+                data-bs-toggle="modal" data-bs-target="#newSupplierModal">
+            + Add Supplier
+        </button>
+    </div>
 </div>
 
 {% if error and not edit_error_supplier_id %}
@@ -51,7 +70,7 @@
     <table class="table mb-0" id="jc-supplier-table">
         <thead>
             <tr>
-                <th>Supplier Name</th>
+                <th>{% if reveal %}Supplier Name{% else %}Supplier Code{% endif %}</th>
                 <th>Contact Person</th>
                 <th>Phone</th>
                 <th>Email</th>
@@ -63,11 +82,17 @@
         <tbody>
             {% for supplier in suppliers %}
             <tr data-status="{% if supplier.is_active %}active{% else %}inactive{% endif %}"
-                data-search="{{ supplier.name|lower }} {{ supplier.contact_person|lower }} {{ supplier.email|lower }}">
-                <td>{{ supplier.name }}</td>
+                data-search="{{ supplier.code|lower }}{% if reveal %} {{ supplier.name|lower }} {{ supplier.contact_person|lower }} {{ supplier.email|lower }}{% endif %}">
+                <td>{% if reveal %}{{ supplier.name }}{% else %}{{ supplier.code|default:"&mdash;" }}{% endif %}</td>
+                {% if reveal %}
                 <td>{{ supplier.contact_person|default:"&mdash;" }}</td>
                 <td>{{ supplier.phone_number|default:"&mdash;" }}</td>
                 <td>{{ supplier.email|default:"&mdash;" }}</td>
+                {% else %}
+                <td class="text-muted">Hidden</td>
+                <td class="text-muted">Hidden</td>
+                <td class="text-muted">Hidden</td>
+                {% endif %}
                 <td>{{ supplier.materials_supplied_count }}</td>
                 <td>
                     {% if supplier.is_active %}
@@ -82,10 +107,10 @@
                                 data-bs-toggle="modal" data-bs-target="#viewSupplierModal{{ supplier.pk }}">
                             View
                         </button>
-                        <button type="button" class="btn btn-sm btn-outline-secondary"
-                                data-bs-toggle="modal" data-bs-target="#editSupplierModal{{ supplier.pk }}">
+                        <a class="btn btn-sm btn-outline-secondary"
+                           href="{% url 'purchasing:supplier_edit' supplier.pk %}">
                             Edit
-                        </button>
+                        </a>
                         <form method="post" action="{% url 'purchasing:supplier_toggle_active' supplier.pk %}">
                             {% csrf_token %}
                             <button type="submit" class="btn btn-sm btn-outline-secondary">
@@ -169,26 +194,34 @@
 </div>
 
 {% for supplier in suppliers %}
-<!-- View Supplier modal: read-only detail, no new page/URL. -->
+<!-- View Supplier modal: read-only detail, no new page/URL. This is the
+     Supplier's own "detail page" (confidentiality request, 2026-11-10)
+     -- OWNER_ADMIN always sees the real name/contact here regardless of
+     the Reveal toggle above; anyone else sees exactly what they see in
+     the table: the code, with contact fields masked. -->
 <div class="modal fade" id="viewSupplierModal{{ supplier.pk }}" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">{{ supplier.name }}</h5>
+                <h5 class="modal-title">{% if can_reveal %}{{ supplier.name }}{% else %}{{ supplier.code|default:"&mdash;" }}{% endif %}</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
+                {% if not can_reveal %}
+                <p class="text-muted small">Supplier code: <strong>{{ supplier.code|default:"&mdash;" }}</strong>.
+                    Real name and contact details are visible to Owner/Admin only.</p>
+                {% endif %}
                 <dl class="row mb-0 small">
                     <dt class="col-5 text-muted">Contact Person</dt>
-                    <dd class="col-7">{{ supplier.contact_person|default:"&mdash;" }}</dd>
+                    <dd class="col-7">{% if can_reveal %}{{ supplier.contact_person|default:"&mdash;" }}{% else %}Hidden{% endif %}</dd>
                     <dt class="col-5 text-muted">Phone</dt>
-                    <dd class="col-7">{{ supplier.phone_number|default:"&mdash;" }}</dd>
+                    <dd class="col-7">{% if can_reveal %}{{ supplier.phone_number|default:"&mdash;" }}{% else %}Hidden{% endif %}</dd>
                     <dt class="col-5 text-muted">Email</dt>
-                    <dd class="col-7">{{ supplier.email|default:"&mdash;" }}</dd>
+                    <dd class="col-7">{% if can_reveal %}{{ supplier.email|default:"&mdash;" }}{% else %}Hidden{% endif %}</dd>
                     <dt class="col-5 text-muted">Address</dt>
-                    <dd class="col-7">{{ supplier.address|default:"&mdash;" }}</dd>
+                    <dd class="col-7">{% if can_reveal %}{{ supplier.address|default:"&mdash;" }}{% else %}Hidden{% endif %}</dd>
                     <dt class="col-5 text-muted">Notes</dt>
-                    <dd class="col-7">{{ supplier.notes|default:"&mdash;" }}</dd>
+                    <dd class="col-7">{% if can_reveal %}{{ supplier.notes|default:"&mdash;" }}{% else %}Hidden{% endif %}</dd>
                     <dt class="col-5 text-muted">Status</dt>
                     <dd class="col-7">
                         {% if supplier.is_active %}
@@ -212,65 +245,6 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
             </div>
-        </div>
-    </div>
-</div>
-
-<!-- Edit Supplier modal: same fields/validation as New Supplier, reusing
-     this list-and-edit-on-one-page convention. Reopens with the
-     submitted values preserved if the edit itself had an error. -->
-<div class="modal fade{% if edit_error_supplier_id == supplier.pk %} show d-block{% endif %}" id="editSupplierModal{{ supplier.pk }}" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <form method="post" action="{% url 'purchasing:supplier_edit' supplier.pk %}">
-                {% csrf_token %}
-                <div class="modal-header">
-                    <h5 class="modal-title">Edit {{ supplier.name }}</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    {% if edit_error_supplier_id == supplier.pk %}
-                    <div class="alert alert-danger py-2">{{ error }}</div>
-                    {% endif %}
-                    <div class="mb-3">
-                        <label class="form-label small fw-semibold">Name</label>
-                        <input type="text" name="name" class="form-control" required
-                               value="{% if edit_error_supplier_id == supplier.pk %}{{ edit_form_values.name }}{% else %}{{ supplier.name }}{% endif %}">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label small fw-semibold">Contact Person</label>
-                        <input type="text" name="contact_person" class="form-control"
-                               value="{% if edit_error_supplier_id == supplier.pk %}{{ edit_form_values.contact_person }}{% else %}{{ supplier.contact_person }}{% endif %}">
-                    </div>
-                    <div class="row g-2 mb-3">
-                        <div class="col-6">
-                            <label class="form-label small fw-semibold">Phone Number</label>
-                            <input type="text" name="phone_number" class="form-control"
-                                   value="{% if edit_error_supplier_id == supplier.pk %}{{ edit_form_values.phone_number }}{% else %}{{ supplier.phone_number }}{% endif %}">
-                        </div>
-                        <div class="col-6">
-                            <label class="form-label small fw-semibold">Email</label>
-                            <input type="email" name="email" class="form-control"
-                                   value="{% if edit_error_supplier_id == supplier.pk %}{{ edit_form_values.email }}{% else %}{{ supplier.email }}{% endif %}">
-                        </div>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label small fw-semibold">Address</label>
-                        <input type="text" name="address" class="form-control"
-                               value="{% if edit_error_supplier_id == supplier.pk %}{{ edit_form_values.address }}{% else %}{{ supplier.address }}{% endif %}">
-                    </div>
-                    <div class="mb-0">
-                        <label class="form-label small fw-semibold">Notes</label>
-                        <textarea name="notes" class="form-control" rows="2">{% if edit_error_supplier_id == supplier.pk %}{{ edit_form_values.notes }}{% else %}{{ supplier.notes }}{% endif %}</textarea>
-                    </div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn" style="background: var(--jc-orange); color: #fff;">
-                        Save Changes
-                    </button>
-                </div>
-            </form>
         </div>
     </div>
 </div>
