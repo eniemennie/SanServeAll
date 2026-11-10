@@ -516,7 +516,11 @@ def admin_dashboard(request):
         exclude_discounts=exclude_discounts,
         exclude_vat=exclude_vat,
     )
-    branch_performance = analytics_services.get_branch_performance()
+    branch_performance = analytics_services.get_branch_performance(
+        include_additional_sales=include_additional_sales,
+        exclude_discounts=exclude_discounts,
+        exclude_vat=exclude_vat,
+    )
     top_products = list(analytics_services.get_top_products(branch=selected_branch))
     total_units_sold = analytics_services.get_total_units_sold(branch=selected_branch)
     forecast_label = forecasting_services.get_demand_forecast_label(branch=selected_branch)

@@ -250,6 +250,69 @@ class TestBranchPerformanceRevenueFormatting:
         assert "&#8369;96<" not in content
 
 
+class TestBranchPerformanceCardsRespectTheRevenueToggles:
+    """Client review (2026-11-10): the dashboard-home revenue audit found
+    that admin_dashboard() called get_branch_performance() with no
+    arguments at all, so the Branch Performance Overview cards never
+    actually changed on screen when an admin flipped Include Additional
+    Sales / Exclude Discounts / Exclude VAT -- only the Total Revenue KPI
+    card (which does receive the toggles) responded. This is the
+    view-layer half of that fix; apps/analytics/tests/test_analytics_module.py
+    already covers the underlying service function's own toggle-awareness."""
+
+    def test_unchecking_additional_sales_changes_the_branch_card_not_just_the_total(
+        self, authed_client, branches, admin
+    ):
+        from django.utils import timezone
+
+        from apps.pos.models import SalesItem, SalesTransaction
+
+        branch = branches[0]
+        catalog_product = Product.objects.create(name="Spanish Latte", price="125.00")
+
+        catalog_txn = SalesTransaction.objects.create(
+            branch=branch,
+            cashier=admin,
+            status=SalesTransaction.Status.COMPLETED,
+            payment_method=SalesTransaction.PaymentMethod.CASH,
+            amount_tendered="125.00",
+            completed_at=timezone.now(),
+        )
+        SalesItem.objects.create(
+            transaction=catalog_txn, product=catalog_product, unit_price="125.00", quantity=1
+        )
+
+        additional_txn = SalesTransaction.objects.create(
+            branch=branch,
+            cashier=admin,
+            status=SalesTransaction.Status.COMPLETED,
+            payment_method=SalesTransaction.PaymentMethod.CASH,
+            amount_tendered="50.00",
+            completed_at=timezone.now(),
+        )
+        SalesItem.objects.create(
+            transaction=additional_txn,
+            product=None,
+            custom_name="Special Order",
+            unit_price="50.00",
+            quantity=1,
+        )
+
+        with_additional = authed_client.get(
+            reverse("accounts:admin_dashboard"), {"additional": "1"}
+        ).content.decode()
+        without_additional = authed_client.get(
+            reverse("accounts:admin_dashboard"), {"additional": "0"}
+        ).content.decode()
+
+        # With both sales included, this branch's card shows the combined
+        # 175.00; with the toggle off, the branch card itself must drop
+        # to 125.00 -- not just the Total Revenue KPI card above it.
+        assert "&#8369;175.00" in with_additional
+        assert "&#8369;125.00" in without_additional
+        assert "&#8369;175.00" not in without_additional
+
+
 class TestNoTemplateSyntaxLeaksIntoPages:
     """Regression: Django's {# ... #} comment only works on a SINGLE line.
     A multi-line one in admin_base.html was not treated as a comment and
