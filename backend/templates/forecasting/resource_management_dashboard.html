@@ -184,34 +184,54 @@
 
     {% if selected_branch.is_kahero_branch %}
     {% comment %}
-      Investigation finding (client review, 2026-11-10): confirmed by
-      code reading (not a live production query -- this environment
-      can't reach that database) that NO code path in this system ever
-      writes a real stock count for the KaHero branch's Inventory rows --
+      Investigation finding (client review, 2026-11-10, revised after a
+      follow-up question about the client's own historical import files):
+      confirmed by code reading (not a live production query -- this
+      environment can't reach that database) that NO code path has ever
+      written a real stock count for the KaHero branch's Inventory rows --
       not real-time POS sales (apps.pos.services.complete_sale_payment
       deliberately skips its deduction hook here), not the KaHero live
-      upload pipeline (apps.kahero_integration has no Inventory
-      reference at all), and not the one-time historical sales backfill
-      (apps.core's import_branch_sales_history, same). Every row sits
-      frozen at the zero the original Inventory-backfill migration set
-      it to. So a reading like "0% sufficiency, every product Critical"
-      here is NOT evidence of a real, total stock-out -- it reflects
-      that this branch's stock has simply never been tracked in this
-      system, not that it is actually empty. Flagged here, unconditionally
-      (even while the section below is collapsed), rather than treated
-      as a display bug to silently "fix" -- there's no stock data to
-      correct it with, and inventing a believable-looking number would
-      be worse than this honest, visible gap. The underlying stock
-      calculation itself is untouched; this is a data-coverage problem,
-      not a query bug.
+      upload pipeline (apps.kahero_integration has no Inventory reference
+      at all), not the one-time historical sales backfill
+      (apps.core.import_branch_sales_history -- same, and its source file
+      is aggregate daily revenue only, never itemized per-product
+      quantities, so it couldn't supply real counts even if it did write
+      to Inventory), and not the historical Stock_Transfer.xlsx import
+      either (apps.production.import_stock_transfer's own docstring: the
+      508-row source file's destination branches are only
+      BATANGAS/LIPA -- this branch was never a transfer destination in
+      that historical data). Every row sits frozen at the zero the
+      original Inventory-backfill migration set it to. So a reading like
+      "0% sufficiency, every product Critical" here is NOT evidence of a
+      real, total stock-out -- it reflects that this branch's stock has
+      simply never been tracked in this system, not that it is actually
+      empty. Flagged here, unconditionally (even while the section below
+      is collapsed), rather than treated as a display bug to silently
+      "fix" -- there's no stock data to correct it with, and inventing a
+      believable-looking number would be worse than this honest, visible
+      gap. The underlying stock calculation itself is untouched; this is
+      a data-coverage problem, not a query bug.
+
+      Going forward, though, this branch is a completely ordinary
+      destination for the app's own live Stock Transfer workflow
+      (apps.production.services.create_stock_transfer_order only
+      forbids a commissary as the destination -- nothing excludes the
+      KaHero branch), so if the commissary genuinely ships finished
+      goods here, recording that through Stock Transfers -> Delivered is
+      the natural, forward-looking fix -- it credits real Inventory the
+      same way it does for every other branch. Manual Stock Adjustment
+      is still offered alongside it for a one-off starting count.
     {% endcomment %}
     <div class="alert alert-warning py-2 px-3 small mb-3">
         <strong>Not real stock data.</strong> {{ selected_branch.name }}'s finished-goods stock has
         never been reconciled in this system -- sales here go through the KaHero batch-import
-        pipeline, which (like real-time POS) never updates Inventory records for this branch. The
-        Critical/Low/Adequate figures below reflect that gap, not a confirmed shortage. Use Inventory
-        Monitoring's Manual Stock Adjustment to record this branch's real counts if accurate figures
-        are needed here.
+        pipeline, which (like real-time POS) never updates Inventory records for this branch, and
+        it has never appeared as a destination in any historical stock transfer either. The
+        Critical/Low/Adequate figures below reflect that gap, not a confirmed shortage. If the
+        commissary ships goods here in real life, record it going forward with Stock Transfers
+        (commissary &rarr; branch, marked Delivered) -- that's this app's normal way of crediting a
+        branch's real stock. Inventory Monitoring's Manual Stock Adjustment can set an initial count
+        instead if that's simpler to start with.
     </div>
     {% endif %}
 
