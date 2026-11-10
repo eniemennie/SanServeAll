@@ -107,6 +107,30 @@ class User(AbstractUser):
     working unchanged (Phase 3 decision) — no custom crypto code needed.
     """
 
+    # Client review (2026-11-10): two kinds of non-staff "cashier" accounts
+    # exist purely as a required FK target for SalesTransaction.cashier,
+    # neither of which a report should ever treat as an ordinary staff
+    # member -- but they need OPPOSITE handling, so they're classified
+    # separately rather than lumped into one "is_fake" flag:
+    #
+    # - SYNTHETIC_BACKFILL_BOT_USERNAME: the one dedicated identity
+    #   scripts/backfill_thin_forecast_pairs.py attributes its
+    #   forecast-coverage-only synthetic sales to (see that script's own
+    #   module docstring). These are NOT real sales and must never count
+    #   toward revenue, units sold, or any other report total, and this
+    #   account must never appear as an ordinary, selectable cashier.
+    #
+    # - HISTORICAL_IMPORT_USERNAME_PREFIX: the one inactive placeholder
+    #   account apps.core's import_branch_sales_history command creates
+    #   per branch, purely as the required cashier FK target for real
+    #   historical sales migrated from the client's own pre-system daily
+    #   sales workbooks (see that command's own module docstring). The
+    #   sales attributed to these accounts ARE real and belong in every
+    #   revenue total -- only the raw, login-style username needs a
+    #   friendlier display label (see display_name below).
+    SYNTHETIC_BACKFILL_BOT_USERNAME = "synthetic_backfill_bot"
+    HISTORICAL_IMPORT_USERNAME_PREFIX = "historical_import_"
+
     role = models.ForeignKey(
         Role,
         on_delete=models.PROTECT,
@@ -133,6 +157,40 @@ class User(AbstractUser):
 
     def is_locked(self) -> bool:
         return bool(self.locked_until and self.locked_until > timezone.now())
+
+    @property
+    def is_synthetic_backfill_account(self) -> bool:
+        """True only for the single dedicated bot account that attributes
+        forecast-coverage-only synthetic sales to itself -- never a real
+        staff member. See the SYNTHETIC_BACKFILL_BOT_USERNAME comment
+        above for what created it and why."""
+        return self.username == self.SYNTHETIC_BACKFILL_BOT_USERNAME
+
+    @property
+    def is_historical_import_account(self) -> bool:
+        """True for the inactive per-branch placeholder account that
+        real, migrated historical sales are attributed to -- not a real,
+        selectable staff cashier, but its attributed sales ARE real. See
+        the HISTORICAL_IMPORT_USERNAME_PREFIX comment above."""
+        return self.username.startswith(self.HISTORICAL_IMPORT_USERNAME_PREFIX)
+
+    @property
+    def display_name(self) -> str:
+        """A report should never show a bare login-style username as if
+        it were a cashier's name. Real users: unchanged (full name, or
+        the username as a last resort). The historical-import placeholder:
+        a plain "Imported" label -- whichever report is showing it
+        already has a Branch column saying which branch. The synthetic
+        bot: a short, clearly-marked label, kept here as a fallback for
+        the rare case this account is ever shown directly rather than
+        filtered out of a report entirely (see apps.analytics.services
+        for where it's filtered out) -- never silently presented as an
+        ordinary cashier's name."""
+        if self.is_historical_import_account:
+            return "Imported"
+        if self.is_synthetic_backfill_account:
+            return "Synthetic (forecast only)"
+        return self.get_full_name() or self.username
 
     def __str__(self):
         return self.get_full_name() or self.username

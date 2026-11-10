@@ -94,6 +94,37 @@ class TestGetSalesHistoryService:
         results = list(services.get_sales_history(cashier_id=cashiers["alex"].pk))
         assert results == [alex_sale]
 
+    def test_excludes_the_synthetic_backfill_bots_own_rows(self, branches, cashiers, latte):
+        """Sales History is a per-transaction audit view -- presenting a
+        forecast-only synthetic sale as an ordinary completed sale here
+        would be actively misleading, not just an inflated total, so
+        this excludes the bot's rows unconditionally (see
+        services._exclude_synthetic_transactions)."""
+        role = Role.objects.create(name=Role.OWNER_ADMIN)
+        bot = User.objects.create_user(
+            username=User.SYNTHETIC_BACKFILL_BOT_USERNAME, role=role, branch=None
+        )
+        real_sale = _sale(branches["batangas"], cashiers["alex"], latte)
+        _sale(branches["batangas"], bot, latte)
+
+        results = list(services.get_sales_history())
+        assert results == [real_sale]
+
+    def test_includes_real_historical_import_rows(self, branches, latte):
+        """Unlike the synthetic bot above, a historical_import_<branch>
+        row is a real, migrated sale and belongs in Sales History."""
+        role = Role.objects.create(name=Role.BRANCH_STAFF)
+        importer = User.objects.create_user(
+            username="historical_import_batangas",
+            role=role,
+            branch=branches["batangas"],
+            is_active=False,
+        )
+        imported_sale = _sale(branches["batangas"], importer, latte)
+
+        results = list(services.get_sales_history())
+        assert results == [imported_sale]
+
     def test_filters_by_date_range_inclusive(self, branches, cashiers, latte):
         # get_sales_history's date_from/date_to are calendar dates in the
         # business's own local time (settings.TIME_ZONE="Asia/Manila", see
@@ -135,6 +166,38 @@ class TestGetCashiersWithSalesHistoryService:
 
         names = list(services.get_cashiers_with_sales_history().values_list("username", flat=True))
         assert names == ["alex"]
+
+    def test_excludes_the_synthetic_backfill_bot(self, branches, cashiers, latte):
+        """Client review (2026-11-10): the forecast-coverage backfill
+        bot (scripts/backfill_thin_forecast_pairs.py) was showing up here
+        as an ordinary, filterable "cashier" right alongside real staff
+        -- misrepresenting forecast-only test data as a legitimate sales
+        channel. It must never appear in this dropdown."""
+        role = Role.objects.create(name=Role.OWNER_ADMIN)
+        bot = User.objects.create_user(
+            username=User.SYNTHETIC_BACKFILL_BOT_USERNAME, role=role, branch=None
+        )
+        _sale(branches["batangas"], cashiers["alex"], latte)
+        _sale(branches["batangas"], bot, latte)
+
+        names = list(services.get_cashiers_with_sales_history().values_list("username", flat=True))
+        assert names == ["alex"]
+
+    def test_includes_a_historical_import_account(self, branches, latte):
+        """The real, migrated-history placeholder accounts (apps.core's
+        import_branch_sales_history) ARE real sales, and must stay
+        filterable -- unlike the synthetic bot above."""
+        role = Role.objects.create(name=Role.BRANCH_STAFF)
+        importer = User.objects.create_user(
+            username="historical_import_batangas",
+            role=role,
+            branch=branches["batangas"],
+            is_active=False,
+        )
+        _sale(branches["batangas"], importer, latte)
+
+        names = list(services.get_cashiers_with_sales_history().values_list("username", flat=True))
+        assert names == ["historical_import_batangas"]
 
 
 class TestSalesHistoryView:
@@ -200,3 +263,46 @@ class TestSalesHistoryView:
         )
         assert response.status_code == 200
         assert b"on or before" in response.content
+
+    def test_synthetic_backfill_bot_never_appears_on_the_page(
+        self, owner_client, branches, cashiers, latte
+    ):
+        """Regression guard for the client review (2026-11-10) finding:
+        the bot's long raw first_name ("Synthetic Backfill Bot
+        (forecast-only, not a real staff account)") must never render
+        anywhere on this page -- not in a row, and not as a normal
+        option in the Cashier dropdown."""
+        role, _ = Role.objects.get_or_create(name=Role.OWNER_ADMIN)
+        bot = User.objects.create_user(
+            username=User.SYNTHETIC_BACKFILL_BOT_USERNAME,
+            first_name="Synthetic Backfill Bot (forecast-only, not a real staff account)",
+            role=role,
+            branch=None,
+        )
+        _sale(branches["batangas"], cashiers["alex"], latte)
+        _sale(branches["batangas"], bot, latte)
+
+        response = owner_client.get(reverse("analytics:sales_history"))
+        content = response.content.decode()
+        assert "Synthetic Backfill Bot" not in content
+        assert bot not in response.context["cashiers"]
+
+    def test_historical_import_cashier_shows_a_friendly_label_not_the_raw_username(
+        self, owner_client, branches, latte
+    ):
+        """The Cashier column and the Cashier filter dropdown must show
+        "Imported", not the raw "historical_import_batangas" login-style
+        username -- see User.display_name."""
+        role = Role.objects.create(name=Role.BRANCH_STAFF)
+        importer = User.objects.create_user(
+            username="historical_import_batangas",
+            role=role,
+            branch=branches["batangas"],
+            is_active=False,
+        )
+        _sale(branches["batangas"], importer, latte)
+
+        response = owner_client.get(reverse("analytics:sales_history"))
+        content = response.content.decode()
+        assert "historical_import_batangas" not in content
+        assert "Imported" in content

@@ -10,11 +10,33 @@ from decimal import Decimal
 from django.db.models import F, Max, Sum
 from django.utils import timezone
 
+from apps.accounts.models import User
 from apps.inventory.models import Product
 from apps.inventory.services import get_branch_inventory
 from apps.pos.models import SalesItem, SalesTransaction
 from apps.production.models import IngredientUsage, ProductionRecord
 from apps.system_config.models import BusinessSettings
+
+
+def _exclude_synthetic_transactions(qs, cashier_lookup="cashier__username"):
+    """Client review (2026-11-10): scripts/backfill_thin_forecast_pairs.py
+    creates real, COMPLETED SalesTransaction rows (through the normal POS
+    service layer) attributed to a single dedicated bot account purely so
+    the forecasting pipeline has enough non-zero days to fit against --
+    see that script's own module docstring. Nothing about `status=
+    COMPLETED` distinguishes those from a genuine sale, so every report
+    aggregate below must explicitly exclude them, or synthetic test data
+    silently inflates real revenue/units/order totals.
+
+    Deliberately does NOT also exclude apps.core's
+    "historical_import_<branch>" accounts -- those ARE real, migrated
+    historical sales and belong in every total exactly as a normal sale
+    would (see User.is_historical_import_account's own docstring).
+
+    `cashier_lookup` lets a caller starting from SalesItem reach through
+    to its transaction's cashier (pass "transaction__cashier__username").
+    """
+    return qs.exclude(**{cashier_lookup: User.SYNTHETIC_BACKFILL_BOT_USERNAME})
 
 
 def _trailing_window_anchor(branch=None):
@@ -55,9 +77,10 @@ def _trailing_window_anchor(branch=None):
     """
     if branch is None:
         return timezone.now()
-    latest = SalesTransaction.objects.filter(
-        branch=branch, status=SalesTransaction.Status.COMPLETED
-    ).aggregate(latest=Max("completed_at"))["latest"]
+    real_transactions = _exclude_synthetic_transactions(
+        SalesTransaction.objects.filter(branch=branch, status=SalesTransaction.Status.COMPLETED)
+    )
+    latest = real_transactions.aggregate(latest=Max("completed_at"))["latest"]
     if latest is None:
         return timezone.now()
     return min(timezone.now(), latest + timedelta(seconds=1))
@@ -126,6 +149,7 @@ def get_sales_summary(branch=None, days=30, date_from=None, date_to=None):
     transactions = SalesTransaction.objects.filter(
         status=SalesTransaction.Status.COMPLETED, completed_at__gte=since, completed_at__lt=until
     )
+    transactions = _exclude_synthetic_transactions(transactions)
     if branch is not None:
         transactions = transactions.filter(branch=branch)
     transactions = list(transactions.prefetch_related("items"))
@@ -169,6 +193,7 @@ def get_weekly_sales_trend(branch=None, weeks=8):
             completed_at__gte=week_start,
             completed_at__lt=week_end,
         )
+        transactions = _exclude_synthetic_transactions(transactions)
         if branch is not None:
             transactions = transactions.filter(branch=branch)
         transactions = transactions.prefetch_related("items")
@@ -207,6 +232,9 @@ def get_weekly_sales_trend_by_branch(weeks=8):
                 status=SalesTransaction.Status.COMPLETED,
                 completed_at__gte=week_start,
                 completed_at__lt=week_end,
+            )
+            branch_transactions = _exclude_synthetic_transactions(
+                branch_transactions
             ).prefetch_related("items")
             revenue = sum((txn.grand_total for txn in branch_transactions), Decimal("0.00"))
             per_branch_revenue[b.pk].append(float(revenue))
@@ -242,11 +270,10 @@ def get_branch_performance(days=30):
         # its own window anchored to its own latest data, not to
         # whichever branch happens to have live activity right now.
         since = _trailing_window_anchor(branch) - timedelta(days=days)
-        transactions = list(
-            SalesTransaction.objects.filter(
-                branch=branch, status=SalesTransaction.Status.COMPLETED, completed_at__gte=since
-            ).prefetch_related("items")
+        transactions = SalesTransaction.objects.filter(
+            branch=branch, status=SalesTransaction.Status.COMPLETED, completed_at__gte=since
         )
+        transactions = list(_exclude_synthetic_transactions(transactions).prefetch_related("items"))
         revenue = sum((txn.grand_total for txn in transactions), Decimal("0.00"))
         units_sold = sum((item.quantity for txn in transactions for item in txn.items.all()), 0)
         results.append(
@@ -341,7 +368,8 @@ def get_sales_summary_with_toggles(
         status=SalesTransaction.Status.COMPLETED,
         completed_at__gte=since,
         branch=branch,
-    ).prefetch_related("items")
+    )
+    transactions = _exclude_synthetic_transactions(transactions).prefetch_related("items")
 
     tax_rate = BusinessSettings.load().tax_rate_percent
     vat_divisor = Decimal("1") + (tax_rate / Decimal("100"))
@@ -411,6 +439,7 @@ def get_top_products(branch=None, days=30, limit=5):
         transaction__status=SalesTransaction.Status.COMPLETED,
         transaction__completed_at__gte=since,
     )
+    items = _exclude_synthetic_transactions(items, cashier_lookup="transaction__cashier__username")
     if branch is not None:
         items = items.filter(transaction__branch=branch)
 
@@ -438,6 +467,7 @@ def get_total_units_sold(branch=None, days=30):
         transaction__status=SalesTransaction.Status.COMPLETED,
         transaction__completed_at__gte=since,
     )
+    items = _exclude_synthetic_transactions(items, cashier_lookup="transaction__cashier__username")
     if branch is not None:
         items = items.filter(transaction__branch=branch)
 
@@ -492,6 +522,9 @@ def get_product_performance(branch=None, days=30, date_from=None, date_to=None):
             transaction__status=SalesTransaction.Status.COMPLETED,
             transaction__completed_at__gte=start,
             transaction__completed_at__lt=end,
+        )
+        items = _exclude_synthetic_transactions(
+            items, cashier_lookup="transaction__cashier__username"
         )
         if branch is not None:
             items = items.filter(transaction__branch=branch)
@@ -662,6 +695,15 @@ def get_sales_history(branch=None, cashier_id=None, date_from=None, date_to=None
     VOIDED sale was never a real, collected sale and has no place in a
     sales history (same exclusion get_sales_summary already applies).
 
+    Client review (2026-11-10): also excludes the synthetic forecast-
+    backfill bot's own rows unconditionally -- see
+    _exclude_synthetic_transactions. Those were never a real sale either,
+    and Sales History is exactly the kind of per-transaction audit view
+    where presenting one as an ordinary completed sale would be actively
+    misleading, not just an inflated total. The real, migrated
+    "historical_import_<branch>" rows are NOT excluded -- see
+    get_cashiers_with_sales_history for why those stay.
+
     `date_from`/`date_to` are inclusive calendar dates (not datetimes) in
     the business's own local time (settings.TIME_ZONE), matching how an
     Owner/Admin actually thinks about "show me Tuesday's sales" rather
@@ -672,6 +714,7 @@ def get_sales_history(branch=None, cashier_id=None, date_from=None, date_to=None
         .select_related("branch", "cashier")
         .prefetch_related("items")
     )
+    qs = _exclude_synthetic_transactions(qs)
 
     if branch is not None:
         qs = qs.filter(branch=branch)
@@ -687,15 +730,34 @@ def get_sales_history(branch=None, cashier_id=None, date_from=None, date_to=None
 
 def get_cashiers_with_sales_history():
     """Cashiers to offer in the Sales History filter dropdown -- everyone
-    who has at least one COMPLETED transaction, including an account
-    since deactivated (a past sale by a now-former cashier is still part
-    of the history and still needs to be findable), rather than every
-    currently-active Branch Staff account regardless of whether they've
-    ever actually made a sale."""
+    who has at least one COMPLETED, non-synthetic transaction, including
+    an account since deactivated (a past sale by a now-former cashier is
+    still part of the history and still needs to be findable), rather
+    than every currently-active Branch Staff account regardless of
+    whether they've ever actually made a sale.
+
+    Client review (2026-11-10): the synthetic forecast-backfill bot
+    (User.SYNTHETIC_BACKFILL_BOT_USERNAME) is excluded outright -- it was
+    showing up here as an ordinary, filterable "cashier" right alongside
+    real staff, which misrepresents forecast-only test data as a
+    legitimate sales channel. Its own rows are also excluded from
+    get_sales_history's results, so there would be nothing to show even
+    if it were offered here.
+
+    apps.core's "historical_import_<branch>" accounts are deliberately
+    NOT excluded -- their attributed sales are real, migrated history
+    (see User.is_historical_import_account), and an Owner/Admin may
+    genuinely want to filter Sales History down to just that branch's
+    imported record. They're still clearly distinguished from a real
+    staff member's name via User.display_name, rather than showing the
+    raw "historical_import_<branch>" username (used in
+    analytics/sales_history.html instead of get_full_name/username)."""
     from django.contrib.auth import get_user_model
 
     cashier_ids = (
-        SalesTransaction.objects.filter(status=SalesTransaction.Status.COMPLETED)
+        _exclude_synthetic_transactions(
+            SalesTransaction.objects.filter(status=SalesTransaction.Status.COMPLETED)
+        )
         .values_list("cashier_id", flat=True)
         .distinct()
     )

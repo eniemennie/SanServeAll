@@ -98,6 +98,51 @@ class TestUser:
             assert user.password != "testpass123"
             assert user.password.startswith("pbkdf2_")
 
+    def test_is_synthetic_backfill_account_true_only_for_the_bot_username(self):
+        """Client review (2026-11-10): confirms the classification used
+        by apps.analytics.services to exclude the forecast-backfill
+        bot's rows from every report total."""
+        role = Role.objects.create(name=Role.OWNER_ADMIN)
+        bot = User.objects.create_user(username="synthetic_backfill_bot", role=role)
+        other = User.objects.create_user(username="cashier1", role=role)
+        assert bot.is_synthetic_backfill_account is True
+        assert other.is_synthetic_backfill_account is False
+        assert bot.is_historical_import_account is False
+
+    def test_is_historical_import_account_true_for_the_per_branch_prefix(self):
+        role = Role.objects.create(name=Role.BRANCH_STAFF)
+        importer = User.objects.create_user(username="historical_import_lipa", role=role)
+        other = User.objects.create_user(username="cashier1", role=role)
+        assert importer.is_historical_import_account is True
+        assert other.is_historical_import_account is False
+        assert importer.is_synthetic_backfill_account is False
+
+    def test_display_name_for_a_real_user_falls_back_to_username(self):
+        role = Role.objects.create(name=Role.BRANCH_STAFF)
+        no_name = User.objects.create_user(username="cashier1", role=role)
+        named = User.objects.create_user(
+            username="cashier2", role=role, first_name="Alex", last_name="Cruz"
+        )
+        assert no_name.display_name == "cashier1"
+        assert named.display_name == "Alex Cruz"
+
+    def test_display_name_for_the_historical_import_account_is_imported(self):
+        role = Role.objects.create(name=Role.BRANCH_STAFF)
+        importer = User.objects.create_user(username="historical_import_lipa", role=role)
+        assert importer.display_name == "Imported"
+
+    def test_display_name_for_the_synthetic_bot_is_a_short_marked_label(self):
+        """Never the bot's own real first_name (a long, scary string --
+        see scripts/backfill_thin_forecast_pairs.py's ensure_bot_user)
+        and never a bare username presented as an ordinary cashier."""
+        role = Role.objects.create(name=Role.OWNER_ADMIN)
+        bot = User.objects.create_user(
+            username="synthetic_backfill_bot",
+            role=role,
+            first_name="Synthetic Backfill Bot (forecast-only, not a real staff account)",
+        )
+        assert bot.display_name == "Synthetic (forecast only)"
+
 
 class TestCashierPIN:
     def test_set_pin_stores_a_hash_not_plaintext(self):

@@ -23,7 +23,7 @@
             <option value="">All Cashiers</option>
             {% for c in cashiers %}
             <option value="{{ c.pk }}" {% if selected_cashier_id == c.pk %}selected{% endif %}>
-                {{ c.get_full_name|default:c.username }}
+                {{ c.display_name }}{% if c.is_historical_import_account %} ({{ c.branch.name }}){% endif %}
             </option>
             {% endfor %}
         </select>
@@ -67,7 +67,7 @@
                 <td>{{ txn.pk }}</td>
                 <td>{{ txn.completed_at|date:"M j, Y H:i" }}</td>
                 <td>{{ txn.branch.name }}</td>
-                <td>{{ txn.cashier.get_full_name|default:txn.cashier.username }}</td>
+                <td>{{ txn.cashier.display_name }}</td>
                 <td>{{ txn.get_dining_option_display }}</td>
                 <td>{{ txn.get_payment_method_display }}</td>
                 <td>
