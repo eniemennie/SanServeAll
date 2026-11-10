@@ -1,5 +1,6 @@
 {% extends "admin_base.html" %}
 {% load sanserveall_filters %}
+{% load humanize %}
 {% block admin_title %}Reports{% endblock %}
 {% block admin_content %}
 
@@ -74,29 +75,52 @@
 <div id="panel-sales" class="report-panel">
     <div class="row g-4 mb-3">
         <div class="col-md-4">
-            <div class="jc-card p-3 p-md-4 text-center">
+            <div class="jc-card p-3 p-md-4 text-center h-100">
                 <div class="text-muted small">Total Revenue</div>
                 <div class="fs-4 fw-bold">&#8369;{{ sales_summary.total_revenue|peso }}</div>
             </div>
         </div>
         <div class="col-md-4">
-            <div class="jc-card p-3 p-md-4 text-center">
+            <div class="jc-card p-3 p-md-4 text-center h-100">
                 <div class="text-muted small">Avg Daily Revenue</div>
                 <div class="fs-4 fw-bold">&#8369;{{ sales_summary.average_daily_revenue|peso }}</div>
             </div>
         </div>
         <div class="col-md-4">
-            <div class="jc-card p-3 p-md-4 text-center">
+            <div class="jc-card p-3 p-md-4 text-center h-100">
                 <div class="text-muted small">Total Units Sold</div>
-                <div class="fs-4 fw-bold">{{ sales_summary.total_units_sold }}</div>
+                <div class="fs-4 fw-bold">{{ sales_summary.total_units_sold|intcomma }}</div>
             </div>
         </div>
     </div>
     <div class="jc-card p-3 p-md-4">
         <div class="fw-semibold mb-2">Sales &amp; Trend Analysis</div>
-        {% if using_custom_range %}
-        <div class="text-muted small mb-2">Always shows the last 8 weeks -- a short custom range doesn't divide meaningfully into weekly points, so this chart doesn't follow the date filter above.</div>
-        {% endif %}
+        <div class="text-muted small mb-2">Always shows the last 8 weeks, ending today -- a short custom range doesn't divide meaningfully into weekly points, so this chart doesn't follow the date filter above (see "Showing data for" below the tabs for what the summary cards and other tabs use instead).</div>
+        {% comment %}
+          Investigation finding (client review, 2026-11-10): verified
+          directly against the client's own source workbooks
+          (Batangas/Lipa/Alangilan Sales_2024-2026.xlsx), not just this
+          app's own data -- every one of them stops at 2026-09-30, the
+          same point where this chart's revenue line drops to flat. This
+          isn't a query bug (get_weekly_sales_trend/get_sales_summary
+          both read every COMPLETED, non-synthetic transaction
+          correctly); the client's real historical dataset simply has no
+          recorded sales past that date. Any nonzero revenue shown after
+          it comes only from transactions entered live into the deployed
+          app since then, not from the client's own records -- flagged
+          here rather than silently treated as a display issue, since a
+          near-total revenue gap spanning most of a recent 30-day window
+          is worth the client's attention either way (either sales
+          genuinely stopped, or daily sales simply haven't been recorded
+          into this system since the last historical import).
+        {% endcomment %}
+        <div class="alert alert-warning py-2 px-3 small mb-2">
+            <strong>Data coverage note.</strong> The client's own historical sales records (Batangas,
+            Lipa, and Alangilan) run through <strong>September 30, 2026</strong>. Any revenue shown for
+            dates after that reflects only live transactions entered into this app since then, not the
+            client's own daily sales logs -- a flat or near-zero stretch past that date most likely
+            means sales since then haven't been recorded here yet, not that the business had no sales.
+        </div>
         <canvas id="salesTrendChart" height="90"></canvas>
     </div>
 </div>
@@ -109,15 +133,29 @@
         <canvas id="productPerformanceChart" height="90"></canvas>
     </div>
     <div class="jc-card p-3 p-md-4">
+        {% comment %}
+          Long-table organization (client review, 2026-11-10): with 20+
+          products this table required excessive scrolling. Data and
+          column order are unchanged (still server-sorted by current
+          period units, descending) -- a search box filters the existing
+          rows client-side, and a "Show top 10 / Show all" toggle caps
+          the initial view without ever dropping a row from the DOM.
+        {% endcomment %}
+        {% if product_performance|length > 10 %}
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+            <input type="search" id="productSearch" class="form-control form-control-sm" style="max-width: 260px;" placeholder="Search products&hellip;">
+            <button type="button" id="productShowAllToggle" class="btn btn-sm btn-jc-outline" data-showing-all="false">Show all ({{ product_performance|length }})</button>
+        </div>
+        {% endif %}
         <div class="table-responsive">
-        <table class="table table-sm mb-0">
+        <table class="table table-sm mb-0" id="productPerformanceTable">
             <thead><tr><th>Product</th><th>This Period</th><th>Previous Period</th><th>Growth</th></tr></thead>
             <tbody>
                 {% for row in product_performance %}
-                <tr>
+                <tr class="report-row{% if forloop.counter > 10 %} report-row-extra d-none{% endif %}" data-search-text="{{ row.product_name|lower }}">
                     <td>{{ row.product_name }}</td>
-                    <td>{{ row.current_units }}</td>
-                    <td>{{ row.previous_units }}</td>
+                    <td>{{ row.current_units|intcomma }}</td>
+                    <td>{{ row.previous_units|intcomma }}</td>
                     <td>
                         {% if row.growth_rate is None %}
                         <span class="jc-badge jc-badge-info" title="No sales in previous period.">New</span>
@@ -134,13 +172,14 @@
             </tbody>
         </table>
         </div>
+        <p class="text-muted small mb-0 mt-2 d-none" id="productNoMatches">No products match that search.</p>
     </div>
 </div>
 
 <div id="panel-resources" class="report-panel d-none">
     <div class="row g-4 mb-3">
         <div class="col-md-3">
-            <div class="jc-card p-3 p-md-4 text-center">
+            <div class="jc-card p-3 p-md-4 text-center h-100">
                 <div class="text-muted small">Total Units Used</div>
                 {% for u in consumption.units_used_by_unit %}
                 <div class="fs-5 fw-bold">{{ u.total|qty:u.unit }} {{ u.unit_display }}</div>
@@ -150,31 +189,42 @@
             </div>
         </div>
         <div class="col-md-3">
-            <div class="jc-card p-3 p-md-4 text-center">
+            <div class="jc-card p-3 p-md-4 text-center h-100">
                 <div class="text-muted small">Material Cost</div>
                 <div class="fs-4 fw-bold">&#8369;{{ consumption.total_cost|peso }}</div>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="jc-card p-3 p-md-4 text-center">
+            <div class="jc-card p-3 p-md-4 text-center h-100">
                 <div class="text-muted small">Units Produced</div>
-                <div class="fs-4 fw-bold">{{ consumption.total_produced }}</div>
+                <div class="fs-4 fw-bold">{{ consumption.total_produced|intcomma }}</div>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="jc-card p-3 p-md-4 text-center">
+            <div class="jc-card p-3 p-md-4 text-center h-100">
                 <div class="text-muted small">Cost per Unit</div>
                 <div class="fs-4 fw-bold">&#8369;{{ consumption.cost_per_unit_produced|peso }}</div>
             </div>
         </div>
     </div>
     <div class="jc-card p-3 p-md-4">
+        {% comment %}
+          Same long-table treatment as Product Performance above: data
+          and the existing Total Used-descending sort are unchanged,
+          just capped to a top 10 by default with search/Show all.
+        {% endcomment %}
+        {% if consumption.by_material|length > 10 %}
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+            <input type="search" id="materialSearch" class="form-control form-control-sm" style="max-width: 260px;" placeholder="Search materials&hellip;">
+            <button type="button" id="materialShowAllToggle" class="btn btn-sm btn-jc-outline" data-showing-all="false">Show all ({{ consumption.by_material|length }})</button>
+        </div>
+        {% endif %}
         <div class="table-responsive">
-        <table class="table table-sm mb-0">
+        <table class="table table-sm mb-0" id="materialTable">
             <thead><tr><th>Material</th><th>Unit</th><th>Total Used</th><th>Total Cost</th></tr></thead>
             <tbody>
                 {% for m in consumption.by_material %}
-                <tr>
+                <tr class="report-row{% if forloop.counter > 10 %} report-row-extra d-none{% endif %}" data-search-text="{{ m.material__name|lower }}">
                     <td>{{ m.material__name }}</td>
                     <td>{{ m.unit_display }}</td>
                     <td>{{ m.total_used|qty:m.unit }}</td>
@@ -186,33 +236,34 @@
             </tbody>
         </table>
         </div>
+        <p class="text-muted small mb-0 mt-2 d-none" id="materialNoMatches">No materials match that search.</p>
     </div>
 </div>
 
 <div id="panel-operational" class="report-panel d-none">
     <div class="row g-4">
         <div class="col-md-4">
-            <div class="jc-card p-3 p-md-4 text-center">
+            <div class="jc-card p-3 p-md-4 text-center h-100">
                 <div class="text-muted small">Batch Completion Rate</div>
                 <div class="fs-4 fw-bold">
                     {% if operational.completion_rate is not None %}{{ operational.completion_rate|floatformat:1 }}%{% else %}&mdash;{% endif %}
                 </div>
-                <div class="text-muted small">{{ operational.completed_batches }} / {{ operational.total_batches }} batches</div>
+                <div class="text-muted small">{{ operational.completed_batches|intcomma }} / {{ operational.total_batches|intcomma }} batches</div>
             </div>
         </div>
         <div class="col-md-4">
-            <div class="jc-card p-3 p-md-4 text-center">
+            <div class="jc-card p-3 p-md-4 text-center h-100">
                 <div class="text-muted small">Quality Pass Rate</div>
                 <div class="fs-4 fw-bold">
                     {% if operational.quality_pass_rate is not None %}{{ operational.quality_pass_rate|floatformat:1 }}%{% else %}&mdash;{% endif %}
                 </div>
-                <div class="text-muted small">{{ operational.passed_batches }} / {{ operational.total_batches }} batches</div>
+                <div class="text-muted small">{{ operational.passed_batches|intcomma }} / {{ operational.total_batches|intcomma }} batches</div>
             </div>
         </div>
         <div class="col-md-4">
-            <div class="jc-card p-3 p-md-4 text-center">
+            <div class="jc-card p-3 p-md-4 text-center h-100">
                 <div class="text-muted small">Total Batches</div>
-                <div class="fs-4 fw-bold">{{ operational.total_batches }}</div>
+                <div class="fs-4 fw-bold">{{ operational.total_batches|intcomma }}</div>
             </div>
         </div>
     </div>
@@ -243,7 +294,28 @@
             labels: {{ trend_labels_json|safe }},
             datasets: [{ label: "Revenue (\u20b1)", data: {{ trend_revenue_json|safe }}, borderColor: "#D2703F", tension: 0.3 }]
         },
-        options: { responsive: true, scales: { y: { beginAtZero: true } } }
+        options: {
+            responsive: true,
+            scales: {
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        // Readability fix (client review, 2026-11-10): plain
+                        // numbers on a revenue axis (e.g. "820000") don't
+                        // match the thousands-separated formatting used
+                        // everywhere else on this page.
+                        callback: function (value) { return "\u20b1" + Number(value).toLocaleString(); }
+                    }
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function (ctx) { return ctx.dataset.label + ": \u20b1" + Number(ctx.parsed.y).toLocaleString(); }
+                    }
+                }
+            }
+        }
     });
 
     new Chart(document.getElementById("productPerformanceChart"), {
@@ -264,6 +336,51 @@
             }
         }
     });
+
+    // Long-table organization (client review, 2026-11-10): shared by
+    // Product Performance and Resource Consumption's materials table.
+    // Purely client-side over rows the server already rendered in full
+    // (sorted order and data untouched) -- never re-fetches or drops a
+    // row, just toggles which ones are visible.
+    function setupReportTable(tableId, searchId, toggleId, noMatchesId) {
+        var table = document.getElementById(tableId);
+        if (!table) return;
+        var rows = Array.prototype.slice.call(table.querySelectorAll("tbody tr.report-row"));
+        var searchInput = document.getElementById(searchId);
+        var toggleBtn = document.getElementById(toggleId);
+        var noMatches = document.getElementById(noMatchesId);
+        if (!rows.length) return;
+
+        function applyState() {
+            var query = (searchInput && searchInput.value || "").trim().toLowerCase();
+            var showingAll = toggleBtn ? toggleBtn.dataset.showingAll === "true" : true;
+            var visibleCount = 0;
+            rows.forEach(function (row, index) {
+                var matchesSearch = !query || row.dataset.searchText.indexOf(query) !== -1;
+                var withinTopTen = showingAll || query || index < 10;
+                var visible = matchesSearch && withinTopTen;
+                row.classList.toggle("d-none", !visible);
+                if (visible) visibleCount += 1;
+            });
+            if (noMatches) noMatches.classList.toggle("d-none", visibleCount !== 0 || !query);
+        }
+
+        if (searchInput) searchInput.addEventListener("input", applyState);
+        if (toggleBtn) {
+            toggleBtn.addEventListener("click", function () {
+                var showingAll = toggleBtn.dataset.showingAll === "true";
+                toggleBtn.dataset.showingAll = showingAll ? "false" : "true";
+                toggleBtn.textContent = showingAll
+                    ? "Show all (" + rows.length + ")"
+                    : "Show top 10";
+                applyState();
+            });
+        }
+        applyState();
+    }
+
+    setupReportTable("productPerformanceTable", "productSearch", "productShowAllToggle", "productNoMatches");
+    setupReportTable("materialTable", "materialSearch", "materialShowAllToggle", "materialNoMatches");
 })();
 </script>
 <style>
