@@ -1139,6 +1139,135 @@ class TestResourceManagementDashboardView:
         assert "Restocking Recommendations (Materials)" in content
         assert "AI-Driven Restocking" not in content
 
+    def test_stock_health_section_defaults_to_collapsed(self, owner_client):
+        """Client review (2026-11-10): the Finished-Goods Stock Health
+        section must default to collapsed, showing just the summary
+        line -- Bootstrap's collapse component treats the body as
+        collapsed whenever it carries "collapse" without "show". The
+        toggle button's aria-expanded must start false too, since CSS
+        rotates the chevron off that attribute (see the template's
+        extra_css block)."""
+        response = owner_client.get(reverse("forecasting:resource_management_dashboard"))
+        content = response.content.decode()
+        assert 'id="stockHealthBody"' in content
+        assert 'class="collapse" id="stockHealthBody"' in content
+        assert 'id="stockHealthToggle"' in content
+        assert 'aria-expanded="false"' in content
+
+    def test_critical_items_beyond_group_limit_are_not_folded_into_adequate(
+        self, owner_client, branch
+    ):
+        """Regression test for the bug this reorganization fixed: the old
+        logic sliced a single combined (Critical-then-Low-then-Adequate)
+        list at STOCK_HEALTH_DISPLAY_LIMIT=20, so any Critical items past
+        that cutoff were silently re-counted as Adequate -- exactly the
+        Alangilan scenario (56 Critical items). Create more than
+        STATUS_GROUP_DISPLAY_LIMIT (25) Critical items for one branch and
+        confirm: none of them are lost from the Critical count, the
+        overflow is reported as a Critical-specific "+N more" note (not
+        folded into an Adequate note), and the rendered page still shows
+        the true Critical count rather than a truncated one."""
+        from apps.inventory.models import Inventory, Product as InventoryProduct
+
+        for i in range(30):
+            product = InventoryProduct.objects.create(name=f"Critical Item {i}", price="10.00")
+            Inventory.objects.create(branch=branch, product=product, quantity_on_hand=0)
+
+        response = owner_client.get(
+            reverse("forecasting:resource_management_dashboard"), {"branch": branch.pk}
+        )
+        resource_status = response.context["resource_status"]
+        assert resource_status["critical_count"] == 30
+        assert len(resource_status["critical_items"]) == 25
+        assert resource_status["critical_hidden_count"] == 5
+
+        content = response.content.decode()
+        assert "+ 5 more Critical items" in content
+        # The old bug's message claimed overflow was Adequate stock --
+        # confirm that mislabeling can't reappear for this scenario.
+        assert "at Adequate stock" not in content
+
+    def test_low_items_are_not_mixed_into_the_critical_group(self, owner_client, branch):
+        """Critical (quantity_on_hand <= 0) and Low (0 < quantity_on_hand
+        <= reorder_threshold) must stay in their own groups -- confirms
+        the view's two list comprehensions (is_out_of_stock vs.
+        is_low_stock) don't double-count an item into both, since
+        Inventory.is_low_stock already excludes quantity_on_hand <= 0."""
+        from apps.inventory.models import Inventory, Product as InventoryProduct
+
+        critical_product = InventoryProduct.objects.create(name="Americano", price="90.00")
+        low_product = InventoryProduct.objects.create(name="Cafe Latte", price="120.00")
+        Inventory.objects.create(branch=branch, product=critical_product, quantity_on_hand=0)
+        Inventory.objects.create(
+            branch=branch,
+            product=low_product,
+            quantity_on_hand=2,
+            reorder_threshold=5,
+        )
+
+        response = owner_client.get(
+            reverse("forecasting:resource_management_dashboard"), {"branch": branch.pk}
+        )
+        resource_status = response.context["resource_status"]
+        assert [i.product.name for i in resource_status["critical_items"]] == ["Americano"]
+        assert [i.product.name for i in resource_status["low_items"]] == ["Cafe Latte"]
+
+    def test_kahero_branch_shows_data_coverage_banner(self, owner_client):
+        """The KaHero (Alangilan) branch has never had real finished-goods
+        stock written to it by any code path (confirmed by reading
+        pos.services, kahero_integration, and
+        import_branch_sales_history -- none touch Inventory for this
+        branch), so selecting it must show the advisory banner, always
+        visible even though the section below defaults to collapsed. A
+        non-KaHero branch must not show it."""
+        kahero_branch = Branch.objects.create(
+            name="Alangilan", code="ALANGILAN", is_kahero_branch=True
+        )
+        ordinary_branch = Branch.objects.create(name="Lipa City 2", code="LIPA2")
+
+        kahero_response = owner_client.get(
+            reverse("forecasting:resource_management_dashboard"), {"branch": kahero_branch.pk}
+        )
+        assert b"Not real stock data." in kahero_response.content
+
+        ordinary_response = owner_client.get(
+            reverse("forecasting:resource_management_dashboard"), {"branch": ordinary_branch.pk}
+        )
+        assert b"Not real stock data." not in ordinary_response.content
+
+    def test_piece_based_on_hand_quantity_renders_as_whole_number(self, owner_client, branch):
+        """Section 3 of the client's layout request: "0.000 on hand"
+        should render as "0 on hand" for piece-based items, matching the
+        `qty` filter already used for Current Stock elsewhere (Product
+        Availability). Previously this line had no filter at all."""
+        from apps.inventory.models import Inventory, Product as InventoryProduct
+
+        cashew = InventoryProduct.objects.create(name="Cashew Nuts", price="650.00")
+        Inventory.objects.create(branch=branch, product=cashew, quantity_on_hand=0)
+
+        response = owner_client.get(
+            reverse("forecasting:resource_management_dashboard"), {"branch": branch.pk}
+        )
+        content = " ".join(response.content.decode().split())
+        assert "0.000 pc on hand" not in content
+        assert "0 pc on hand" in content
+
+    def test_units_produced_card_has_thousands_separator(self, owner_client, owner):
+        """Section 1 of the client's request: Total Cost/Cost per Unit
+        already used intcomma via the `peso` filter -- Units Produced did
+        not. Create enough production to actually cross the
+        four-digit threshold so a missing separator would be visible."""
+        from apps.inventory.models import Product as InventoryProduct
+        from apps.production.models import ProductionRecord
+
+        cake = InventoryProduct.objects.create(name="Chocolate Cake", price="450.00")
+        ProductionRecord.objects.create(
+            commissary_staff=owner, product=cake, quantity_produced=1234
+        )
+
+        response = owner_client.get(reverse("forecasting:resource_management_dashboard"))
+        assert b"1,234" in response.content
+
 
 class TestExportResourceReportView:
     """Export Report button (Resource Management topbar): a CSV mirroring
