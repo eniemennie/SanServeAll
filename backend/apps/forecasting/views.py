@@ -132,18 +132,38 @@ def resource_management_dashboard(request):
         category_labels.append(f"Other materials ({len(other_materials)})")
         category_values.append(float(sum(m["total_used"] for m in other_materials)))
 
-    # Finished-Goods Stock Health list overcrowding (pre-defense UI review):
-    # with real client data across every branch, this list runs to 175+
-    # rows and made the page roughly 14,000px tall. Critical items are
-    # already sorted first, then Low, then Adequate (see
-    # get_resource_status_summary), so showing only the first N still
-    # surfaces every Critical/Low item -- nothing that needs attention is
-    # hidden, only the long, unremarkable Adequate tail.
-    STOCK_HEALTH_DISPLAY_LIMIT = 20
+    # Finished-Goods Stock Health list overcrowding (pre-defense UI review;
+    # grouping/collapsible fix, client review 2026-11-10): with real
+    # client data across every branch, this list can run to 175+ rows and
+    # made the page roughly 14,000px tall.
+    #
+    # The original fix here sliced the first STOCK_HEALTH_DISPLAY_LIMIT
+    # items off the single combined list and claimed "Critical and Low
+    # items are always listed above" -- true only as long as Critical +
+    # Low together stayed under that limit. A branch with more Critical
+    # items than the limit (e.g. Alangilan's 56, see this view's own
+    # investigation notes) would silently have real Critical items cut
+    # off and folded into the "+N more at Adequate stock" count, which is
+    # the opposite of what that message claims. Capping each STATUS
+    # group separately, instead of slicing the combined list once, is
+    # what actually keeps that promise: Adequate is the only group ever
+    # hidden behind a "+N more" count; Critical/Low only grow their own
+    # "+N more" note if that one group itself is unusually long.
+    STATUS_GROUP_DISPLAY_LIMIT = 25
     resource_status = inventory_services.get_resource_status_summary(branch=selected_branch)
     resource_status_items = resource_status["items"]
-    resource_status_hidden_count = max(0, len(resource_status_items) - STOCK_HEALTH_DISPLAY_LIMIT)
-    resource_status["items"] = resource_status_items[:STOCK_HEALTH_DISPLAY_LIMIT]
+
+    critical_items = [item for item in resource_status_items if item.is_out_of_stock]
+    low_items = [item for item in resource_status_items if item.is_low_stock]
+    adequate_count = len(resource_status_items) - len(critical_items) - len(low_items)
+
+    resource_status["critical_items"] = critical_items[:STATUS_GROUP_DISPLAY_LIMIT]
+    resource_status["critical_hidden_count"] = max(
+        0, len(critical_items) - STATUS_GROUP_DISPLAY_LIMIT
+    )
+    resource_status["low_items"] = low_items[:STATUS_GROUP_DISPLAY_LIMIT]
+    resource_status["low_hidden_count"] = max(0, len(low_items) - STATUS_GROUP_DISPLAY_LIMIT)
+    resource_status["adequate_count"] = adequate_count
 
     return render(
         request,
@@ -155,7 +175,6 @@ def resource_management_dashboard(request):
             "consumption": consumption,
             "material_alerts": data["material_alerts"],
             "resource_status": resource_status,
-            "resource_status_hidden_count": resource_status_hidden_count,
             "category_labels_json": json.dumps(category_labels),
             "category_values_json": json.dumps(category_values),
         },

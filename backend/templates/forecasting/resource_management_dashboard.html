@@ -1,6 +1,24 @@
 {% extends "admin_base.html" %}
 {% load sanserveall_filters %}
+{% load humanize %}
 {% block admin_title %}Resource Management{% endblock %}
+
+{% block extra_css %}
+{{ block.super }}
+<style>
+  /* Finished-Goods Stock Health collapse toggle (client review,
+     2026-11-10): rotates the chevron glyph using Bootstrap's own
+     aria-expanded state on the trigger button -- no extra JS needed. */
+  #stockHealthToggle .jc-chevron {
+    display: inline-block;
+    transition: transform 0.15s ease;
+  }
+  #stockHealthToggle[aria-expanded="true"] .jc-chevron {
+    transform: rotate(90deg);
+  }
+</style>
+{% endblock %}
+
 {% block admin_content %}
 
 <div class="d-flex justify-content-between align-items-start mb-3">
@@ -37,21 +55,30 @@
 
 <div class="row g-4 mb-4">
     <div class="col-md-3">
-        <div class="jc-card p-3 p-md-4 text-center">
+        <div class="jc-card p-3 p-md-4 text-center d-flex flex-column h-100">
             <div class="jc-icon-chip jc-icon-chip-orange mx-auto mb-3">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
             </div>
             <div class="text-muted small">Total Units Used (30d)</div>
-            {% for u in consumption.units_used_by_unit %}
-            <div class="fs-5 fw-bold">{{ u.total|qty:u.unit }} {{ u.unit_display }}</div>
-            {% empty %}
-            <div class="fs-4 fw-bold">&mdash;</div>
-            {% endfor %}
+            {% comment %}
+              Layout fix (client review, 2026-11-10): one value per unit
+              (kg/L/pc -- never summed together, see
+              get_resource_consumption_summary's own docstring) shown
+              side by side in a single row instead of stacked, so this
+              card stays the same height as the other three.
+            {% endcomment %}
+            <div class="d-flex justify-content-center align-items-baseline gap-3 flex-wrap flex-grow-1">
+                {% for u in consumption.units_used_by_unit %}
+                <div class="fs-6 fw-bold">{{ u.total|qty:u.unit }} <span class="fw-normal text-muted">{{ u.unit_display }}</span></div>
+                {% empty %}
+                <div class="fs-4 fw-bold">&mdash;</div>
+                {% endfor %}
+            </div>
             <div class="text-muted small">See per-material breakdown below</div>
         </div>
     </div>
     <div class="col-md-3">
-        <div class="jc-card p-3 p-md-4 text-center">
+        <div class="jc-card p-3 p-md-4 text-center h-100">
             <div class="jc-icon-chip jc-icon-chip-teal mx-auto mb-3">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
             </div>
@@ -60,16 +87,16 @@
         </div>
     </div>
     <div class="col-md-3">
-        <div class="jc-card p-3 p-md-4 text-center">
+        <div class="jc-card p-3 p-md-4 text-center h-100">
             <div class="jc-icon-chip jc-icon-chip-sage mx-auto mb-3">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
             </div>
             <div class="text-muted small">Units Produced</div>
-            <div class="fs-4 fw-bold">{{ consumption.total_produced }}</div>
+            <div class="fs-4 fw-bold">{{ consumption.total_produced|intcomma }}</div>
         </div>
     </div>
     <div class="col-md-3">
-        <div class="jc-card p-3 p-md-4 text-center">
+        <div class="jc-card p-3 p-md-4 text-center h-100">
             <div class="jc-icon-chip jc-icon-chip-orange mx-auto mb-3">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>
             </div>
@@ -132,7 +159,19 @@
 
 <div class="jc-card p-3 p-md-4">
     <div class="d-flex justify-content-between align-items-center mb-3">
-        <div class="fw-semibold">Finished-Goods Stock Health</div>
+        {% comment %}
+          Collapsible section (client review, 2026-11-10): the header
+          itself is the toggle, defaulting to collapsed -- see the
+          "collapse" (no "show") class on #stockHealthBody below. The
+          chevron direction is driven purely by Bootstrap's own
+          aria-expanded attribute via CSS, no extra JS needed.
+        {% endcomment %}
+        <button type="button" class="btn btn-link p-0 text-decoration-none fw-semibold text-dark d-flex align-items-center gap-2"
+                data-bs-toggle="collapse" data-bs-target="#stockHealthBody" aria-expanded="false"
+                aria-controls="stockHealthBody" id="stockHealthToggle">
+            <span class="jc-chevron" aria-hidden="true">&#9656;</span>
+            Finished-Goods Stock Health
+        </button>
         <form method="get" style="min-width: 220px;">
             <select name="branch" class="form-select form-select-sm" onchange="this.form.submit()">
                 <option value="">All Branches</option>
@@ -142,6 +181,40 @@
             </select>
         </form>
     </div>
+
+    {% if selected_branch.is_kahero_branch %}
+    {% comment %}
+      Investigation finding (client review, 2026-11-10): confirmed by
+      code reading (not a live production query -- this environment
+      can't reach that database) that NO code path in this system ever
+      writes a real stock count for the KaHero branch's Inventory rows --
+      not real-time POS sales (apps.pos.services.complete_sale_payment
+      deliberately skips its deduction hook here), not the KaHero live
+      upload pipeline (apps.kahero_integration has no Inventory
+      reference at all), and not the one-time historical sales backfill
+      (apps.core's import_branch_sales_history, same). Every row sits
+      frozen at the zero the original Inventory-backfill migration set
+      it to. So a reading like "0% sufficiency, every product Critical"
+      here is NOT evidence of a real, total stock-out -- it reflects
+      that this branch's stock has simply never been tracked in this
+      system, not that it is actually empty. Flagged here, unconditionally
+      (even while the section below is collapsed), rather than treated
+      as a display bug to silently "fix" -- there's no stock data to
+      correct it with, and inventing a believable-looking number would
+      be worse than this honest, visible gap. The underlying stock
+      calculation itself is untouched; this is a data-coverage problem,
+      not a query bug.
+    {% endcomment %}
+    <div class="alert alert-warning py-2 px-3 small mb-3">
+        <strong>Not real stock data.</strong> {{ selected_branch.name }}'s finished-goods stock has
+        never been reconciled in this system -- sales here go through the KaHero batch-import
+        pipeline, which (like real-time POS) never updates Inventory records for this branch. The
+        Critical/Low/Adequate figures below reflect that gap, not a confirmed shortage. Use Inventory
+        Monitoring's Manual Stock Adjustment to record this branch's real counts if accurate figures
+        are needed here.
+    </div>
+    {% endif %}
+
     <div class="row g-3 mb-3">
         <div class="col-md-4">
             <div class="text-muted small">Overall Sufficiency</div>
@@ -156,29 +229,66 @@
             <div class="fs-5 fw-bold">{{ resource_status.low_count }}</div>
         </div>
     </div>
-    {% for item in resource_status.items %}
-    <div class="d-flex justify-content-between align-items-center py-2 {% if not forloop.last %}border-bottom{% endif %}">
-        <div>
-            <div class="fw-semibold">{{ item.product.name }}</div>
-            <div class="text-muted small">{{ item.display_quantity }} on hand &middot; {{ item.branch.name }}</div>
+
+    <div class="collapse" id="stockHealthBody">
+        {% if resource_status.critical_items %}
+        <div class="text-uppercase small fw-semibold text-muted mt-2 mb-1" style="letter-spacing: .03em;">
+            Critical ({{ resource_status.critical_count }})
         </div>
-        {% if item.is_out_of_stock %}
-        <span class="jc-badge jc-badge-critical">Critical</span>
-        {% elif item.is_low_stock %}
-        <span class="jc-badge jc-badge-low">Low</span>
-        {% else %}
-        <span class="jc-badge jc-badge-adequate">Adequate</span>
+        {% for item in resource_status.critical_items %}
+        <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+            <div>
+                <div class="fw-semibold">{{ item.product.name }}</div>
+                <div class="text-muted small">
+                    {{ item.display_quantity|qty:item.product.unit_of_measure }} {{ item.product.get_unit_of_measure_display }}
+                    on hand &middot; {{ item.branch.name }}
+                </div>
+            </div>
+            <span class="jc-badge jc-badge-critical">Critical</span>
+        </div>
+        {% endfor %}
+        {% if resource_status.critical_hidden_count %}
+        <p class="text-muted small mb-0 pt-2">
+            + {{ resource_status.critical_hidden_count }} more Critical item{{ resource_status.critical_hidden_count|pluralize }}
+            not shown. Export the report for the full list.
+        </p>
+        {% endif %}
+        {% endif %}
+
+        {% if resource_status.low_items %}
+        <div class="text-uppercase small fw-semibold text-muted mt-3 mb-1" style="letter-spacing: .03em;">
+            Low ({{ resource_status.low_count }})
+        </div>
+        {% for item in resource_status.low_items %}
+        <div class="d-flex justify-content-between align-items-center py-2 border-bottom">
+            <div>
+                <div class="fw-semibold">{{ item.product.name }}</div>
+                <div class="text-muted small">
+                    {{ item.display_quantity|qty:item.product.unit_of_measure }} {{ item.product.get_unit_of_measure_display }}
+                    on hand &middot; {{ item.branch.name }}
+                </div>
+            </div>
+            <span class="jc-badge jc-badge-low">Low</span>
+        </div>
+        {% endfor %}
+        {% if resource_status.low_hidden_count %}
+        <p class="text-muted small mb-0 pt-2">
+            + {{ resource_status.low_hidden_count }} more Low item{{ resource_status.low_hidden_count|pluralize }}
+            not shown. Export the report for the full list.
+        </p>
+        {% endif %}
+        {% endif %}
+
+        {% if not resource_status.critical_items and not resource_status.low_items %}
+        <p class="text-muted small mb-0 mt-2">No Critical or Low finished-goods stock for this selection.</p>
+        {% endif %}
+
+        {% if resource_status.adequate_count %}
+        <p class="text-muted small mb-0 pt-3">
+            + {{ resource_status.adequate_count }} item{{ resource_status.adequate_count|pluralize }} at Adequate stock not shown individually.
+        </p>
         {% endif %}
     </div>
-    {% empty %}
-    <p class="text-muted small mb-0">No finished-goods inventory tracked for this selection yet.</p>
-    {% endfor %}
-    {% if resource_status_hidden_count %}
-    <p class="text-muted small mb-0 pt-2">
-        + {{ resource_status_hidden_count }} more item{{ resource_status_hidden_count|pluralize }} at Adequate stock not shown.
-        Critical and Low items are always listed above.
-    </p>
-    {% endif %}
 </div>
 
 {% endblock %}
