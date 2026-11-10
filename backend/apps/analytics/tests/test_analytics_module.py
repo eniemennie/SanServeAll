@@ -627,17 +627,42 @@ class TestBranchPerformance:
         assert rows[0]["units_sold"] == 0
         assert rows[0]["orders"] == 0
 
-    def test_branch_with_only_old_batch_data_still_shows_its_real_numbers(
-        self, branch, cashier, latte
-    ):
-        """Task #136 (client review, 2026-11-04): Alangilan's real
-        scenario -- a branch updated only via periodic batch upload, not
-        live POS, whose last upload is now more than 30 days in the
-        past. It must show that branch's own real last period of
-        activity on the Branch Performance Overview card, not zeros, and
-        must not affect a sibling branch that DOES have recent activity
-        (each branch's window is anchored independently -- see
-        _trailing_window_anchor)."""
+    def test_a_sale_from_a_previous_month_is_not_counted(self, branch, cashier, latte):
+        """Client review (2026-11-10): the Branch Performance Overview
+        card is explicitly labeled "This month" (see admin_dashboard.html),
+        but used to run on _trailing_window_anchor's own trailing-30-days-
+        anchored-to-last-activity window instead of the real calendar
+        month -- so a 60-day-old sale could still count as part of "this
+        month"'s revenue, and a branch whose last real activity predated
+        the current month entirely would show that stale period's totals
+        mislabeled as this month's. (This superseded Task #136's old
+        "show Alangilan's last real period rather than zeros" fallback for
+        THIS specific card -- that fallback was right for a generic
+        trailing-N-days KPI, but wrong for one that promises a specific
+        calendar month: a branch with no sales yet this month genuinely
+        has Php0 revenue this month.) Now uses _current_month_window, so
+        a sale from a previous month must not count at all, even when
+        it's the branch's only sale."""
+        old_date = timezone.now() - timedelta(days=60)
+        _completed_sale(
+            branch,
+            cashier,
+            latte,
+            quantity=1,
+            unit_price="125.00",
+            amount_tendered="125.00",
+            when=old_date,
+        )
+
+        rows = {r["branch"].pk: r for r in services.get_branch_performance()}
+
+        assert rows[branch.pk]["revenue"] == Decimal("0.00")
+        assert rows[branch.pk]["units_sold"] == 0
+        assert rows[branch.pk]["orders"] == 0
+
+    def test_each_branchs_window_is_independent(self, branch, cashier, latte):
+        """A sale outside the current month at one branch must not
+        affect a sibling branch's own (real, this-month) numbers."""
         other_branch = Branch.objects.create(name="Batangas City", code="BATANGAS")
         other_cashier = User.objects.create_user(
             username="cashier2", password="testpass123", role=cashier.role, branch=other_branch
@@ -663,8 +688,7 @@ class TestBranchPerformance:
 
         rows = {r["branch"].pk: r for r in services.get_branch_performance()}
 
-        assert rows[branch.pk]["revenue"] == pytest.approx(125.00)
-        assert rows[branch.pk]["units_sold"] == 1
+        assert rows[branch.pk]["revenue"] == Decimal("0.00")
         assert rows[other_branch.pk]["revenue"] == pytest.approx(375.00)
 
     def test_revenue_reflects_transaction_wide_discount(self, branch, cashier, latte):
@@ -680,6 +704,82 @@ class TestBranchPerformance:
         )
         rows = {r["branch"].pk: r for r in services.get_branch_performance()}
         assert rows[branch.pk]["revenue"] == pytest.approx(400.00)
+
+    def test_toggles_actually_change_branch_performance_not_just_total_revenue(
+        self, branch, cashier, latte
+    ):
+        """Client review (2026-11-10): before get_branch_performance
+        accepted the same three toggles as get_sales_summary_with_
+        toggles, it always used grand_total regardless of which toggles
+        were active -- so flipping a toggle moved the Total Revenue KPI
+        but left every Branch Performance card completely unchanged,
+        guaranteeing a visible mismatch the moment an admin touched a
+        toggle. Confirms each toggle now actually changes this card's
+        own revenue figure."""
+        txn = SalesTransaction.objects.create(
+            branch=branch,
+            cashier=cashier,
+            status=SalesTransaction.Status.COMPLETED,
+            completed_at=timezone.now(),
+            transaction_discount_category="SENIOR",
+            transaction_discount_type="PERCENT",
+            transaction_discount_amount="20.00",
+        )
+        SalesItem.objects.create(transaction=txn, product=latte, unit_price="100.00", quantity=1)
+        SalesItem.objects.create(
+            transaction=txn, custom_name="Off-menu special", unit_price="50.00", quantity=1
+        )
+
+        default_rows = {r["branch"].pk: r for r in services.get_branch_performance()}
+        no_additional_rows = {
+            r["branch"].pk: r
+            for r in services.get_branch_performance(include_additional_sales=False)
+        }
+        no_discount_rows = {
+            r["branch"].pk: r for r in services.get_branch_performance(exclude_discounts=True)
+        }
+
+        # Default: (100 + 50) subtotal, 20% off = 120.00.
+        assert default_rows[branch.pk]["revenue"] == pytest.approx(120.00)
+        # Off-menu item excluded: 100 subtotal, 20% off = 80.00.
+        assert no_additional_rows[branch.pk]["revenue"] == pytest.approx(80.00)
+        # Discount reversed: 100 + 50 subtotal, no discount = 150.00.
+        assert no_discount_rows[branch.pk]["revenue"] == pytest.approx(150.00)
+
+    def test_total_revenue_matches_branch_performance_under_every_toggle(
+        self, branch, cashier, latte
+    ):
+        """The headline guarantee from the client review (2026-11-10)
+        audit: Total Revenue (the KPI card) must equal the sum of the
+        Branch Performance cards' own revenue, for every toggle
+        combination -- not just the defaults."""
+        txn = SalesTransaction.objects.create(
+            branch=branch,
+            cashier=cashier,
+            status=SalesTransaction.Status.COMPLETED,
+            completed_at=timezone.now(),
+            transaction_discount_category="SENIOR",
+            transaction_discount_type="PERCENT",
+            transaction_discount_amount="20.00",
+        )
+        SalesItem.objects.create(transaction=txn, product=latte, unit_price="100.00", quantity=1)
+        SalesItem.objects.create(
+            transaction=txn, custom_name="Off-menu special", unit_price="50.00", quantity=1
+        )
+
+        for kwargs in [
+            {},
+            {"include_additional_sales": False},
+            {"exclude_discounts": True},
+            {"exclude_vat": True},
+            {"include_additional_sales": False, "exclude_discounts": True, "exclude_vat": True},
+        ]:
+            branch_rows = services.get_branch_performance(**kwargs)
+            expected_total = sum((r["revenue"] for r in branch_rows), Decimal("0.00"))
+            total_revenue = services.get_sales_summary_with_toggles(branch=None, **kwargs)[
+                "total_revenue"
+            ]
+            assert total_revenue == expected_total, f"mismatch for toggles={kwargs}"
 
 
 class TestSyntheticAndHistoricalImportRevenueHandling:
@@ -869,22 +969,72 @@ class TestSalesSummaryWithToggles:
         assert inclusive["total_revenue"] == pytest.approx(112.00)
         assert exclusive["total_revenue"] == pytest.approx(100.00, abs=0.01)
 
-    def test_all_branches_total_matches_sum_of_branch_performance_with_batch_only_branch(
+    def test_percent_discount_is_quantized_like_grand_total(self, branch, cashier, latte):
+        """Client review (2026-11-10): the old inline discount math here
+        computed a PERCENT discount's value without quantize()ing it to
+        2 decimal places the way SalesTransaction.transaction_discount_
+        value (and so grand_total) already does -- a sub-centavo
+        precision mismatch between this function and get_branch_
+        performance's old grand_total-based figure. A 20% discount on
+        Php457.60 is the exact real-site regression case
+        (transaction_discount_value's own docstring): unquantized,
+        Decimal division/multiplication leaves extra places
+        (91.5200...), so this confirms the toggled result matches the
+        model's own already-correct, quantized math exactly."""
+        txn = SalesTransaction.objects.create(
+            branch=branch,
+            cashier=cashier,
+            status=SalesTransaction.Status.COMPLETED,
+            completed_at=timezone.now(),
+            transaction_discount_category="SC2",
+            transaction_discount_type="PERCENT",
+            transaction_discount_amount="20.00",
+        )
+        SalesItem.objects.create(transaction=txn, product=latte, unit_price="457.60", quantity=1)
+        txn.refresh_from_db()
+
+        result = services.get_sales_summary_with_toggles(branch=branch)
+        assert result["total_revenue"] == txn.grand_total
+
+    def test_a_sale_from_a_previous_month_is_excluded_from_total_revenue(
         self, branch, cashier, latte
     ):
-        """Task #161 (adviser dry-run, 2026-11-05): Alangilan's real
-        scenario -- a batch-only branch whose last upload is more than
-        `days` in the past -- was showing up on the Branch Performance
-        cards (which anchor per-branch, see
-        test_branch_with_only_old_batch_data_still_shows_its_real_numbers)
-        but NOT in the Total Revenue KPI, because
-        get_sales_summary_with_toggles(branch=None) anchored its single
-        window to timezone.now() for every branch combined, instead of
-        anchoring each branch independently the same way
-        get_branch_performance does. Total Revenue must equal the sum of
-        every branch's own Branch Performance revenue, for every
-        combination of the three toggles -- not just when every branch
-        happens to have recent activity."""
+        """Mirrors TestBranchPerformance's own current-month regression
+        test -- the Total Revenue KPI must honor the same real calendar-
+        month window, not the old trailing-30-days-anchored-to-last-
+        activity one."""
+        old_date = timezone.now() - timedelta(days=60)
+        _completed_sale(
+            branch, cashier, latte, quantity=1, unit_price="125.00", amount_tendered="125.00"
+        )
+        _completed_sale(
+            branch,
+            cashier,
+            latte,
+            quantity=1,
+            unit_price="999.00",
+            amount_tendered="999.00",
+            when=old_date,
+        )
+
+        result = services.get_sales_summary_with_toggles(branch=branch)
+        assert result["total_revenue"] == pytest.approx(125.00)
+        assert result["total_transactions"] == 1
+
+    def test_all_branches_total_matches_sum_of_branch_performance_with_a_quiet_branch(
+        self, branch, cashier, latte
+    ):
+        """Client review (2026-11-10): Total Revenue (branch=None) must
+        equal the sum of the Branch Performance cards' own revenue, for
+        every combination of the three toggles -- not just when every
+        branch happens to have activity this month. Originally written
+        for Task #161 (adviser dry-run, 2026-11-05)'s anchor-consistency
+        fix; now get_sales_summary_with_toggles(branch=None) is built
+        directly from get_branch_performance's own rows (see that
+        function's own docstring), so this is close to a tautology for
+        the default-toggles case, but still real coverage for the
+        per-branch, non-default-toggle path below, which uses its own
+        separate calculation for a single branch."""
         other_branch = Branch.objects.create(name="Batangas City", code="BATANGAS")
         other_cashier = User.objects.create_user(
             username="cashier2", password="testpass123", role=cashier.role, branch=other_branch

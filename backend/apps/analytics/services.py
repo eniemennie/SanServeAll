@@ -245,9 +245,98 @@ def get_weekly_sales_trend_by_branch(weeks=8):
     }
 
 
-def get_branch_performance(days=30):
+def _current_month_window():
+    """The Dashboard Home "This month" window (Branch Performance
+    Overview + Total Revenue card): the real calendar month so far, in
+    the business's own local time (settings.TIME_ZONE) -- from day 1,
+    00:00 through now.
+
+    Client review (2026-11-10): before this helper existed, both of
+    those sections actually used _trailing_window_anchor's own trailing-
+    30-days-anchored-to-last-activity window, despite the page's own
+    "This month" label -- a real sale from, say, 45 days ago could
+    still show up as part of "this month"'s revenue. Deliberately
+    separate from _trailing_window_anchor, and used ONLY by
+    get_branch_performance/get_sales_summary_with_toggles below --
+    every other screen that still wants a soft, activity-anchored
+    trailing window (the Sales Analytics trend chart, Reports Hub, the
+    demand-forecast baseline) is unaffected and keeps using
+    _trailing_window_anchor exactly as before. Unlike that helper, this
+    one never falls back to a branch's own older activity when nothing
+    happened yet this month -- "This month" promises a specific
+    calendar month, so a branch with zero sales so far this month
+    genuinely has Php0 revenue this month, not some older month's total
+    silently relabeled as this one.
+    """
+    now = timezone.localtime(timezone.now())
+    start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return start_of_month, now
+
+
+def _toggled_transaction_revenue(
+    txn, items, include_additional_sales, exclude_discounts, exclude_vat, vat_divisor
+):
+    """The one piece of math get_branch_performance and get_sales_
+    summary_with_toggles must share, so a per-branch card and the Total
+    Revenue KPI can never silently diverge on the exact same toggle
+    state (client review, 2026-11-10 -- before this helper existed,
+    get_branch_performance always used the untoggled grand_total
+    regardless of which toggles were on, while this function's own
+    inline copy of the same math applied them; flipping a toggle moved
+    Total Revenue but left every Branch Performance card completely
+    unchanged).
+
+    Also fixes a precision mismatch the old inline copy had: it
+    computed a PERCENT transaction-wide discount's value without
+    quantize()ing it to 2 decimal places the way SalesTransaction.
+    transaction_discount_value already does for grand_total -- a tiny
+    (sub-centavo) rounding difference that could otherwise compound
+    across many transactions. Quantizing here keeps this path
+    numerically identical to grand_total whenever no toggle actually
+    changes anything.
+
+    Returns (amount, counted_items) for one COMPLETED transaction, or
+    (None, []) when include_additional_sales=False strips every item
+    this transaction had (nothing left to count). `items` must already
+    be this transaction's full item list (so callers can prefetch once
+    and reuse it for their own units_sold tally)."""
+    if not include_additional_sales:
+        items = [i for i in items if i.product_id is not None]
+    if not items:
+        return None, []
+
+    subtotal = sum((i.subtotal for i in items), Decimal("0.00"))
+
+    if exclude_discounts:
+        amount = subtotal
+    else:
+        if txn.transaction_discount_amount and txn.transaction_discount_category:
+            if txn.transaction_discount_type == "PERCENT":
+                discount_value = (
+                    subtotal * (txn.transaction_discount_amount / Decimal("100"))
+                ).quantize(Decimal("0.01"))
+            else:
+                discount_value = txn.transaction_discount_amount
+            discount_value = min(discount_value, subtotal)
+        else:
+            discount_value = Decimal("0.00")
+        amount = subtotal - discount_value
+
+    if exclude_vat:
+        amount = amount / vat_divisor
+
+    return amount, items
+
+
+def get_branch_performance(
+    include_additional_sales=True, exclude_discounts=False, exclude_vat=False
+):
     """Per-branch Revenue / Units Sold / Orders for the Dashboard Home
-    Branch Performance cards (Fig. 3-19's three branch cards).
+    Branch Performance cards (Fig. 3-19's three branch cards), for the
+    current calendar month (see _current_month_window) and honoring the
+    same three Total Revenue toggles get_sales_summary_with_toggles
+    does -- see _toggled_transaction_revenue's own docstring for why
+    both must share this exact calculation.
 
     NOTE: the reference design's third figure is labeled "Production",
     but ProductionRecord has no branch FK -- production genuinely is
@@ -256,32 +345,44 @@ def get_branch_performance(days=30):
     production batch can't honestly be attributed to one branch). Rather
     than invent a number, Units Sold is used as the real,
     per-branch-derivable substitute for that third figure.
-
-    Revenue uses each transaction's discount-aware grand_total, same as
-    get_sales_summary -- see that function's docstring for why a raw
-    SalesItem SUM() overstates revenue on discounted sales.
     """
     from apps.accounts.models import Branch
 
+    since, until = _current_month_window()
+    tax_rate = BusinessSettings.load().tax_rate_percent
+    vat_divisor = Decimal("1") + (tax_rate / Decimal("100"))
+
     results = []
     for branch in Branch.objects.filter(is_active=True, is_commissary=False):
-        # Anchored per-branch (see _trailing_window_anchor) rather than
-        # once outside the loop -- a batch-only branch (Alangilan) needs
-        # its own window anchored to its own latest data, not to
-        # whichever branch happens to have live activity right now.
-        since = _trailing_window_anchor(branch) - timedelta(days=days)
         transactions = SalesTransaction.objects.filter(
             branch=branch, status=SalesTransaction.Status.COMPLETED, completed_at__gte=since
         )
-        transactions = list(_exclude_synthetic_transactions(transactions).prefetch_related("items"))
-        revenue = sum((txn.grand_total for txn in transactions), Decimal("0.00"))
-        units_sold = sum((item.quantity for txn in transactions for item in txn.items.all()), 0)
+        transactions = _exclude_synthetic_transactions(transactions).prefetch_related("items")
+
+        revenue = Decimal("0.00")
+        units_sold = 0
+        orders = 0
+        for txn in transactions:
+            amount, counted_items = _toggled_transaction_revenue(
+                txn,
+                list(txn.items.all()),
+                include_additional_sales,
+                exclude_discounts,
+                exclude_vat,
+                vat_divisor,
+            )
+            if amount is None:
+                continue
+            revenue += amount
+            units_sold += sum(i.quantity for i in counted_items)
+            orders += 1
+
         results.append(
             {
                 "branch": branch,
-                "revenue": revenue,
+                "revenue": revenue.quantize(Decimal("0.01")),
                 "units_sold": units_sold,
-                "orders": len(transactions),
+                "orders": orders,
             }
         )
     return results
@@ -289,13 +390,13 @@ def get_branch_performance(days=30):
 
 def get_sales_summary_with_toggles(
     branch=None,
-    days=30,
     include_additional_sales=True,
     exclude_discounts=False,
     exclude_vat=False,
 ):
-    """Dashboard Home's Total Revenue KPI card (Fig. 3-19), with the
-    three real toggles the reference design shows underneath it:
+    """Dashboard Home's Total Revenue KPI card (Fig. 3-19), for the
+    current calendar month (see _current_month_window), with the three
+    real toggles the reference design shows underneath it:
 
     - include_additional_sales: SalesItem rows with product=None are
       off-menu/custom items (Fig. 3-13's "Add Custom Product"). Toggling
@@ -319,104 +420,68 @@ def get_sales_summary_with_toggles(
     changing its behavior would be a real regression risk for no benefit
     to that screen, which doesn't have these toggles.
 
-    Task #161 (adviser dry-run, 2026-11-05): when branch is None ("All
-    Branches"), the window used to be anchored once to timezone.now()
-    for every branch's transactions combined. A batch-only branch (e.g.
-    Alangilan, updated via periodic upload rather than live POS -- see
-    _trailing_window_anchor) whose last upload is more than `days` in
-    the past then had ALL of its transactions fall outside that single
-    now-anchored window and silently contributed nothing to Total
-    Revenue -- while the Branch Performance cards (get_branch_
-    performance) anchor each branch independently to its OWN latest
-    activity and correctly include it. The result was Total Revenue !=
-    sum of the Branch Performance cards' own revenue figures whenever
-    any branch's last activity was more than `days` old.
-
-    Fixed by anchoring per branch, exactly like get_branch_performance:
-    when branch is None, the query is run once per active branch (each
-    with its own anchor) and the results are combined, rather than once
-    globally. A specific branch still resolves to a single query with
-    that branch's own anchor, unchanged from before.
+    Client review (2026-11-10): when branch is None ("All Branches"),
+    this now does nothing more than sum get_branch_performance's own
+    per-branch rows for the exact same toggles, rather than running a
+    second, independent query per branch the way it used to (Task #161,
+    2026-11-05) -- the two were already meant to use the same window and
+    the same math, and the most reliable way to guarantee Total Revenue
+    always equals the sum of the Branch Performance cards, under every
+    toggle combination, is to make Total Revenue BE that sum by
+    construction instead of trusting two separate calculations to agree.
+    A specific branch still resolves to its own single-branch
+    calculation via _toggled_transaction_revenue, unchanged in spirit
+    from before.
     """
+    since, until = _current_month_window()
+    days_elapsed = (until.date() - since.date()).days + 1
+
     if branch is None:
-        from apps.accounts.models import Branch
+        rows = get_branch_performance(
+            include_additional_sales=include_additional_sales,
+            exclude_discounts=exclude_discounts,
+            exclude_vat=exclude_vat,
+        )
+        total_revenue = sum((r["revenue"] for r in rows), Decimal("0.00"))
+        total_units_sold = sum(r["units_sold"] for r in rows)
+        total_transactions = sum(r["orders"] for r in rows)
+    else:
+        tax_rate = BusinessSettings.load().tax_rate_percent
+        vat_divisor = Decimal("1") + (tax_rate / Decimal("100"))
 
-        branches = list(Branch.objects.filter(is_active=True, is_commissary=False))
-        combined = {
-            "total_revenue": Decimal("0.00"),
-            "total_transactions": 0,
-            "total_units_sold": 0,
-            "average_daily_revenue": Decimal("0.00"),
-            "days": days,
-        }
-        for b in branches:
-            per_branch = get_sales_summary_with_toggles(
-                branch=b,
-                days=days,
-                include_additional_sales=include_additional_sales,
-                exclude_discounts=exclude_discounts,
-                exclude_vat=exclude_vat,
+        transactions = SalesTransaction.objects.filter(
+            status=SalesTransaction.Status.COMPLETED,
+            completed_at__gte=since,
+            branch=branch,
+        )
+        transactions = _exclude_synthetic_transactions(transactions).prefetch_related("items")
+
+        total_revenue = Decimal("0.00")
+        total_units_sold = 0
+        total_transactions = 0
+        for txn in transactions:
+            amount, counted_items = _toggled_transaction_revenue(
+                txn,
+                list(txn.items.all()),
+                include_additional_sales,
+                exclude_discounts,
+                exclude_vat,
+                vat_divisor,
             )
-            combined["total_revenue"] += per_branch["total_revenue"]
-            combined["total_transactions"] += per_branch["total_transactions"]
-            combined["total_units_sold"] += per_branch["total_units_sold"]
-            combined["average_daily_revenue"] += per_branch["average_daily_revenue"]
-        return combined
+            if amount is None:
+                continue
+            total_revenue += amount
+            total_units_sold += sum(i.quantity for i in counted_items)
+            total_transactions += 1
 
-    since = _trailing_window_anchor(branch) - timedelta(days=days)
-    transactions = SalesTransaction.objects.filter(
-        status=SalesTransaction.Status.COMPLETED,
-        completed_at__gte=since,
-        branch=branch,
-    )
-    transactions = _exclude_synthetic_transactions(transactions).prefetch_related("items")
-
-    tax_rate = BusinessSettings.load().tax_rate_percent
-    vat_divisor = Decimal("1") + (tax_rate / Decimal("100"))
-
-    total_revenue = Decimal("0.00")
-    total_units = 0
-    transaction_count = 0
-
-    for txn in transactions:
-        items = list(txn.items.all())
-        if not include_additional_sales:
-            items = [i for i in items if i.product_id is not None]
-        if not items and not include_additional_sales:
-            # Every item in this transaction was a custom/off-menu sale
-            # and we're excluding those -- nothing left to count from it.
-            continue
-
-        transaction_count += 1
-        subtotal = sum((i.subtotal for i in items), Decimal("0.00"))
-        total_units += sum(i.quantity for i in items)
-
-        if exclude_discounts:
-            amount = subtotal
-        else:
-            if txn.transaction_discount_amount and txn.transaction_discount_category:
-                if txn.transaction_discount_type == "PERCENT":
-                    discount_value = subtotal * (txn.transaction_discount_amount / Decimal("100"))
-                else:
-                    discount_value = txn.transaction_discount_amount
-                discount_value = min(discount_value, subtotal)
-            else:
-                discount_value = Decimal("0.00")
-            amount = subtotal - discount_value
-
-        if exclude_vat:
-            amount = amount / vat_divisor
-
-        total_revenue += amount
-
-    average_daily_revenue = (total_revenue / days) if days else Decimal("0.00")
+    average_daily_revenue = (total_revenue / days_elapsed) if days_elapsed else Decimal("0.00")
 
     return {
-        "total_revenue": total_revenue.quantize(Decimal("0.01")),
-        "total_transactions": transaction_count,
-        "total_units_sold": total_units,
+        "total_revenue": Decimal(total_revenue).quantize(Decimal("0.01")),
+        "total_transactions": total_transactions,
+        "total_units_sold": total_units_sold,
         "average_daily_revenue": average_daily_revenue.quantize(Decimal("0.01")),
-        "days": days,
+        "days": days_elapsed,
     }
 
 
