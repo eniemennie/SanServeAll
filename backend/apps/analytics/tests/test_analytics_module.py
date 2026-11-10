@@ -1317,6 +1317,88 @@ class TestReportsHubView:
         )
         assert without_range.context["trend_labels_json"] == with_range.context["trend_labels_json"]
 
+    def test_summary_cards_use_thousands_separators(self, owner_client, branch, cashier, latte):
+        """Client review (2026-11-10): Total Units Sold (Sales tab) and
+        Units Produced (Resource Consumption tab) previously rendered as
+        plain, unformatted numbers -- apply the same intcomma formatting
+        used everywhere else on this page (e.g. the peso filter)."""
+        # One transaction with a large quantity is enough to cross the
+        # four-digit threshold without creating hundreds of DB rows.
+        _completed_sale(
+            branch, cashier, latte, quantity=1234, unit_price="1.00", amount_tendered="1234.00"
+        )
+
+        content = owner_client.get(reverse("analytics:reports_hub")).content.decode()
+        assert "1,234" in content
+
+    def test_product_performance_table_has_search_and_show_all_toggle_past_ten_rows(
+        self, owner_client, branch, cashier
+    ):
+        """Section 2, client review (2026-11-10): more than 10 products
+        must get a search box and a "Show top 10 / Show all" toggle;
+        every row still renders (data untouched), rows past the 10th are
+        just initially hidden via report-row-extra d-none."""
+        for i in range(15):
+            product = Product.objects.create(name=f"Product {i:02d}", price="50.00")
+            _completed_sale(branch, cashier, product, 1, "50.00", "50.00")
+
+        response = owner_client.get(reverse("analytics:reports_hub"))
+        assert len(response.context["product_performance"]) == 15
+        content = response.content.decode()
+        assert 'id="productSearch"' in content
+        assert 'id="productShowAllToggle"' in content
+        assert "Show all (15)" in content
+        assert content.count('class="report-row report-row-extra d-none"') == 5
+        # Every product name is still present in the rendered HTML, not
+        # dropped -- the extra rows are hidden via CSS, not server-side.
+        for i in range(15):
+            assert f"Product {i:02d}" in content
+
+    def test_product_performance_table_has_no_toggle_at_ten_rows_or_fewer(
+        self, owner_client, branch, cashier, latte
+    ):
+        _completed_sale(branch, cashier, latte, 1, "125.00", "125.00")
+
+        content = owner_client.get(reverse("analytics:reports_hub")).content.decode()
+        assert 'id="productSearch"' not in content
+        assert 'id="productShowAllToggle"' not in content
+
+    def test_material_table_has_search_and_show_all_toggle_past_ten_rows(self, owner_client):
+        Branch.objects.create(name="Commissary", code="COMMISSARY", is_commissary=True)
+        role = Role.objects.create(name=Role.COMMISSARY_STAFF)
+        staff = User.objects.create_user(username="commissary1", password="testpass123", role=role)
+        cake = Product.objects.create(name="Cake", price="140.00")
+
+        for i in range(12):
+            material = Product.objects.create(
+                name=f"Material {i:02d}", price="10.00", product_type=Product.ProductType.MATERIAL
+            )
+            record = ProductionRecord.objects.create(
+                commissary_staff=staff, product=cake, quantity_produced=1
+            )
+            IngredientUsage.objects.create(
+                production_record=record, material=material, quantity_used=1
+            )
+
+        response = owner_client.get(reverse("analytics:reports_hub"))
+        assert len(response.context["consumption"]["by_material"]) == 12
+        content = response.content.decode()
+        assert 'id="materialSearch"' in content
+        assert 'id="materialShowAllToggle"' in content
+        assert "Show all (12)" in content
+        assert content.count('class="report-row report-row-extra d-none"') == 2
+
+    def test_data_coverage_note_shown_on_sales_tab(self, owner_client):
+        """Investigation finding (client review, 2026-11-10): the
+        Sales & Trend tab must clearly flag that the client's own
+        historical sales records stop at 2026-09-30 (verified directly
+        against Batangas/Lipa/Alangilan Sales_2024-2026.xlsx), so a flat
+        or near-zero stretch after that date isn't mistaken for either a
+        query bug or a confirmed total sales stop."""
+        content = owner_client.get(reverse("analytics:reports_hub")).content.decode()
+        assert "Data coverage note." in content
+        assert "September 30, 2026" in content
+
 
 class TestResolveReportWindowAndServicesWithExplicitDateRange:
     """Task #146 (client review, 2026-11-04): service-level coverage for
