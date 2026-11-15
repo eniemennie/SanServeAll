@@ -748,7 +748,7 @@ def get_low_stock_alert_count(branch):
     return len(items)
 
 
-def get_sales_history(branch=None, cashier_id=None, date_from=None, date_to=None):
+def get_sales_history(branch=None, cashier_id=None, date_from=None, date_to=None, product_id=None):
     """Transaction-level Sales History (backend gap assessment: "add a
     filterable sales-history view (branch/cashier/date)"). Unlike the
     other functions in this module, which aggregate across many
@@ -773,6 +773,16 @@ def get_sales_history(branch=None, cashier_id=None, date_from=None, date_to=None
     the business's own local time (settings.TIME_ZONE), matching how an
     Owner/Admin actually thinks about "show me Tuesday's sales" rather
     than requiring them to reason about UTC boundaries.
+
+    `product_id` (panel revision, 2026-11-15 -- "verify whether users can
+    filter historical sales data based on the selected date range,
+    branch, and product"): a transaction is included if ANY of its
+    SalesItem rows is for that product -- this is a transaction-level
+    view, not a line-item view, so filtering by product surfaces every
+    sale that *included* it, same granularity as the branch/cashier
+    filters above. `.distinct()` guards against a transaction matching
+    more than once if it somehow has multiple line items for the same
+    product (e.g. added separately with different modifiers).
     """
     qs = (
         SalesTransaction.objects.filter(status=SalesTransaction.Status.COMPLETED)
@@ -789,6 +799,8 @@ def get_sales_history(branch=None, cashier_id=None, date_from=None, date_to=None
         qs = qs.filter(completed_at__date__gte=date_from)
     if date_to:
         qs = qs.filter(completed_at__date__lte=date_to)
+    if product_id:
+        qs = qs.filter(items__product_id=product_id).distinct()
 
     return qs.order_by("-completed_at")
 
@@ -827,3 +839,21 @@ def get_cashiers_with_sales_history():
         .distinct()
     )
     return get_user_model().objects.filter(pk__in=cashier_ids).order_by("username")
+
+
+def get_products_with_sales_history():
+    """Products to offer in the Sales History filter dropdown (panel
+    revision, 2026-11-15 -- see get_sales_history's product_id docstring).
+    Mirrors get_cashiers_with_sales_history: only products that appear on
+    at least one COMPLETED, non-synthetic transaction, same reasoning --
+    a product that only ever "sold" through the forecast-coverage
+    backfill bot has no real sale to show in this audit view, so it has
+    no business being offered as a filter here either."""
+    product_ids = (
+        _exclude_synthetic_transactions(
+            SalesTransaction.objects.filter(status=SalesTransaction.Status.COMPLETED)
+        )
+        .values_list("items__product_id", flat=True)
+        .distinct()
+    )
+    return Product.objects.filter(pk__in=product_ids).order_by("name")

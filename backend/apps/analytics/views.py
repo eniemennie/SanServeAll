@@ -328,6 +328,7 @@ def sales_history(request):
     selected_branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
 
     cashier_id = request.GET.get("cashier") or None
+    product_id = request.GET.get("product") or None
 
     date_from_raw = request.GET.get("date_from") or ""
     date_to_raw = request.GET.get("date_to") or ""
@@ -352,6 +353,7 @@ def sales_history(request):
             cashier_id=cashier_id,
             date_from=date_from,
             date_to=date_to,
+            product_id=product_id,
         )
         page_obj = Paginator(results, 25).get_page(request.GET.get("page"))
         transactions = page_obj.object_list
@@ -368,6 +370,8 @@ def sales_history(request):
             "selected_branch": selected_branch,
             "cashiers": services.get_cashiers_with_sales_history(),
             "selected_cashier_id": int(cashier_id) if cashier_id else None,
+            "products": services.get_products_with_sales_history(),
+            "selected_product_id": int(product_id) if product_id else None,
             "date_from": date_from_raw,
             "date_to": date_to_raw,
             "date_error": date_error,

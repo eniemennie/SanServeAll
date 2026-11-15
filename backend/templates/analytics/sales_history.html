@@ -29,6 +29,15 @@
         </select>
     </div>
     <div class="col-auto">
+        <label class="form-label small fw-semibold mb-1">Product</label>
+        <select name="product" class="form-select form-select-sm">
+            <option value="">All Products</option>
+            {% for p in products %}
+            <option value="{{ p.pk }}" {% if selected_product_id == p.pk %}selected{% endif %}>{{ p.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-auto">
         <label class="form-label small fw-semibold mb-1">From</label>
         <input type="date" name="date_from" class="form-control form-control-sm" value="{{ date_from }}">
     </div>
