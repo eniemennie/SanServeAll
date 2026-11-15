@@ -117,15 +117,25 @@ def _fill_probability_for(day_date):
 def plan_hero_pair(branch, product):
     """Read-only: looks at the REAL daily series for this pair over the
     last DAYS_BACK days and returns the list of (date, quantity) that
-    would be created -- only on days the real series shows as zero."""
+    would be created -- only on days the real series shows as zero.
+
+    Matches by calendar date (idx.date()), not by reconstructing a
+    timestamp to look up directly. build_daily_sales_series anchors its
+    index to UTC midnight (timezone.now() is UTC-aware; .replace(hour=0)
+    zeroes the UTC hour, not the local one), while a naive
+    timezone.make_aware(...) here would anchor to Asia/Manila midnight --
+    an 8-hour offset that makes every key miss by a day and every
+    lookup silently return "not found". Caught via debug_hero_lookup.py
+    returning 0 candidates for every single hero pair on the first live
+    dry run (2026-11-15) -- confirmed the series itself had hundreds of
+    real zero days, so the lookup, not the data, was wrong."""
     today = timezone.localdate()
     series = build_daily_sales_series(branch, product, days_history=365)
+    zero_dates = {idx.date() for idx, qty in series.items() if qty == 0}
     candidates = []
     for offset in range(DAYS_BACK, 0, -1):
         day = today - timezone.timedelta(days=offset)
-        ts = timezone.make_aware(timezone.datetime(day.year, day.month, day.day))
-        existing_qty = series.get(ts, None)
-        if existing_qty is None or existing_qty != 0:
+        if day not in zero_dates:
             continue  # already has a real sale (or outside the series range) -- never touch it
         if random.random() > _fill_probability_for(day):
             continue  # deliberately left as a zero day, for realism
