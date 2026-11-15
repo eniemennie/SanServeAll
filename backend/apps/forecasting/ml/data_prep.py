@@ -11,7 +11,7 @@ from django.utils import timezone
 from apps.pos.models import SalesItem, SalesTransaction
 
 
-def build_daily_sales_series(branch, product, days_history=90):
+def build_daily_sales_series(branch, product, days_history=365):
     """Returns a pandas Series indexed by date (daily frequency), values
     are total units of `product` sold at `branch` that day.
 
@@ -25,6 +25,19 @@ def build_daily_sales_series(branch, product, days_history=90):
     Days with ZERO sales are filled in explicitly -- Holt-Winters needs a
     regular, gap-free time index. A day with no sales is a real data
     point (demand was zero that day), not a missing one.
+
+    `days_history` default widened from 90 to 365 (capstone panel
+    revision, 2026-11-14): the 90-day window was discarding real sales
+    history past ~3 months back even though the client's actual imported
+    data runs Jan 2024-Sept 2026. Widening to a full year surfaces real,
+    already-existing data to Holt-Winters -- a longer, more convincing
+    trend and a fuller weekly-seasonality picture -- without fabricating
+    anything. No other code needed to change: has_sufficient_history's
+    14-day/3-non-zero-day floor and forecast_model.MINIMUM_SEASONAL_CYCLES
+    are both independent of window length, and holt_winters.fit/forecast
+    already work for any window length, not just 90 (see that module's
+    own docstring on the seasonal-phase-alignment fix, which generalizes
+    to any `len(series) % m`, not just 90 % 7).
     """
     today_midnight = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
     end_date = today_midnight  # exclusive upper bound

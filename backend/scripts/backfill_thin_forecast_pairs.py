@@ -123,11 +123,15 @@ MANIFEST_PATH = Path(__file__).resolve().parent / "synthetic_backfill_manifest.j
 BOT_USERNAME = "synthetic_backfill_bot"
 
 # Mirrors apps.forecasting.ml.data_prep.has_sufficient_history and
-# build_daily_sales_series's own defaults -- not redefined independently,
-# so this script can never silently drift from what the forecasting
-# code actually requires.
+# build_daily_sales_series's own defaults. These are plain constants, not
+# imported from data_prep's own default, so they MUST be kept in sync by
+# hand whenever that default changes -- updated 90 -> 365 alongside the
+# 2026-11-14 window-widening change; if data_prep's default ever changes
+# again without updating this, this script would silently judge
+# "under-served" against a different window than production forecasts
+# actually use.
 MINIMUM_NON_ZERO_DAYS = 3
-DAYS_HISTORY = 90
+DAYS_HISTORY = 365
 
 # Fixed seed -- reproducible which days/quantities get chosen, same
 # spirit as seed_sample_operations_data.py's own random.seed().

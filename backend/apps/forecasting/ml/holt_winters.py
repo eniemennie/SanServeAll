@@ -127,9 +127,11 @@ def forecast(fit_result, steps):
     only when `len(y)` happens to be an exact multiple of `m` (every
     existing test used `np.tile(pattern, k)`, which is always a multiple
     of m -- the bug had no test that could have caught it). In
-    production, build_daily_sales_series always fits a fixed 90-day
-    window, and 90 % 7 == 6, not 0 -- every real forecast was shifting
-    the weekly pattern (e.g. the weekend spike) onto the wrong days.
+    production, build_daily_sales_series fits a fixed window (90 days
+    originally, widened to 365 on 2026-11-14 -- see that function's own
+    docstring), and neither 90 % 7 nor 365 % 7 is 0 -- every real
+    forecast was shifting the weekly pattern (e.g. the weekend spike)
+    onto the wrong days, regardless of which window length is in use.
 
     Fit's recurrence updates `seasonal[t % m]` for t in range(n) (see
     _fit_with_params), so the phase immediately after the last fitted
