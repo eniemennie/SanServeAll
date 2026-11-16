@@ -125,6 +125,18 @@ class TestGetSalesHistoryService:
         results = list(services.get_sales_history())
         assert results == [imported_sale]
 
+    def test_filters_by_product(self, branches, cashiers, latte):
+        """Panel revision (2026-11-15): "verify whether users can filter
+        historical sales data based on the selected date range, branch,
+        and product." A transaction is included if it has a SalesItem
+        for that product, regardless of what else is on the sale."""
+        mocha = Product.objects.create(name="Mocha Latte", price="130.00")
+        latte_sale = _sale(branches["batangas"], cashiers["alex"], latte)
+        _sale(branches["batangas"], cashiers["alex"], mocha)
+
+        results = list(services.get_sales_history(product_id=latte.pk))
+        assert results == [latte_sale]
+
     def test_filters_by_date_range_inclusive(self, branches, cashiers, latte):
         # get_sales_history's date_from/date_to are calendar dates in the
         # business's own local time (settings.TIME_ZONE="Asia/Manila", see
@@ -200,6 +212,35 @@ class TestGetCashiersWithSalesHistoryService:
         assert names == ["historical_import_batangas"]
 
 
+class TestGetProductsWithSalesHistoryService:
+    def test_only_includes_products_with_a_completed_sale(self, branches, cashiers, latte):
+        mocha = Product.objects.create(name="Mocha Latte", price="130.00")
+        _sale(branches["batangas"], cashiers["alex"], latte)
+        # mocha has never been sold
+
+        names = list(services.get_products_with_sales_history().values_list("name", flat=True))
+        assert names == [latte.name]
+        assert mocha.name not in names
+
+    def test_excludes_products_only_sold_by_the_synthetic_backfill_bot(
+        self, branches, cashiers, latte
+    ):
+        """Mirrors TestGetCashiersWithSalesHistoryService's own guard: a
+        product that only ever "sold" through the forecast-coverage
+        backfill bot has nothing real to show here, so it must not be
+        offered as a filter either."""
+        role = Role.objects.create(name=Role.OWNER_ADMIN)
+        bot = User.objects.create_user(
+            username=User.SYNTHETIC_BACKFILL_BOT_USERNAME, role=role, branch=None
+        )
+        mocha = Product.objects.create(name="Mocha Latte", price="130.00")
+        _sale(branches["batangas"], cashiers["alex"], latte)
+        _sale(branches["batangas"], bot, mocha)
+
+        names = list(services.get_products_with_sales_history().values_list("name", flat=True))
+        assert names == [latte.name]
+
+
 class TestSalesHistoryView:
     def test_owner_can_view_the_page(self, owner_client, branches, cashiers, latte):
         _sale(branches["batangas"], cashiers["alex"], latte)
@@ -248,6 +289,15 @@ class TestSalesHistoryView:
         )
         assert response.status_code == 200
         assert list(response.context["transactions"]) == [in_lipa]
+
+    def test_product_filter_narrows_results(self, owner_client, branches, cashiers, latte):
+        mocha = Product.objects.create(name="Mocha Latte", price="130.00")
+        latte_sale = _sale(branches["batangas"], cashiers["alex"], latte)
+        _sale(branches["batangas"], cashiers["alex"], mocha)
+
+        response = owner_client.get(reverse("analytics:sales_history"), {"product": latte.pk})
+        assert response.status_code == 200
+        assert list(response.context["transactions"]) == [latte_sale]
 
     def test_invalid_date_shows_error_and_no_results(self, owner_client, branches, cashiers, latte):
         _sale(branches["batangas"], cashiers["alex"], latte)
