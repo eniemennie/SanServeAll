@@ -131,20 +131,27 @@
     {% endif %}
     <div class="jc-card p-3 p-md-4">
         <div class="fw-semibold mb-2">Sales &amp; Trend Analysis</div>
-        <div class="text-muted small mb-2">Always shows the last 8 weeks, ending today -- a short custom range doesn't divide meaningfully into weekly points, so this chart doesn't follow the date filter above (see "Showing data for" below the tabs for what the summary cards and other tabs use instead).</div>
+        <!-- Panel request (2026-11-17): this chart now follows the
+             Period/From/To filter above instead of always showing a
+             fixed last-8-weeks window -- see get_sales_trend. The
+             bucket size shown here comes straight from
+             trend_granularity (set by that same function), so this
+             caption can never drift out of sync with what's actually
+             plotted. -->
+        <div class="text-muted small mb-2">Reflects the date range selected above, grouped by {% if trend_granularity == "day" %}day{% elif trend_granularity == "week" %}week{% else %}month{% endif %} depending on the range length (see "Showing data for" below the tabs for the exact window).</div>
         {% comment %}
           Investigation finding (client review, 2026-11-10): verified
           directly against the client's own source workbooks
           (Batangas/Lipa/Alangilan Sales_2024-2026.xlsx), not just this
           app's own data -- every one of them stops at 2026-09-30, the
           same point where this chart's revenue line drops to flat. This
-          isn't a query bug (get_weekly_sales_trend/get_sales_summary
-          both read every COMPLETED, non-synthetic transaction
-          correctly); the client's real historical dataset simply has no
-          recorded sales past that date. Any nonzero revenue shown after
-          it comes only from transactions entered live into the deployed
-          app since then, not from the client's own records -- flagged
-          here rather than silently treated as a display issue, since a
+          isn't a query bug (get_sales_trend/get_sales_summary both read
+          every COMPLETED, non-synthetic transaction correctly); the
+          client's real historical dataset simply has no recorded sales
+          past that date. Any nonzero revenue shown after it comes only
+          from transactions entered live into the deployed app since
+          then, not from the client's own records -- flagged here
+          rather than silently treated as a display issue, since a
           near-total revenue gap spanning most of a recent 30-day window
           is worth the client's attention either way (either sales
           genuinely stopped, or daily sales simply haven't been recorded
