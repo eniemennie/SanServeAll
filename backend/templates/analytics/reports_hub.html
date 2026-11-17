@@ -172,6 +172,25 @@
     <p class="text-muted small mb-2">
         Branch: <strong>{{ selected_branch.name|default:"All Branches" }}</strong>
     </p>
+    {% if not product_performance %}
+    <!-- Investigation finding (client review, 2026-11-17): a period can
+         show real revenue on Sales & Trend yet nothing here -- confirmed
+         against production data this isn't a query bug. The historical-
+         sales import (import_branch_sales_history) records one
+         aggregate "Store Sales (Imported)" revenue row per branch per
+         day, with no product attached at all -- Sales & Trend sums
+         every sale regardless, but this table deliberately excludes
+         product=None rows (see get_product_performance's own docstring
+         on why counting them here would misaggregate, not just double
+         count). A period made up entirely of imported sales has no
+         per-product detail to show, by design of what was imported. -->
+    <div class="alert alert-secondary py-2 px-3 small mb-3">
+        No product-level sales for this period. If Sales &amp; Trend above shows revenue for the
+        same range, it's most likely from the historical sales import, which recorded only
+        aggregate daily revenue per branch -- not a per-product breakdown -- so there's nothing to
+        show here for that data, not a missing or broken filter.
+    </div>
+    {% endif %}
     <div class="jc-card p-3 p-md-4 mb-3">
         <canvas id="productPerformanceChart" height="90"></canvas>
     </div>
@@ -220,6 +239,22 @@
 </div>
 
 <div id="panel-resources" class="report-panel d-none">
+    {% if not consumption.total_produced %}
+    <!-- Same investigation finding as Product Performance's note above,
+         confirmed against production data: Resource Consumption reads
+         ProductionRecord/IngredientUsage only -- there's no link to
+         SalesTransaction at all, so this tab has nothing to do with
+         whether Sales & Trend shows revenue for the same period. Real
+         batch/production tracking in this system only starts
+         2026-05-04; any period entirely before that is correctly empty
+         here, not a sign of a missing query. -->
+    <div class="alert alert-secondary py-2 px-3 small mb-3">
+        No production recorded for this period. Batch/production tracking in this system only
+        began May 2026 -- a period before that is expected to show nothing here, even if Sales &amp;
+        Trend above shows real revenue for the same range (that revenue comes from the separate
+        historical sales import, which has no production records behind it).
+    </div>
+    {% endif %}
     <div class="row g-4 mb-3">
         <div class="col-md-3">
             <div class="jc-card p-3 p-md-4 text-center h-100">
@@ -284,6 +319,18 @@
 </div>
 
 <div id="panel-operational" class="report-panel d-none">
+    {% if not operational.total_batches %}
+    <!-- Same investigation finding as the Resource Consumption note
+         above -- Operational Performance also reads ProductionRecord
+         only, independent of SalesTransaction, and real batch tracking
+         only starts 2026-05-04. -->
+    <div class="alert alert-secondary py-2 px-3 small mb-3">
+        No batches recorded for this period. Batch/production tracking in this system only began
+        May 2026 -- a period before that is expected to show "&mdash;" here, even if Sales &amp;
+        Trend above shows real revenue for the same range (that revenue comes from the separate
+        historical sales import, which has no batch records behind it).
+    </div>
+    {% endif %}
     <div class="row g-4">
         <div class="col-md-4">
             <div class="jc-card p-3 p-md-4 text-center h-100">
