@@ -14,24 +14,38 @@
              current filters (branch/days/date range) so the download
              always matches what's on screen, by reusing the exact same
              query-param names reports_hub itself reads. -->
-        <a href="{% url 'analytics:reports_hub_export' %}?branch={{ selected_branch.pk|default:'' }}&amp;days={{ days }}&amp;date_from={{ date_from }}&amp;date_to={{ date_to }}" class="btn btn-sm" style="background: var(--jc-orange); color: #fff;">Download Excel</a>
+        <a href="{% url 'analytics:reports_hub_export' %}?branch={{ selected_branch.pk|default:'' }}&amp;period={{ period }}&amp;days={{ days }}&amp;date_from={{ date_from }}&amp;date_to={{ date_to }}" class="btn btn-sm" style="background: var(--jc-orange); color: #fff;">Download Excel</a>
         <form method="get" class="d-flex align-items-end flex-wrap gap-2">
             <input type="hidden" name="branch" value="{{ selected_branch.pk|default:'' }}">
+            <!-- Panel request (2026-11-17): named, calendar-based presets
+                 replace the old Last 7/30/90 Days dropdown. Picking one
+                 submits immediately and overrides whatever is in the From/
+                 To inputs below (see _resolve_reports_hub_filters). "Custom
+                 Range" keeps today's existing manual-dates behavior. -->
+            <div>
+                <label class="form-label small fw-semibold mb-1">Period</label>
+                <select name="period" id="periodSelect" class="form-select form-select-sm" style="max-width: 160px;" onchange="this.form.submit()">
+                    <option value="this_month" {% if period == "this_month" %}selected{% endif %}>This Month</option>
+                    <option value="last_3_months" {% if period == "last_3_months" %}selected{% endif %}>Last 3 Months</option>
+                    <option value="last_6_months" {% if period == "last_6_months" %}selected{% endif %}>Last 6 Months</option>
+                    <option value="this_year" {% if period == "this_year" %}selected{% endif %}>This Year</option>
+                    <option value="custom" {% if period == "custom" %}selected{% endif %}>Custom Range</option>
+                </select>
+            </div>
             <div>
                 <label class="form-label small fw-semibold mb-1">From</label>
-                <input type="date" name="date_from" class="form-control form-control-sm" value="{{ date_from }}">
+                <!-- Editing either date directly means "I want a custom
+                     range" even if the dropdown above still reads an
+                     earlier preset -- flip it to Custom Range so Apply
+                     Range submits period=custom with these dates, instead
+                     of a preset silently overriding what was just typed. -->
+                <input type="date" name="date_from" class="form-control form-control-sm" value="{{ date_from }}" onchange="document.getElementById('periodSelect').value='custom';">
             </div>
             <div>
                 <label class="form-label small fw-semibold mb-1">To</label>
-                <input type="date" name="date_to" class="form-control form-control-sm" value="{{ date_to }}">
+                <input type="date" name="date_to" class="form-control form-control-sm" value="{{ date_to }}" onchange="document.getElementById('periodSelect').value='custom';">
             </div>
             <button type="submit" class="btn btn-sm" style="background: var(--jc-orange); color: #fff;">Apply Range</button>
-            <span class="text-muted small mx-1">or</span>
-            <select name="days" class="form-select form-select-sm" style="max-width: 160px;" onchange="this.form.submit()">
-                <option value="7" {% if days == 7 %}selected{% endif %}>Last 7 Days</option>
-                <option value="30" {% if days == 30 %}selected{% endif %}>Last 30 Days</option>
-                <option value="90" {% if days == 90 %}selected{% endif %}>Last 90 Days</option>
-            </select>
         </form>
     </div>
 </div>
@@ -65,7 +79,15 @@
 
 <p class="text-muted small mb-3">
     Showing data for:
-    {% if using_custom_range %}
+    {% if period == "this_month" %}
+    <strong>This Month</strong> ({{ date_from }} to {{ date_to }})
+    {% elif period == "last_3_months" %}
+    <strong>Last 3 Months</strong> ({{ date_from }} to {{ date_to }})
+    {% elif period == "last_6_months" %}
+    <strong>Last 6 Months</strong> ({{ date_from }} to {{ date_to }})
+    {% elif period == "this_year" %}
+    <strong>This Year</strong> ({{ date_from }} to {{ date_to }})
+    {% elif using_custom_range %}
     <strong>{{ date_from }} to {{ date_to }}</strong>
     {% else %}
     <strong>Last {{ days }} Days</strong>
@@ -93,6 +115,9 @@
             </div>
         </div>
     </div>
+    {% if sales_summary.total_transactions == 0 %}
+    <div class="alert alert-secondary py-2 px-3 small mb-3">No sales were recorded for this period.</div>
+    {% endif %}
     <div class="jc-card p-3 p-md-4">
         <div class="fw-semibold mb-2">Sales &amp; Trend Analysis</div>
         <div class="text-muted small mb-2">Always shows the last 8 weeks, ending today -- a short custom range doesn't divide meaningfully into weekly points, so this chart doesn't follow the date filter above (see "Showing data for" below the tabs for what the summary cards and other tabs use instead).</div>

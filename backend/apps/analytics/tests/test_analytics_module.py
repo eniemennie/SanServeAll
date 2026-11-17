@@ -13,6 +13,7 @@ from django.utils import timezone
 
 from apps.accounts.models import Branch, Role, User
 from apps.analytics import services
+from apps.analytics import views as analytics_views
 from apps.inventory.models import Product
 from conftest import verify_otp_for_client
 from apps.pos.models import SalesItem, SalesTransaction
@@ -1130,6 +1131,52 @@ class TestWeeklySalesTrendByBranch:
         assert series["revenue"][0] == pytest.approx(400.00)
 
 
+class TestPresetPeriodRange:
+    """Pure-function tests for the Reports Hub's named-preset date math
+    (apps.analytics.views), independent of the view/DB -- pins down the
+    exact calendar boundaries with a fixed `today` rather than relying
+    on whatever day the suite happens to run."""
+
+    def test_this_month_starts_on_the_1st_of_the_current_month(self):
+        today = date(2026, 11, 17)
+        start, end = analytics_views._preset_period_range("this_month", today=today)
+        assert start == date(2026, 11, 1)
+        assert end == today
+
+    def test_last_3_months_spans_exactly_three_calendar_months(self):
+        """Opened in November, "Last 3 Months" should read as
+        September-October-November (3 months), not a rolling 90 days."""
+        today = date(2026, 11, 17)
+        start, end = analytics_views._preset_period_range("last_3_months", today=today)
+        assert start == date(2026, 9, 1)
+        assert end == today
+
+    def test_last_6_months_spans_exactly_six_calendar_months(self):
+        today = date(2026, 11, 17)
+        start, end = analytics_views._preset_period_range("last_6_months", today=today)
+        assert start == date(2026, 6, 1)
+        assert end == today
+
+    def test_this_year_starts_on_january_1st(self):
+        today = date(2026, 11, 17)
+        start, end = analytics_views._preset_period_range("this_year", today=today)
+        assert start == date(2026, 1, 1)
+        assert end == today
+
+    def test_last_months_preset_crosses_a_year_boundary_correctly(self):
+        """Opened in February, "Last 6 Months" must roll back into the
+        previous calendar year (September) rather than wrapping to an
+        invalid month number."""
+        today = date(2027, 2, 10)
+        start, end = analytics_views._preset_period_range("last_6_months", today=today)
+        assert start == date(2026, 9, 1)
+        assert end == today
+
+    def test_unknown_period_is_rejected(self):
+        with pytest.raises(ValueError):
+            analytics_views._preset_period_range("not-a-real-period")
+
+
 class TestReportsHubView:
     """Reports & Export batch: the new hub combining all four real
     report datasets (Sales & Trend, Product Performance, Resource
@@ -1303,6 +1350,93 @@ class TestReportsHubView:
         response = owner_client.get(reverse("analytics:reports_hub"), {"days": 7})
         assert response.context["using_custom_range"] is False
         assert response.context["days"] == 7
+
+    def test_default_load_defaults_to_this_month_preset(self, owner_client):
+        """Panel request (2026-11-17): the page's first load (no period,
+        no dates, no days at all) retains a reasonable default --
+        This Month -- rather than an unlabeled trailing 30 days."""
+        response = owner_client.get(reverse("analytics:reports_hub"))
+        today = timezone.localdate()
+        assert response.context["period"] == "this_month"
+        assert response.context["date_from"] == today.replace(day=1).isoformat()
+        assert response.context["date_to"] == today.isoformat()
+
+    def test_days_only_link_keeps_legacy_days_behavior_not_a_preset(self, owner_client):
+        """An old bookmarked ?days=7 link (back-compat, no period) must
+        not be mistaken for a named preset -- the days-based trailing
+        window still applies exactly as before this change."""
+        response = owner_client.get(reverse("analytics:reports_hub"), {"days": 7})
+        assert response.context["period"] == "days"
+
+    def test_each_named_preset_resolves_to_its_own_calendar_range(self, owner_client):
+        today = timezone.localdate()
+        cases = {
+            "this_month": date(today.year, today.month, 1),
+            "this_year": date(today.year, 1, 1),
+        }
+        for period, expected_start in cases.items():
+            response = owner_client.get(reverse("analytics:reports_hub"), {"period": period})
+            assert response.context["period"] == period
+            assert response.context["date_from"] == expected_start.isoformat()
+            assert response.context["date_to"] == today.isoformat()
+            assert response.context["using_custom_range"] is True
+
+    def test_last_3_and_6_months_presets_start_on_the_first_of_the_right_month(self, owner_client):
+        today = timezone.localdate()
+        three_months = analytics_views._first_of_month_offset(today, 2)
+        six_months = analytics_views._first_of_month_offset(today, 5)
+
+        resp3 = owner_client.get(reverse("analytics:reports_hub"), {"period": "last_3_months"})
+        assert resp3.context["date_from"] == three_months.isoformat()
+
+        resp6 = owner_client.get(reverse("analytics:reports_hub"), {"period": "last_6_months"})
+        assert resp6.context["date_from"] == six_months.isoformat()
+
+    def test_named_preset_overrides_stray_manual_dates_in_querystring(
+        self, owner_client, branch, cashier, latte
+    ):
+        """Selecting a preset while a previous Custom Range's date_from/
+        date_to are still sitting in the query string (e.g. a stale
+        bookmark, or the dropdown firing before the date inputs are
+        cleared) must win over those stray values, not silently honor
+        them instead."""
+        today = timezone.localdate()
+        response = owner_client.get(
+            reverse("analytics:reports_hub"),
+            {"period": "this_month", "date_from": "2020-01-01", "date_to": "2020-01-02"},
+        )
+        assert response.context["date_from"] == today.replace(day=1).isoformat()
+        assert response.context["date_to"] == today.isoformat()
+
+    def test_custom_period_still_behaves_like_manual_date_range(
+        self, owner_client, branch, cashier, latte
+    ):
+        """period=custom is just a label for today's existing manual
+        date_from/date_to behavior -- explicitly exercising it here
+        guards against the new period-resolution logic accidentally
+        treating "custom" as a fifth preset."""
+        in_range = _completed_sale(
+            branch,
+            cashier,
+            latte,
+            quantity=1,
+            unit_price="125.00",
+            amount_tendered="125.00",
+            when=timezone.make_aware(datetime(2026, 11, 6, 10, 0)),
+        )
+        response = owner_client.get(
+            reverse("analytics:reports_hub"),
+            {"period": "custom", "date_from": "2026-11-06", "date_to": "2026-11-07"},
+        )
+        assert response.context["period"] == "custom"
+        assert response.context["using_custom_range"] is True
+        assert response.context["sales_summary"]["total_revenue"] == in_range.grand_total
+
+    def test_period_with_no_sales_shows_empty_state_message(self, owner_client):
+        content = owner_client.get(
+            reverse("analytics:reports_hub"), {"period": "this_month"}
+        ).content.decode()
+        assert "No sales were recorded for this period." in content
 
     def test_trend_chart_ignores_the_custom_range_by_design(
         self, owner_client, branch, cashier, latte
@@ -1576,9 +1710,20 @@ class TestReportsHubExportView:
         assert rows["Total Units Sold"] == expected["total_units_sold"]
 
     def test_filename_reflects_branch_and_range(self, owner_client, branch):
+        """The export's filename follows whatever range is actually in
+        effect: with no query params at all, that's now the default
+        This Month preset (panel request, 2026-11-17), not the old
+        unlabeled Last 30 Days."""
         response = owner_client.get(reverse("analytics:reports_hub_export"), {"branch": branch.pk})
         disposition = response["Content-Disposition"]
         assert branch.name.replace(" ", "") in disposition
+        assert "ThisMonth" in disposition
+
+    def test_filename_reflects_legacy_days_link(self, owner_client, branch):
+        response = owner_client.get(
+            reverse("analytics:reports_hub_export"), {"branch": branch.pk, "days": 30}
+        )
+        disposition = response["Content-Disposition"]
         assert "Last30Days" in disposition
 
     def test_custom_date_range_is_honored_same_as_the_page(
