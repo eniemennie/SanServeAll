@@ -1536,6 +1536,78 @@ class TestReportsHubView:
         ).content.decode()
         assert "No sales were recorded for this period." in content
 
+    def test_imported_only_period_explains_why_the_other_three_tabs_are_empty(
+        self, owner_client, branch, cashier
+    ):
+        """Investigation finding (client review, 2026-11-17): a period
+        made up entirely of historical-import revenue (product=None
+        SalesItem rows, no linked production/batch records) shows real
+        revenue on Sales & Trend but legitimately nothing on Product
+        Performance/Resource Consumption/Operational Performance --
+        confirmed against production data, not a query bug (see
+        get_product_performance's docstring on why product=None rows
+        are excluded, and get_resource_consumption_summary/
+        get_operational_performance_summary's complete independence
+        from SalesTransaction). Each of those three tabs now explains
+        this inline instead of just looking broken."""
+        _completed_sale(
+            branch,
+            cashier,
+            product=None,
+            quantity=1,
+            unit_price="100.00",
+            amount_tendered="100.00",
+            when=timezone.make_aware(datetime(2025, 6, 15, 10, 0)),
+        )
+
+        content = owner_client.get(
+            reverse("analytics:reports_hub"),
+            {"date_from": "2025-01-01", "date_to": "2025-12-31"},
+        ).content.decode()
+
+        assert "No product-level sales for this period." in content
+        assert "No production recorded for this period." in content
+        assert "No batches recorded for this period." in content
+
+    def test_notes_about_imported_only_periods_do_not_show_when_data_exists(
+        self, owner_client, branch, cashier, latte
+    ):
+        _completed_sale(
+            branch,
+            cashier,
+            latte,
+            quantity=1,
+            unit_price="125.00",
+            amount_tendered="125.00",
+            when=timezone.make_aware(datetime(2025, 6, 15, 10, 0)),
+        )
+        commissary_role = Role.objects.create(name=Role.COMMISSARY_STAFF)
+        commissary_staff = User.objects.create_user(
+            username="commissary_notes_test", password="testpass123", role=commissary_role
+        )
+        record = ProductionRecord.objects.create(
+            commissary_staff=commissary_staff,
+            product=latte,
+            quantity_produced=10,
+            status=ProductionRecord.Status.COMPLETED,
+            quality=ProductionRecord.Quality.PASS,
+        )
+        # created_at is auto_now_add -- set the real historical date via
+        # an update(), same as any other field a factory can't pass
+        # straight into create() for an auto_now_add column.
+        ProductionRecord.objects.filter(pk=record.pk).update(
+            created_at=timezone.make_aware(datetime(2025, 6, 15, 10, 0))
+        )
+
+        content = owner_client.get(
+            reverse("analytics:reports_hub"),
+            {"date_from": "2025-01-01", "date_to": "2025-12-31"},
+        ).content.decode()
+
+        assert "No product-level sales for this period." not in content
+        assert "No production recorded for this period." not in content
+        assert "No batches recorded for this period." not in content
+
     def test_trend_chart_follows_the_custom_range(self, owner_client, branch, cashier, latte):
         """Panel request (2026-11-17): the chart now moves with the
         same Period/From/To filter as the summary cards, instead of
