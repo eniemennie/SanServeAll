@@ -10,26 +10,77 @@ staff-facing version of these screens in this batch.
 """
 
 import json
-from datetime import datetime
+from datetime import date, datetime
 
 import openpyxl
 from django.core.paginator import Paginator
 from django.http import HttpResponse
 from django.shortcuts import render
+from django.utils import timezone
 
 from apps.accounts.models import Branch, Role
 from apps.accounts.permissions import role_required
 from apps.analytics import services
 
+# Client/panel request (2026-11-17): named, calendar-based presets for
+# the Reports Hub date filter, replacing the old "Last 7/30/90 Days"
+# trailing-day-count dropdown. Each maps to a first-of-month offset from
+# today except "this_year" -- see _preset_period_range.
+PRESET_PERIODS = ("this_month", "last_3_months", "last_6_months", "this_year")
+
+
+def _first_of_month_offset(today, months_back):
+    """The 1st of the month `months_back` whole months before `today`'s
+    own month (0 = today's own month). Built from a plain (year*12 +
+    month_index) count rather than subtracting a timedelta, so it can
+    never land on an invalid date (e.g. "April 31") the way naive day
+    arithmetic across months can."""
+    total_months = today.year * 12 + (today.month - 1) - months_back
+    year, month_index = divmod(total_months, 12)
+    return date(year, month_index + 1, 1)
+
+
+def _preset_period_range(period, today=None):
+    """Calendar-based (date_from, date_to) for one of PRESET_PERIODS,
+    both inclusive, always ending today. "Last N Months" means the 1st
+    of the month (N-1) months back through today -- so opened on
+    November 17, "Last 3 Months" reads as September 1 - November 17
+    (September, October, November), matching how a person reads that
+    label on a calendar, not a rolling 90-day count."""
+    today = today or timezone.localdate()
+    if period == "this_month":
+        start = _first_of_month_offset(today, 0)
+    elif period == "last_3_months":
+        start = _first_of_month_offset(today, 2)
+    elif period == "last_6_months":
+        start = _first_of_month_offset(today, 5)
+    elif period == "this_year":
+        start = date(today.year, 1, 1)
+    else:
+        raise ValueError(f"Not a preset period: {period!r}")
+    return start, today
+
 
 def _resolve_reports_hub_filters(request):
-    """Shared branch/days/date-range parsing for reports_hub and its
+    """Shared branch/period/date-range parsing for reports_hub and its
     Excel export sibling (reports_hub_export) -- factored out so the
     export always resolves the exact same filters the on-screen view
     just used, rather than risking the two interpreting a query string
-    differently were this logic duplicated."""
-    days = int(request.GET.get("days", 30))
+    differently were this logic duplicated.
 
+    Panel request (2026-11-17): named presets (This Month/Last 3
+    Months/Last 6 Months/This Year/Custom Range) via a `period` param,
+    on top of the date_from/date_to custom-range inputs and `days`
+    fallback that already existed (Task #146). A preset always wins
+    over any stray date_from/date_to in the query string -- e.g. left
+    over from a previous Custom Range selection -- since the whole
+    point of picking a preset is not having to also clear those by
+    hand. With no `period`, `date_from`/`date_to`, or `days` at all
+    (the page's first load), the default is "This Month" -- a
+    reasonable retained default, matching the "This month" caption
+    already used elsewhere on the admin dashboard, rather than an
+    unlabeled trailing 30 days.
+    """
     branch_id = request.GET.get("branch")
     selected_branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
 
@@ -48,6 +99,24 @@ def _resolve_reports_hub_filters(request):
     if date_from and date_to and date_from > date_to:
         date_error = "'From' date must be on or before 'To' date."
 
+    period = request.GET.get("period") or ""
+    if not period:
+        if date_from_raw or date_to_raw:
+            period = "custom"
+        elif "days" in request.GET:
+            period = "days"  # legacy trailing-N-days link, back-compat only
+        else:
+            period = "this_month"  # first load: reasonable retained default
+
+    days = int(request.GET.get("days", 30))
+
+    if period in PRESET_PERIODS:
+        date_from, date_to = _preset_period_range(period)
+        date_from_raw, date_to_raw = date_from.isoformat(), date_to.isoformat()
+        date_error = None
+    elif period == "days":
+        date_from = date_to = None
+
     # An incomplete or invalid custom range falls back to the preset
     # `days` window rather than silently showing nothing -- only a
     # genuine error (bad format, or From after To) blocks the query.
@@ -56,6 +125,7 @@ def _resolve_reports_hub_filters(request):
 
     return {
         "days": days,
+        "period": period,
         "selected_branch": selected_branch,
         "date_from_raw": date_from_raw,
         "date_to_raw": date_to_raw,
@@ -129,6 +199,7 @@ def reports_hub(request):
             "branches": Branch.objects.filter(is_active=True, is_commissary=False),
             "selected_branch": selected_branch,
             "days": days,
+            "period": f["period"],
             "date_from": f["date_from_raw"],
             "date_to": f["date_to_raw"],
             "date_error": f["date_error"],
@@ -260,7 +331,15 @@ def reports_hub_export(request):
     )
 
     branch_label = selected_branch.name if selected_branch else "AllBranches"
-    if effective_from and effective_to:
+    preset_labels = {
+        "this_month": "ThisMonth",
+        "last_3_months": "Last3Months",
+        "last_6_months": "Last6Months",
+        "this_year": "ThisYear",
+    }
+    if f["period"] in preset_labels:
+        range_label = preset_labels[f["period"]]
+    elif effective_from and effective_to:
         range_label = f"{f['date_from_raw']}_to_{f['date_to_raw']}"
     else:
         range_label = f"Last{days}Days"
