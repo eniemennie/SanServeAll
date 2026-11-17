@@ -204,6 +204,137 @@ def get_weekly_sales_trend(branch=None, weeks=8):
     return trend
 
 
+# Panel request (2026-11-17): "Sales & Trend Analysis" chart previously
+# ignored the Reports Hub date filter entirely, always showing a fixed
+# last-8-weeks window via get_weekly_sales_trend (unchanged above --
+# still used by the separate Sales Analytics Dashboard, sales_dashboard,
+# which has no date filter of its own). get_sales_trend below is the
+# Reports Hub's own version: it takes the exact same days/date_from/
+# date_to arguments as get_sales_summary/get_product_performance, and
+# additionally decides its own bucket size from how wide that window
+# actually is -- a fixed weekly grouping reads fine over a few months
+# but is either noisy (a 2-day range plotted as 1 weekly point hides
+# the days) or unreadable (a 2-year range would need ~100 weekly
+# points) at the extremes.
+GRANULARITY_DAY_MAX_DAYS = 45
+GRANULARITY_WEEK_MAX_DAYS = 365
+
+
+def _trend_granularity(span_days):
+    """Bucket size for a trend chart covering `span_days` calendar days
+    (inclusive of both endpoints). Day: fine-grained enough to be
+    useful, and short enough that daily points stay readable (at most
+    ~45 of them). Week: the previous fixed behavior, kept for the
+    "a few months" middle ground. Month: anything spanning more than a
+    year collapses to monthly points rather than scattering ~50+ weekly
+    ones across the chart."""
+    if span_days <= GRANULARITY_DAY_MAX_DAYS:
+        return "day"
+    if span_days <= GRANULARITY_WEEK_MAX_DAYS:
+        return "week"
+    return "month"
+
+
+def _bucket_start(local_date, granularity):
+    if granularity == "day":
+        return local_date
+    if granularity == "week":
+        return local_date - timedelta(days=local_date.weekday())
+    return local_date.replace(day=1)
+
+
+def _next_bucket_start(bucket_start, granularity):
+    if granularity == "day":
+        return bucket_start + timedelta(days=1)
+    if granularity == "week":
+        return bucket_start + timedelta(weeks=1)
+    # Month: step to the 1st of the following month without drifting
+    # (timedelta(days=30) would slowly misalign against real month
+    # boundaries over a multi-year range).
+    if bucket_start.month == 12:
+        return bucket_start.replace(year=bucket_start.year + 1, month=1)
+    return bucket_start.replace(month=bucket_start.month + 1)
+
+
+def _bucket_label(bucket_start, granularity, spans_multiple_years):
+    if granularity == "month":
+        return (
+            bucket_start.strftime("%b %Y") if spans_multiple_years else bucket_start.strftime("%b")
+        )
+    if spans_multiple_years:
+        return bucket_start.strftime("%b %d, %Y")
+    return bucket_start.strftime("%b %d")
+
+
+def get_sales_trend(branch=None, days=30, date_from=None, date_to=None):
+    """Revenue over the selected Reports Hub window (same days/date_from/
+    date_to shape as get_sales_summary/get_product_performance), bucketed
+    by day, week, or month depending on how wide that window is -- see
+    _trend_granularity. Replaces the fixed last-8-weeks chart
+    (get_weekly_sales_trend) specifically for the Reports Hub, so
+    selecting a Period/From/To there moves the chart in step with the
+    summary cards above it instead of leaving it on its own unrelated
+    window.
+
+    Every calendar bucket in the window is included even when it has
+    zero revenue (same "zero days/weeks are real data points, not gaps"
+    reasoning as get_weekly_sales_trend and build_daily_sales_series),
+    so a quiet stretch shows as a flat line, not a shortened chart.
+
+    Returned oldest-bucket-first, matching get_weekly_sales_trend's own
+    left-to-right chronological ordering.
+    """
+    since, until = _resolve_report_window(days, date_from, date_to, branch)
+
+    if date_from and date_to:
+        span_from, span_to = date_from, date_to
+    else:
+        span_from = timezone.localtime(since).date()
+        # `until` is an exclusive upper bound, but -- unlike the explicit
+        # date_from/date_to case above, where it's exactly midnight the
+        # day after date_to -- here it's _trailing_window_anchor's own
+        # sub-day timestamp (normally "now"). Subtracting a whole day
+        # would wrongly drop today's own bucket; subtracting a sliver of
+        # a second and taking that moment's calendar date gives the
+        # right last day in both cases (anchor at "now" -> today; an
+        # anchor nudged 1 second past a branch's own latest transaction,
+        # see _trailing_window_anchor -> that transaction's own day).
+        span_to = (timezone.localtime(until) - timedelta(microseconds=1)).date()
+
+    span_days = (span_to - span_from).days + 1
+    granularity = _trend_granularity(span_days)
+    spans_multiple_years = span_from.year != span_to.year
+
+    transactions = SalesTransaction.objects.filter(
+        status=SalesTransaction.Status.COMPLETED, completed_at__gte=since, completed_at__lt=until
+    )
+    transactions = _exclude_synthetic_transactions(transactions)
+    if branch is not None:
+        transactions = transactions.filter(branch=branch)
+    transactions = transactions.prefetch_related("items")
+
+    revenue_by_bucket = {}
+    for txn in transactions:
+        bucket_start = _bucket_start(timezone.localtime(txn.completed_at).date(), granularity)
+        revenue_by_bucket[bucket_start] = (
+            revenue_by_bucket.get(bucket_start, Decimal("0.00")) + txn.grand_total
+        )
+
+    trend = []
+    bucket_start = _bucket_start(span_from, granularity)
+    final_bucket_start = _bucket_start(span_to, granularity)
+    while bucket_start <= final_bucket_start:
+        trend.append(
+            {
+                "label": _bucket_label(bucket_start, granularity, spans_multiple_years),
+                "revenue": float(revenue_by_bucket.get(bucket_start, Decimal("0.00"))),
+            }
+        )
+        bucket_start = _next_bucket_start(bucket_start, granularity)
+
+    return {"granularity": granularity, "points": trend}
+
+
 def get_weekly_sales_trend_by_branch(weeks=8):
     """Same window/shape as get_weekly_sales_trend, but broken out per
     branch -- feeds the Dashboard Home Sales Analytics chart (Fig. 3-19),

@@ -4,6 +4,7 @@ Performance (Row 9.2), Resource Consumption & Operational Performance
 (Row 9.3).
 """
 
+import json
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
@@ -266,6 +267,103 @@ class TestWeeklySalesTrend:
         )
         trend = services.get_weekly_sales_trend(branch=branch, weeks=1)
         assert trend[0]["revenue"] == pytest.approx(400.00)
+
+
+class TestSalesTrend:
+    """get_sales_trend: the Reports Hub's own date-range-aware trend
+    chart data, distinct from the fixed-8-weeks get_weekly_sales_trend
+    (still used by the separate Sales Analytics Dashboard)."""
+
+    def test_short_range_buckets_by_day(self, branch, cashier, latte):
+        _completed_sale(
+            branch,
+            cashier,
+            latte,
+            quantity=2,
+            unit_price="125.00",
+            amount_tendered="250.00",
+            when=timezone.make_aware(datetime(2026, 11, 6, 10, 0)),
+        )
+        trend = services.get_sales_trend(
+            branch=branch, date_from=date(2026, 11, 6), date_to=date(2026, 11, 7)
+        )
+        assert trend["granularity"] == "day"
+        assert len(trend["points"]) == 2
+        assert trend["points"][0]["revenue"] == pytest.approx(250.00)
+        assert trend["points"][1]["revenue"] == pytest.approx(0.0)
+
+    def test_medium_range_buckets_by_week(self, branch, cashier, latte):
+        _completed_sale(
+            branch,
+            cashier,
+            latte,
+            quantity=1,
+            unit_price="125.00",
+            amount_tendered="125.00",
+            when=timezone.make_aware(datetime(2026, 9, 1, 10, 0)),
+        )
+        trend = services.get_sales_trend(
+            branch=branch, date_from=date(2026, 8, 1), date_to=date(2026, 10, 15)
+        )
+        assert trend["granularity"] == "week"
+        assert sum(p["revenue"] for p in trend["points"]) == pytest.approx(125.00)
+        # ~76 days / 7 => around 11 weekly points, nowhere near "hundreds"
+        assert 9 <= len(trend["points"]) <= 13
+
+    def test_long_range_buckets_by_month(self, branch, cashier, latte):
+        _completed_sale(
+            branch,
+            cashier,
+            latte,
+            quantity=1,
+            unit_price="125.00",
+            amount_tendered="125.00",
+            when=timezone.make_aware(datetime(2024, 6, 15, 10, 0)),
+        )
+        trend = services.get_sales_trend(
+            branch=branch, date_from=date(2024, 1, 1), date_to=date(2025, 12, 31)
+        )
+        assert trend["granularity"] == "month"
+        assert len(trend["points"]) == 24
+        assert sum(p["revenue"] for p in trend["points"]) == pytest.approx(125.00)
+        assert trend["points"][5]["revenue"] == pytest.approx(125.00)  # June 2024
+
+    def test_zero_revenue_buckets_are_included_not_skipped(self, branch, cashier, latte):
+        trend = services.get_sales_trend(
+            branch=branch, date_from=date(2026, 11, 1), date_to=date(2026, 11, 5)
+        )
+        assert trend["granularity"] == "day"
+        assert len(trend["points"]) == 5
+        assert all(p["revenue"] == 0.0 for p in trend["points"])
+
+    def test_discount_aware_revenue_same_as_other_reports(self, branch, cashier, latte):
+        _completed_sale_with_discount(
+            branch,
+            cashier,
+            latte,
+            quantity=4,
+            unit_price="125.00",
+            discount_category="SC2",
+            discount_type="PERCENT",
+            discount_amount="20",
+            when=timezone.make_aware(datetime(2026, 11, 6, 10, 0)),
+        )
+        trend = services.get_sales_trend(
+            branch=branch, date_from=date(2026, 11, 6), date_to=date(2026, 11, 6)
+        )
+        assert trend["points"][0]["revenue"] == pytest.approx(400.00)
+
+    def test_trailing_days_fallback_still_works_without_explicit_dates(
+        self, branch, cashier, latte
+    ):
+        """No date_from/date_to given (legacy `days` link) -- same
+        trailing-window shape get_sales_summary already uses."""
+        _completed_sale(
+            branch, cashier, latte, quantity=1, unit_price="125.00", amount_tendered="125.00"
+        )
+        trend = services.get_sales_trend(branch=branch, days=7)
+        assert trend["granularity"] == "day"
+        assert sum(p["revenue"] for p in trend["points"]) == pytest.approx(125.00)
 
 
 class TestTopProducts:
@@ -1438,18 +1536,41 @@ class TestReportsHubView:
         ).content.decode()
         assert "No sales were recorded for this period." in content
 
-    def test_trend_chart_ignores_the_custom_range_by_design(
-        self, owner_client, branch, cashier, latte
-    ):
-        """Documented scope boundary: get_weekly_sales_trend deliberately
-        does not take date_from/date_to, so the chart data shouldn't
-        change based on the custom-range querystring."""
-        without_range = owner_client.get(reverse("analytics:reports_hub"))
-        with_range = owner_client.get(
-            reverse("analytics:reports_hub"),
-            {"date_from": "2026-11-06", "date_to": "2026-11-07"},
+    def test_trend_chart_follows_the_custom_range(self, owner_client, branch, cashier, latte):
+        """Panel request (2026-11-17): the chart now moves with the
+        same Period/From/To filter as the summary cards, instead of
+        always showing its own fixed last-8-weeks window."""
+        in_range = _completed_sale(
+            branch,
+            cashier,
+            latte,
+            quantity=1,
+            unit_price="125.00",
+            amount_tendered="125.00",
+            when=timezone.make_aware(datetime(2026, 11, 6, 10, 0)),
         )
-        assert without_range.context["trend_labels_json"] == with_range.context["trend_labels_json"]
+        response = owner_client.get(
+            reverse("analytics:reports_hub"),
+            {"branch": branch.pk, "date_from": "2026-11-06", "date_to": "2026-11-07"},
+        )
+        assert response.context["trend_granularity"] == "day"
+        labels = json.loads(response.context["trend_labels_json"])
+        revenues = json.loads(response.context["trend_revenue_json"])
+        assert len(labels) == 2
+        assert sum(revenues) == pytest.approx(float(in_range.grand_total))
+
+    def test_trend_chart_granularity_matches_range_length(self, owner_client):
+        """Same window the summary cards use (This Year, a long-enough
+        range to require monthly, not weekly, bucketing)."""
+        response = owner_client.get(reverse("analytics:reports_hub"), {"period": "last_6_months"})
+        assert response.context["trend_granularity"] in ("day", "week", "month")
+
+        long_range_response = owner_client.get(
+            reverse("analytics:reports_hub"),
+            {"date_from": "2024-01-01", "date_to": "2025-12-31"},
+        )
+        assert long_range_response.context["trend_granularity"] == "month"
+        assert "grouped by month" in long_range_response.content.decode()
 
     def test_summary_cards_use_thousands_separators(self, owner_client, branch, cashier, latte):
         """Client review (2026-11-10): Total Units Sold (Sales tab) and

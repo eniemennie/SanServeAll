@@ -164,12 +164,16 @@ def reports_hub(request):
     analytics:sales_history) now takes priority over the preset `days`
     dropdown whenever both dates are given and valid. All of Sales
     Summary, Product Performance, Resource Consumption, and Operational
-    Performance respect it. The weekly trend CHART is a deliberate
-    exception -- it's a fixed "last 8 weeks" line chart by design, and
-    bucketing an arbitrary short range (the client's own example,
-    "November 6-7") into meaningful weekly points isn't a sensible
-    reshape of that visual; the template labels it accordingly rather
-    than silently implying it also follows the custom range.
+    Performance respect it.
+
+    Panel request (2026-11-17): the Sales & Trend CHART used to be a
+    fixed "last 8 weeks" exception to the above -- it now also follows
+    Period/From/To, via get_sales_trend, which picks its own bucket
+    size (day/week/month) from how wide the selected window is rather
+    than always grouping by week (see that function's docstring). The
+    old fixed-window get_weekly_sales_trend is unchanged and still
+    backs the separate, unfiltered Sales Analytics Dashboard
+    (sales_dashboard).
     """
     f = _resolve_reports_hub_filters(request)
     selected_branch = f["selected_branch"]
@@ -180,7 +184,9 @@ def reports_hub(request):
     sales_summary = services.get_sales_summary(
         branch=selected_branch, days=days, date_from=effective_from, date_to=effective_to
     )
-    trend = services.get_weekly_sales_trend(branch=selected_branch)
+    trend = services.get_sales_trend(
+        branch=selected_branch, days=days, date_from=effective_from, date_to=effective_to
+    )
     product_performance_rows = services.get_product_performance(
         branch=selected_branch, days=days, date_from=effective_from, date_to=effective_to
     )
@@ -208,8 +214,9 @@ def reports_hub(request):
             "product_performance": product_performance_rows,
             "consumption": consumption,
             "operational": operational,
-            "trend_labels_json": json.dumps([t["week_label"] for t in trend]),
-            "trend_revenue_json": json.dumps([float(t["revenue"]) for t in trend]),
+            "trend_granularity": trend["granularity"],
+            "trend_labels_json": json.dumps([p["label"] for p in trend["points"]]),
+            "trend_revenue_json": json.dumps([p["revenue"] for p in trend["points"]]),
             "product_names_json": json.dumps([r["product_name"] for r in product_performance_rows]),
             "product_units_json": json.dumps(
                 [r["current_units"] for r in product_performance_rows]
