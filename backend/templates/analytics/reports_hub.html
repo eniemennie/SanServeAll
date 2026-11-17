@@ -4,9 +4,17 @@
 {% block admin_title %}Reports{% endblock %}
 {% block admin_content %}
 
-<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+<!-- UI/UX fix (2026-11-17): this header used to pack the title, both
+     action buttons, and all four filter controls into one flex row,
+     which wrapped awkwardly below ~1200px wide. Split into three
+     clearly separate rows -- title+actions, filter bar, tabs (tabs
+     were already their own row below, untouched) -- each of which
+     stacks cleanly on its own rather than everything wrapping
+     together mid-row. No change to any query param, view logic, or
+     the date-filtering behavior itself. -->
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
     <h1 class="h5 mb-0">Reports</h1>
-    <div class="d-flex align-items-center gap-2">
+    <div class="d-flex align-items-center flex-wrap gap-2">
         <a href="{% url 'analytics:sales_history' %}" class="btn btn-jc-outline btn-sm">Sales History</a>
         <!-- Client review (2026-11-09): the manuscript referenced a
              "downloadable Excel report" that never actually existed --
@@ -15,39 +23,42 @@
              always matches what's on screen, by reusing the exact same
              query-param names reports_hub itself reads. -->
         <a href="{% url 'analytics:reports_hub_export' %}?branch={{ selected_branch.pk|default:'' }}&amp;period={{ period }}&amp;days={{ days }}&amp;date_from={{ date_from }}&amp;date_to={{ date_to }}" class="btn btn-sm" style="background: var(--jc-orange); color: #fff;">Download Excel</a>
-        <form method="get" class="d-flex align-items-end flex-wrap gap-2">
-            <input type="hidden" name="branch" value="{{ selected_branch.pk|default:'' }}">
-            <!-- Panel request (2026-11-17): named, calendar-based presets
-                 replace the old Last 7/30/90 Days dropdown. Picking one
-                 submits immediately and overrides whatever is in the From/
-                 To inputs below (see _resolve_reports_hub_filters). "Custom
-                 Range" keeps today's existing manual-dates behavior. -->
-            <div>
-                <label class="form-label small fw-semibold mb-1">Period</label>
-                <select name="period" id="periodSelect" class="form-select form-select-sm" style="max-width: 160px;" onchange="this.form.submit()">
-                    <option value="this_month" {% if period == "this_month" %}selected{% endif %}>This Month</option>
-                    <option value="last_3_months" {% if period == "last_3_months" %}selected{% endif %}>Last 3 Months</option>
-                    <option value="last_6_months" {% if period == "last_6_months" %}selected{% endif %}>Last 6 Months</option>
-                    <option value="this_year" {% if period == "this_year" %}selected{% endif %}>This Year</option>
-                    <option value="custom" {% if period == "custom" %}selected{% endif %}>Custom Range</option>
-                </select>
-            </div>
-            <div>
-                <label class="form-label small fw-semibold mb-1">From</label>
-                <!-- Editing either date directly means "I want a custom
-                     range" even if the dropdown above still reads an
-                     earlier preset -- flip it to Custom Range so Apply
-                     Range submits period=custom with these dates, instead
-                     of a preset silently overriding what was just typed. -->
-                <input type="date" name="date_from" class="form-control form-control-sm" value="{{ date_from }}" onchange="document.getElementById('periodSelect').value='custom';">
-            </div>
-            <div>
-                <label class="form-label small fw-semibold mb-1">To</label>
-                <input type="date" name="date_to" class="form-control form-control-sm" value="{{ date_to }}" onchange="document.getElementById('periodSelect').value='custom';">
-            </div>
-            <button type="submit" class="btn btn-sm" style="background: var(--jc-orange); color: #fff;">Apply Range</button>
-        </form>
     </div>
+</div>
+
+<div class="jc-card p-2 p-md-3 mb-3">
+    <form method="get" class="d-flex align-items-end flex-wrap gap-2">
+        <input type="hidden" name="branch" value="{{ selected_branch.pk|default:'' }}">
+        <!-- Panel request (2026-11-17): named, calendar-based presets
+             replace the old Last 7/30/90 Days dropdown. Picking one
+             submits immediately and overrides whatever is in the From/
+             To inputs below (see _resolve_reports_hub_filters). "Custom
+             Range" keeps today's existing manual-dates behavior. -->
+        <div>
+            <label class="form-label small fw-semibold mb-1">Period</label>
+            <select name="period" id="periodSelect" class="form-select form-select-sm" style="max-width: 160px;" onchange="this.form.submit()">
+                <option value="this_month" {% if period == "this_month" %}selected{% endif %}>This Month</option>
+                <option value="last_3_months" {% if period == "last_3_months" %}selected{% endif %}>Last 3 Months</option>
+                <option value="last_6_months" {% if period == "last_6_months" %}selected{% endif %}>Last 6 Months</option>
+                <option value="this_year" {% if period == "this_year" %}selected{% endif %}>This Year</option>
+                <option value="custom" {% if period == "custom" %}selected{% endif %}>Custom Range</option>
+            </select>
+        </div>
+        <div>
+            <label class="form-label small fw-semibold mb-1">From</label>
+            <!-- Editing either date directly means "I want a custom
+                 range" even if the dropdown above still reads an
+                 earlier preset -- flip it to Custom Range so Apply
+                 Range submits period=custom with these dates, instead
+                 of a preset silently overriding what was just typed. -->
+            <input type="date" name="date_from" class="form-control form-control-sm" value="{{ date_from }}" onchange="document.getElementById('periodSelect').value='custom';">
+        </div>
+        <div>
+            <label class="form-label small fw-semibold mb-1">To</label>
+            <input type="date" name="date_to" class="form-control form-control-sm" value="{{ date_to }}" onchange="document.getElementById('periodSelect').value='custom';">
+        </div>
+        <button type="submit" class="btn btn-sm" style="background: var(--jc-orange); color: #fff;">Apply Range</button>
+    </form>
 </div>
 
 {% if date_error %}
