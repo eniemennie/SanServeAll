@@ -128,8 +128,25 @@ class User(AbstractUser):
     #   sales attributed to these accounts ARE real and belong in every
     #   revenue total -- only the raw, login-style username needs a
     #   friendlier display label (see display_name below).
+    #
+    # - DEMO_DATA_GENERATOR_USERNAME: a third, deliberately different
+    #   kind (client review, 2026-11-18). scripts/generate_demo_history.py
+    #   attributes its generated 2020-2026 production/material/sales
+    #   history to this one dedicated identity, filling the gap before
+    #   real batch/production tracking began (2026-05-04) so the Reports
+    #   Hub's Product Performance/Resource Consumption/Operational
+    #   Performance tabs aren't empty for that period. NOT real --
+    #   unlike HISTORICAL_IMPORT, nothing behind these rows actually
+    #   happened. UNLIKE SYNTHETIC_BACKFILL_BOT, these rows ARE meant to
+    #   be seen: they're included in exactly those three Reports Hub
+    #   tabs (quietly marked, see display_name below), specifically so
+    #   old date ranges aren't blank. They must still never reach Sales
+    #   & Trend, Sales History, the Dashboard, or the Excel export --
+    #   see _exclude_demo_data_transactions in apps.analytics.services,
+    #   applied everywhere except get_product_performance.
     SYNTHETIC_BACKFILL_BOT_USERNAME = "synthetic_backfill_bot"
     HISTORICAL_IMPORT_USERNAME_PREFIX = "historical_import_"
+    DEMO_DATA_GENERATOR_USERNAME = "demo_data_generator"
 
     role = models.ForeignKey(
         Role,
@@ -175,6 +192,14 @@ class User(AbstractUser):
         return self.username.startswith(self.HISTORICAL_IMPORT_USERNAME_PREFIX)
 
     @property
+    def is_demo_data_account(self) -> bool:
+        """True only for the single dedicated identity
+        scripts/generate_demo_history.py attributes its generated
+        2020-2026 production/sales history to. See the
+        DEMO_DATA_GENERATOR_USERNAME comment above."""
+        return self.username == self.DEMO_DATA_GENERATOR_USERNAME
+
+    @property
     def display_name(self) -> str:
         """A report should never show a bare login-style username as if
         it were a cashier's name. Real users: unchanged (full name, or
@@ -185,9 +210,15 @@ class User(AbstractUser):
         the rare case this account is ever shown directly rather than
         filtered out of a report entirely (see apps.analytics.services
         for where it's filtered out) -- never silently presented as an
-        ordinary cashier's name."""
+        ordinary cashier's name. The demo-data account: a plain "Demo"
+        label -- unlike the synthetic bot, this one IS meant to surface
+        in a few specific places (see apps.analytics.services'
+        _exclude_demo_data_transactions), so its label needs to read
+        naturally inline next to real names, not as a long disclaimer."""
         if self.is_historical_import_account:
             return "Imported"
+        if self.is_demo_data_account:
+            return "Demo"
         if self.is_synthetic_backfill_account:
             return "Synthetic (forecast only)"
         return self.get_full_name() or self.username
