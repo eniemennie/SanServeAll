@@ -12,6 +12,7 @@ from django.db import transaction as db_transaction
 from django.db.models import Sum
 from django.utils import timezone
 
+from apps.accounts.models import User
 from apps.inventory.models import Inventory, InventoryTransaction, Product
 from apps.production.models import IngredientUsage, ProductionRecord, StockTransferOrder
 
@@ -77,11 +78,23 @@ def get_total_output(days=30):
     there's no honest way to attribute one production run to one branch.
     This total is real; it just isn't branch-filterable the way Revenue
     or Orders are on the same dashboard.
+
+    Explicitly excludes User.DEMO_DATA_GENERATOR_USERNAME's generated
+    production history (client review, 2026-11-18) -- the Dashboard
+    must never include it, unlike the three Reports Hub tabs it's
+    deliberately shown in (see apps.analytics.services'
+    _exclude_demo_data_transactions). In practice that history is
+    backdated well before this trailing window would ever reach it,
+    but the exclusion is explicit rather than relying on that timing.
     """
     since = timezone.now() - timedelta(days=days)
-    total = ProductionRecord.objects.filter(
-        status=ProductionRecord.Status.COMPLETED, created_at__gte=since
-    ).aggregate(total=Sum("quantity_produced"))["total"]
+    total = (
+        ProductionRecord.objects.exclude(
+            commissary_staff__username=User.DEMO_DATA_GENERATOR_USERNAME
+        )
+        .filter(status=ProductionRecord.Status.COMPLETED, created_at__gte=since)
+        .aggregate(total=Sum("quantity_produced"))["total"]
+    )
     return total or 0
 
 
