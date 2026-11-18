@@ -7,7 +7,7 @@ models, this module only reports on what other modules already record.
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from django.db.models import F, Max, Sum
+from django.db.models import Case, F, IntegerField, Max, Sum, When
 from django.utils import timezone
 
 from apps.accounts.models import User
@@ -18,7 +18,7 @@ from apps.production.models import IngredientUsage, ProductionRecord
 from apps.system_config.models import BusinessSettings
 
 
-def _exclude_synthetic_transactions(qs, cashier_lookup="cashier__username"):
+def _exclude_forecast_bot_transactions(qs, cashier_lookup="cashier__username"):
     """Client review (2026-11-10): scripts/backfill_thin_forecast_pairs.py
     creates real, COMPLETED SalesTransaction rows (through the normal POS
     service layer) attributed to a single dedicated bot account purely so
@@ -26,7 +26,9 @@ def _exclude_synthetic_transactions(qs, cashier_lookup="cashier__username"):
     see that script's own module docstring. Nothing about `status=
     COMPLETED` distinguishes those from a genuine sale, so every report
     aggregate below must explicitly exclude them, or synthetic test data
-    silently inflates real revenue/units/order totals.
+    silently inflates real revenue/units/order totals. Unlike the
+    demo-data account below, this bot's rows are never meant to be seen
+    anywhere -- applied unconditionally, everywhere, no exceptions.
 
     Deliberately does NOT also exclude apps.core's
     "historical_import_<branch>" accounts -- those ARE real, migrated
@@ -37,6 +39,45 @@ def _exclude_synthetic_transactions(qs, cashier_lookup="cashier__username"):
     to its transaction's cashier (pass "transaction__cashier__username").
     """
     return qs.exclude(**{cashier_lookup: User.SYNTHETIC_BACKFILL_BOT_USERNAME})
+
+
+def _exclude_demo_data_transactions(qs, cashier_lookup="cashier__username"):
+    """Client review (2026-11-18): scripts/generate_demo_history.py
+    creates real, COMPLETED SalesTransaction rows attributed to a single
+    dedicated demo-data account, covering 2020-2026 (before real batch/
+    production tracking existed, 2026-05-04) so Product Performance has
+    something to show for that period instead of being empty -- see
+    User.DEMO_DATA_GENERATOR_USERNAME's own comment for the full
+    rationale and User.display_name for how it's labeled inline wherever
+    it does surface ("Demo", quiet rather than a banner, per that
+    discussion).
+
+    Unlike _exclude_forecast_bot_transactions, this is NOT applied
+    unconditionally: get_product_performance deliberately does NOT call
+    this helper, so its generated units show up there. Every other
+    report aggregate (Sales & Trend, Sales History, the Dashboard, the
+    Excel export) DOES call this -- those must never include invented
+    history, regardless of what Product Performance shows. See
+    _exclude_synthetic_transactions below, which is what every one of
+    those other call sites actually uses.
+    """
+    return qs.exclude(**{cashier_lookup: User.DEMO_DATA_GENERATOR_USERNAME})
+
+
+def _exclude_synthetic_transactions(qs, cashier_lookup="cashier__username"):
+    """The default exclusion for every report aggregate in this module
+    EXCEPT get_product_performance: excludes both the forecast bot
+    (always invisible, see _exclude_forecast_bot_transactions) and the
+    demo-data account (invisible everywhere except Product Performance,
+    see _exclude_demo_data_transactions). Kept as one combined helper,
+    under its original name, so every pre-existing call site below needs
+    no change -- only get_product_performance calls
+    _exclude_forecast_bot_transactions directly instead, to let the
+    demo-data account's rows through.
+    """
+    return _exclude_demo_data_transactions(
+        _exclude_forecast_bot_transactions(qs, cashier_lookup), cashier_lookup
+    )
 
 
 def _trailing_window_anchor(branch=None):
@@ -719,12 +760,33 @@ def get_product_performance(branch=None, days=30, date_from=None, date_to=None):
             transaction__completed_at__gte=start,
             transaction__completed_at__lt=end,
         )
-        items = _exclude_synthetic_transactions(
+        # Only the forecast bot is excluded here -- unlike every other
+        # report aggregate in this module, Product Performance
+        # deliberately lets the demo-data account's generated 2020-2026
+        # units through (see _exclude_demo_data_transactions' own
+        # docstring for why), so a pre-2026-05 date range isn't empty.
+        # demo_units_sold tracks how many of a product's units (per
+        # window) came from that account specifically, so the caller
+        # below can flag a row as including generated data without
+        # having to run a second, separate query.
+        items = _exclude_forecast_bot_transactions(
             items, cashier_lookup="transaction__cashier__username"
         )
         if branch is not None:
             items = items.filter(transaction__branch=branch)
-        return items.values("product__id", "product__name").annotate(units_sold=Sum("quantity"))
+        return items.values("product__id", "product__name").annotate(
+            units_sold=Sum("quantity"),
+            demo_units_sold=Sum(
+                Case(
+                    When(
+                        transaction__cashier__username=User.DEMO_DATA_GENERATOR_USERNAME,
+                        then="quantity",
+                    ),
+                    default=0,
+                    output_field=IntegerField(),
+                )
+            ),
+        )
 
     current = {row["product__id"]: row for row in _units_sold_in_range(current_start, now)}
     previous = {
@@ -733,9 +795,11 @@ def get_product_performance(branch=None, days=30, date_from=None, date_to=None):
 
     results = []
     for product_id in set(current) | set(previous):
-        current_units = current.get(product_id, {}).get("units_sold", 0)
-        previous_units = previous.get(product_id, {}).get("units_sold", 0)
-        name = (current.get(product_id) or previous.get(product_id))["product__name"]
+        current_row = current.get(product_id, {})
+        previous_row = previous.get(product_id, {})
+        current_units = current_row.get("units_sold", 0)
+        previous_units = previous_row.get("units_sold", 0)
+        name = (current_row or previous_row)["product__name"]
 
         if previous_units > 0:
             growth_rate = ((current_units - previous_units) / previous_units) * 100
@@ -750,6 +814,9 @@ def get_product_performance(branch=None, days=30, date_from=None, date_to=None):
                 "current_units": current_units,
                 "previous_units": previous_units,
                 "growth_rate": growth_rate,
+                "includes_demo_data": bool(
+                    current_row.get("demo_units_sold") or previous_row.get("demo_units_sold")
+                ),
             }
         )
 
@@ -776,6 +843,18 @@ def get_resource_consumption_summary(days=30, date_from=None, date_to=None):
     unit (`unit`/`unit_display`), both for display (the ticket's "Add a
     Unit column") and so a future consumer of this data can't
     accidentally sum across units either.
+
+    Client review (2026-11-18): unlike Sales-side reports, this function
+    does NOT exclude scripts/generate_demo_history.py's generated
+    ProductionRecord/IngredientUsage rows (commissary_staff ==
+    User.DEMO_DATA_GENERATOR_USERNAME) -- they're included deliberately,
+    same reasoning as get_product_performance, so a pre-2026-05 date
+    range isn't empty. Each `by_material` row carries its own
+    `includes_demo_data` flag (true if any of that material's usage in
+    the window came from a generated batch) for a quiet inline label,
+    rather than one blanket note for the whole tab -- a window mixing
+    real and generated batches for the same material shouldn't claim
+    the whole row is fake, or hide that part of it is.
     """
     since, until = _resolve_report_window(days, date_from, date_to)
     usages = IngredientUsage.objects.filter(
@@ -820,12 +899,25 @@ def get_resource_consumption_summary(days=30, date_from=None, date_to=None):
             ),
             "total_used": row["total_used"],
             "total_material_cost": row["total_material_cost"],
+            "includes_demo_data": bool(row["demo_usage_count"]),
         }
         for row in (
             usages.values("material__name", "material__unit_of_measure")
             .annotate(
                 total_used=Sum("quantity_used"),
                 total_material_cost=Sum(F("quantity_used") * F("material__price")),
+                demo_usage_count=Sum(
+                    Case(
+                        When(
+                            production_record__commissary_staff__username=(
+                                User.DEMO_DATA_GENERATOR_USERNAME
+                            ),
+                            then=1,
+                        ),
+                        default=0,
+                        output_field=IntegerField(),
+                    )
+                ),
             )
             .order_by("-total_used")
         )
@@ -837,6 +929,7 @@ def get_resource_consumption_summary(days=30, date_from=None, date_to=None):
         "total_produced": total_produced,
         "cost_per_unit_produced": cost_per_unit_produced,
         "by_material": by_material,
+        "includes_demo_data": any(m["includes_demo_data"] for m in by_material),
         "days": days,
     }
 
@@ -849,13 +942,24 @@ def get_operational_performance_summary(days=30, date_from=None, date_to=None):
     for it would be reporting something we don't actually measure.
 
     Accepts an explicit date_from/date_to range (task #146) as an
-    alternative to `days` -- see _resolve_report_window."""
+    alternative to `days` -- see _resolve_report_window.
+
+    Client review (2026-11-18): same as get_resource_consumption_summary,
+    does NOT exclude scripts/generate_demo_history.py's generated
+    ProductionRecord rows -- included deliberately so a pre-2026-05 date
+    range isn't empty. Unlike that function, there's no natural per-row
+    place for a label here (just aggregate batch/completion/quality
+    counts, not a materials breakdown), so `includes_demo_data` is one
+    flag for the whole result, for a single quiet inline note."""
     since, until = _resolve_report_window(days, date_from, date_to)
     records = ProductionRecord.objects.filter(created_at__gte=since, created_at__lt=until)
 
     total_batches = records.count()
     completed_batches = records.filter(status=ProductionRecord.Status.COMPLETED).count()
     passed_batches = records.filter(quality=ProductionRecord.Quality.PASS).count()
+    demo_batches = records.filter(
+        commissary_staff__username=User.DEMO_DATA_GENERATOR_USERNAME
+    ).count()
 
     completion_rate = (completed_batches / total_batches * 100) if total_batches else None
     quality_pass_rate = (passed_batches / total_batches * 100) if total_batches else None
@@ -866,6 +970,7 @@ def get_operational_performance_summary(days=30, date_from=None, date_to=None):
         "completion_rate": completion_rate,
         "passed_batches": passed_batches,
         "quality_pass_rate": quality_pass_rate,
+        "includes_demo_data": demo_batches > 0,
         "days": days,
     }
 

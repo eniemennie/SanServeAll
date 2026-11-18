@@ -540,6 +540,27 @@ class TestGetTotalOutput:
     def test_no_production_yet_returns_zero_not_none(self):
         assert services.get_total_output() == 0
 
+    def test_excludes_demo_data_generator_runs(self, commissary, cake, flour, sugar):
+        """scripts/generate_demo_history.py attributes its generated
+        2020-2026 production history to User.DEMO_DATA_GENERATOR_USERNAME
+        (client review, 2026-11-18) -- this Dashboard KPI must never
+        include it, unlike Reports Hub's Product Performance/Resource
+        Consumption/Operational Performance, which deliberately do."""
+        role = Role.objects.create(name=Role.OWNER_ADMIN)
+        demo_user = User.objects.create_user(
+            username=User.DEMO_DATA_GENERATOR_USERNAME, role=role, branch=None
+        )
+        services.record_production(
+            commissary_staff=demo_user,
+            product_id=cake.pk,
+            quantity_produced=50,
+            ingredient_rows=[
+                {"material_id": flour.pk, "quantity_used": 5},
+                {"material_id": sugar.pk, "quantity_used": 5},
+            ],
+        )
+        assert services.get_total_output() == 0
+
     def test_shell_context_present(self, commissary_client):
         response = commissary_client.get(reverse("production:batch_management"))
         assert response.context["active_nav"] == "batch"
@@ -870,3 +891,62 @@ class TestRoleAwareAdminShell:
         assert b"Demand Forecasting" in response.content
         assert b"Resource Management" in response.content
         assert b"Product Availability" in response.content
+
+
+class TestBatchManagementExcludesDemoData:
+    """Batch Logs has no date filter and computes its own stat cards from
+    every ProductionRecord by default (client review, 2026-11-18) -- so
+    unlike Reports Hub's three tabs, which deliberately show demo data
+    with a quiet label, Batch Logs excludes it entirely, matching how
+    Sales History already excludes demo sales."""
+
+    @pytest.fixture
+    def demo_user(self):
+        role, _ = Role.objects.get_or_create(name=Role.OWNER_ADMIN)
+        return User.objects.create_user(
+            username=User.DEMO_DATA_GENERATOR_USERNAME, role=role, branch=None
+        )
+
+    def test_demo_batch_is_excluded_from_the_table_and_stat_cards(
+        self, commissary_client, commissary, demo_user, cake, flour, sugar
+    ):
+        services.record_production(
+            commissary_staff=demo_user,
+            product_id=cake.pk,
+            quantity_produced=50,
+            ingredient_rows=[
+                {"material_id": flour.pk, "quantity_used": 5},
+                {"material_id": sugar.pk, "quantity_used": 5},
+            ],
+            status=ProductionRecord.Status.COMPLETED,
+        )
+
+        response = commissary_client.get(reverse("production:batch_management"))
+        assert response.context["stats"]["total"] == 0
+        assert response.context["stats"]["completed"] == 0
+        assert len(response.context["page_obj"].object_list) == 0
+
+    def test_real_batch_still_shows_once_demo_data_exists(
+        self, commissary_client, commissary_staff, demo_user, commissary, cake, flour, sugar
+    ):
+        services.record_production(
+            commissary_staff=demo_user,
+            product_id=cake.pk,
+            quantity_produced=50,
+            ingredient_rows=[
+                {"material_id": flour.pk, "quantity_used": 5},
+                {"material_id": sugar.pk, "quantity_used": 5},
+            ],
+            status=ProductionRecord.Status.COMPLETED,
+        )
+        services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 2}],
+            status=ProductionRecord.Status.COMPLETED,
+        )
+
+        response = commissary_client.get(reverse("production:batch_management"))
+        assert response.context["stats"]["total"] == 1
+        assert response.context["stats"]["completed"] == 1

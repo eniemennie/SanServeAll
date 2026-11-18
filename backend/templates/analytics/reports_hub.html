@@ -215,7 +215,12 @@
             <tbody>
                 {% for row in product_performance %}
                 <tr class="report-row{% if forloop.counter > 10 %} report-row-extra d-none{% endif %}" data-search-text="{{ row.product_name|lower }}">
-                    <td>{{ row.product_name }}</td>
+                    <td>
+                        {{ row.product_name }}
+                        {% if row.includes_demo_data %}
+                        <span class="jc-badge jc-badge-info" title="This row's totals include demo data generated to fill periods before production/sale detail was tracked here (pre-May 2026). Sales &amp; Trend and Sales History never include this data.">Demo</span>
+                        {% endif %}
+                    </td>
                     <td>{{ row.current_units|intcomma }}</td>
                     <td>{{ row.previous_units|intcomma }}</td>
                     <td>
@@ -254,6 +259,12 @@
         Trend above shows real revenue for the same range (that revenue comes from the separate
         historical sales import, which has no production records behind it).
     </div>
+    {% endif %}
+    {% if consumption.includes_demo_data %}
+    <p class="text-muted small mb-3">
+        <span class="jc-badge jc-badge-info" title="Figures below include demo data generated to fill periods before production tracking began here (pre-May 2026). Sales &amp; Trend and Sales History never include this data.">Demo</span>
+        Some totals in this range include demo data, not real production.
+    </p>
     {% endif %}
     <div class="row g-4 mb-3">
         <div class="col-md-3">
@@ -303,7 +314,12 @@
             <tbody>
                 {% for m in consumption.by_material %}
                 <tr class="report-row{% if forloop.counter > 10 %} report-row-extra d-none{% endif %}" data-search-text="{{ m.material__name|lower }}">
-                    <td>{{ m.material__name }}</td>
+                    <td>
+                        {{ m.material__name }}
+                        {% if m.includes_demo_data %}
+                        <span class="jc-badge jc-badge-info" title="This row's totals include demo data generated to fill periods before production tracking began here (pre-May 2026). Sales &amp; Trend and Sales History never include this data.">Demo</span>
+                        {% endif %}
+                    </td>
                     <td>{{ m.unit_display }}</td>
                     <td>{{ m.total_used|qty:m.unit }}</td>
                     <td>&#8369;{{ m.total_material_cost|peso }}</td>
@@ -330,6 +346,12 @@
         Trend above shows real revenue for the same range (that revenue comes from the separate
         historical sales import, which has no batch records behind it).
     </div>
+    {% endif %}
+    {% if operational.includes_demo_data %}
+    <p class="text-muted small mb-3">
+        <span class="jc-badge jc-badge-info" title="Figures below include demo data generated to fill periods before production tracking began here (pre-May 2026). Sales &amp; Trend and Sales History never include this data.">Demo</span>
+        Some batches in this range are demo data, not real production.
+    </p>
     {% endif %}
     <div class="row g-4">
         <div class="col-md-4">

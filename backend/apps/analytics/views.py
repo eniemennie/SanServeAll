@@ -283,8 +283,16 @@ def reports_hub_export(request):
     for row in trend:
         sheet.append([row["week_label"], row["revenue"]])
 
+    # Product Performance / Resource Consumption / Operational Performance
+    # intentionally include demo data (see
+    # apps.analytics.services._exclude_demo_data_transactions's own
+    # docstring) so a downloaded workbook isn't missing figures the
+    # on-screen Reports Hub shows -- but a downloaded file is a durable,
+    # shareable artifact, so every sheet that can include demo data
+    # carries the same quiet "Demo" marking the page uses (client review,
+    # 2026-11-18), never silently blended in as if it were all real.
     sheet = workbook.create_sheet("Product Performance")
-    sheet.append(["Product", "This Period", "Previous Period", "Growth Rate (%)"])
+    sheet.append(["Product", "This Period", "Previous Period", "Growth Rate (%)", "Demo"])
     for row in product_performance_rows:
         sheet.append(
             [
@@ -292,11 +300,12 @@ def reports_hub_export(request):
                 row["current_units"],
                 row["previous_units"],
                 round(row["growth_rate"], 1) if row["growth_rate"] is not None else "New",
+                "Demo" if row.get("includes_demo_data") else "",
             ]
         )
 
     sheet = workbook.create_sheet("Resource Consumption")
-    sheet.append(["Material", "Unit", "Total Used", "Total Cost"])
+    sheet.append(["Material", "Unit", "Total Used", "Total Cost", "Demo"])
     for material in consumption["by_material"]:
         sheet.append(
             [
@@ -304,15 +313,32 @@ def reports_hub_export(request):
                 material["unit_display"],
                 float(material["total_used"]),
                 float(material["total_material_cost"]),
+                "Demo" if material.get("includes_demo_data") else "",
             ]
         )
     sheet.append([])
     sheet.append(["Total Material Cost", float(consumption["total_cost"])])
     sheet.append(["Units Produced", consumption["total_produced"]])
     sheet.append(["Cost per Unit Produced", float(consumption["cost_per_unit_produced"])])
+    if consumption.get("includes_demo_data"):
+        sheet.append(
+            [
+                "Note",
+                "Some totals above include demo data generated to fill periods "
+                "before production tracking began (pre-May 2026); see the Demo column.",
+            ]
+        )
 
     sheet = workbook.create_sheet("Operational Performance")
     sheet.append(["Metric", "Value"])
+    if operational.get("includes_demo_data"):
+        sheet.append(
+            [
+                "Note",
+                "Some batches below include demo data generated to fill periods "
+                "before production tracking began (pre-May 2026).",
+            ]
+        )
     sheet.append(["Total Batches", operational["total_batches"]])
     sheet.append(["Completed Batches", operational["completed_batches"]])
     sheet.append(

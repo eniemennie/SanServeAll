@@ -1975,4 +1975,223 @@ class TestReportsHubExportView:
         sheet = workbook["Product Performance"]
         data_rows = list(sheet.iter_rows(min_row=2, values_only=True))
 
-        assert ("Spanish Latte", 3, 0, "New") in data_rows
+        assert ("Spanish Latte", 3, 0, "New", None) in data_rows
+
+
+class TestDemoDataInclusionAndLabeling:
+    """scripts/generate_demo_history.py (client review, 2026-11-18)
+    attributes its generated 2020-2026 production/sales history to one
+    dedicated User.DEMO_DATA_GENERATOR_USERNAME account. Unlike the
+    synthetic forecast bot, this data IS meant to surface -- but only in
+    Product Performance, Resource Consumption, and Operational
+    Performance (never Sales & Trend, Sales History, the Dashboard, or
+    get_sales_summary), and only with a per-row "includes_demo_data"
+    flag so it's never silently indistinguishable from a real sale or a
+    real batch."""
+
+    @pytest.fixture
+    def demo_user(self):
+        role, _ = Role.objects.get_or_create(name=Role.OWNER_ADMIN)
+        return User.objects.create_user(
+            username=User.DEMO_DATA_GENERATOR_USERNAME, role=role, branch=None
+        )
+
+    def test_display_name_reads_demo_not_the_raw_username(self, demo_user):
+        assert demo_user.is_demo_data_account is True
+        assert demo_user.display_name == "Demo"
+
+    def test_product_performance_includes_demo_units_and_flags_the_row(
+        self, branch, cashier, demo_user, latte
+    ):
+        _completed_sale(
+            branch, cashier, latte, quantity=2, unit_price="125.00", amount_tendered="250.00"
+        )
+        _completed_sale(
+            branch, demo_user, latte, quantity=7, unit_price="125.00", amount_tendered="875.00"
+        )
+
+        rows = {
+            r["product_name"]: r for r in services.get_product_performance(branch=branch, days=30)
+        }
+        assert rows["Spanish Latte"]["current_units"] == 9  # 2 real + 7 demo
+        assert rows["Spanish Latte"]["includes_demo_data"] is True
+
+    def test_product_performance_row_without_demo_data_is_not_flagged(self, branch, cashier, latte):
+        _completed_sale(
+            branch, cashier, latte, quantity=2, unit_price="125.00", amount_tendered="250.00"
+        )
+        rows = {
+            r["product_name"]: r for r in services.get_product_performance(branch=branch, days=30)
+        }
+        assert rows["Spanish Latte"]["includes_demo_data"] is False
+
+    def test_sales_summary_still_excludes_demo_sales(self, branch, cashier, demo_user, latte):
+        """Demo data is deliberately visible in Product Performance, but
+        it must never inflate a real revenue total."""
+        _completed_sale(
+            branch, cashier, latte, quantity=1, unit_price="125.00", amount_tendered="125.00"
+        )
+        _completed_sale(
+            branch, demo_user, latte, quantity=50, unit_price="125.00", amount_tendered="6250.00"
+        )
+
+        summary = services.get_sales_summary(branch=branch)
+        assert summary["total_revenue"] == pytest.approx(125.00)
+        assert summary["total_transactions"] == 1
+
+    def test_sales_trend_still_excludes_demo_sales(self, branch, cashier, demo_user, latte):
+        _completed_sale(
+            branch, cashier, latte, quantity=1, unit_price="125.00", amount_tendered="125.00"
+        )
+        _completed_sale(
+            branch, demo_user, latte, quantity=50, unit_price="125.00", amount_tendered="6250.00"
+        )
+
+        trend = services.get_sales_trend(branch=branch, days=30)
+        total_revenue = sum(p["revenue"] for p in trend["points"])
+        assert total_revenue == pytest.approx(125.00)
+
+    def test_resource_consumption_includes_demo_production_and_flags_it(self, branch, demo_user):
+        role = Role.objects.create(name=Role.COMMISSARY_STAFF)
+        staff = User.objects.create_user(username="commissary1", password="testpass123", role=role)
+        flour = Product.objects.create(
+            name="Flour (kg)", price="55.00", product_type=Product.ProductType.MATERIAL
+        )
+        cake = Product.objects.create(name="Cake", price="140.00")
+
+        real_record = ProductionRecord.objects.create(
+            commissary_staff=staff, product=cake, quantity_produced=10
+        )
+        IngredientUsage.objects.create(
+            production_record=real_record, material=flour, quantity_used=5
+        )
+
+        demo_record = ProductionRecord.objects.create(
+            commissary_staff=demo_user, product=cake, quantity_produced=20
+        )
+        IngredientUsage.objects.create(
+            production_record=demo_record, material=flour, quantity_used=12
+        )
+
+        summary = services.get_resource_consumption_summary(days=30)
+        assert summary["total_produced"] == 30  # 10 real + 20 demo
+        assert summary["includes_demo_data"] is True
+
+        by_material = {row["material__name"]: row for row in summary["by_material"]}
+        assert by_material["Flour (kg)"]["total_used"] == 17  # 5 real + 12 demo
+        assert by_material["Flour (kg)"]["includes_demo_data"] is True
+
+    def test_resource_consumption_without_demo_data_is_not_flagged(self, branch):
+        role = Role.objects.create(name=Role.COMMISSARY_STAFF)
+        staff = User.objects.create_user(username="commissary1", password="testpass123", role=role)
+        flour = Product.objects.create(
+            name="Flour (kg)", price="55.00", product_type=Product.ProductType.MATERIAL
+        )
+        cake = Product.objects.create(name="Cake", price="140.00")
+        record = ProductionRecord.objects.create(
+            commissary_staff=staff, product=cake, quantity_produced=10
+        )
+        IngredientUsage.objects.create(production_record=record, material=flour, quantity_used=5)
+
+        summary = services.get_resource_consumption_summary(days=30)
+        assert summary["includes_demo_data"] is False
+        assert all(not row["includes_demo_data"] for row in summary["by_material"])
+
+    def test_operational_performance_includes_demo_batches_and_flags_it(self, branch, demo_user):
+        cake = Product.objects.create(name="Cake", price="140.00")
+
+        ProductionRecord.objects.create(
+            commissary_staff=demo_user,
+            product=cake,
+            quantity_produced=10,
+            status=ProductionRecord.Status.COMPLETED,
+            quality=ProductionRecord.Quality.PASS,
+        )
+
+        summary = services.get_operational_performance_summary(days=30)
+        assert summary["total_batches"] == 1
+        assert summary["includes_demo_data"] is True
+
+    def test_operational_performance_without_demo_batches_is_not_flagged(self, branch):
+        role = Role.objects.create(name=Role.COMMISSARY_STAFF)
+        staff = User.objects.create_user(username="commissary1", password="testpass123", role=role)
+        cake = Product.objects.create(name="Cake", price="140.00")
+        ProductionRecord.objects.create(
+            commissary_staff=staff,
+            product=cake,
+            quantity_produced=10,
+            status=ProductionRecord.Status.COMPLETED,
+            quality=ProductionRecord.Quality.PASS,
+        )
+
+        summary = services.get_operational_performance_summary(days=30)
+        assert summary["includes_demo_data"] is False
+
+
+class TestReportsHubDemoDataLabeling:
+    """View/template layer: the quiet "Demo" marker added to
+    templates/analytics/reports_hub.html and the Excel export (client
+    review, 2026-11-18) must appear exactly where demo data is present,
+    and nowhere else."""
+
+    @pytest.fixture
+    def demo_user(self):
+        role, _ = Role.objects.get_or_create(name=Role.OWNER_ADMIN)
+        return User.objects.create_user(
+            username=User.DEMO_DATA_GENERATOR_USERNAME, role=role, branch=None
+        )
+
+    def test_product_performance_tab_shows_demo_badge_when_demo_data_present(
+        self, owner_client, branch, demo_user, latte
+    ):
+        _completed_sale(
+            branch, demo_user, latte, quantity=5, unit_price="125.00", amount_tendered="625.00"
+        )
+
+        response = owner_client.get(reverse("analytics:reports_hub"), {"branch": branch.pk})
+        assert response.status_code == 200
+        assert b"Demo</span>" in response.content
+        assert b"Spanish Latte" in response.content
+
+    def test_reports_hub_has_no_demo_badge_without_any_demo_data(
+        self, owner_client, branch, cashier, latte
+    ):
+        _completed_sale(
+            branch, cashier, latte, quantity=5, unit_price="125.00", amount_tendered="625.00"
+        )
+
+        response = owner_client.get(reverse("analytics:reports_hub"), {"branch": branch.pk})
+        assert response.status_code == 200
+        assert b"Demo</span>" not in response.content
+
+    def test_export_marks_demo_rows_in_product_performance_and_resource_consumption_sheets(
+        self, owner_client, branch, demo_user
+    ):
+        flour = Product.objects.create(
+            name="Flour (kg)", price="55.00", product_type=Product.ProductType.MATERIAL
+        )
+        cake = Product.objects.create(name="Cake", price="140.00")
+        _completed_sale(
+            branch, demo_user, cake, quantity=4, unit_price="140.00", amount_tendered="560.00"
+        )
+        demo_record = ProductionRecord.objects.create(
+            commissary_staff=demo_user, product=cake, quantity_produced=10
+        )
+        IngredientUsage.objects.create(
+            production_record=demo_record, material=flour, quantity_used=5
+        )
+
+        import io
+
+        import openpyxl
+
+        response = owner_client.get(reverse("analytics:reports_hub_export"), {"branch": branch.pk})
+        workbook = openpyxl.load_workbook(io.BytesIO(response.content))
+
+        product_rows = list(workbook["Product Performance"].iter_rows(min_row=2, values_only=True))
+        assert any(row[0] == "Cake" and row[-1] == "Demo" for row in product_rows)
+
+        material_rows = list(
+            workbook["Resource Consumption"].iter_rows(min_row=2, values_only=True)
+        )
+        assert any(row and row[0] == "Flour (kg)" and row[-1] == "Demo" for row in material_rows)

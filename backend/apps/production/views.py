@@ -17,7 +17,7 @@ from django.db.models.functions import Cast
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 
-from apps.accounts.models import Branch, Role
+from apps.accounts.models import Branch, Role, User
 from apps.accounts.permissions import role_required
 from apps.inventory import services as inventory_services
 from apps.inventory.models import Product
@@ -163,8 +163,23 @@ def batch_management(request):
     # stat cards, since they were counted by re-filtering an already
     # status-narrowed queryset -- that bug is fixed as part of this
     # pass, not just worked around in the template.
-    base_records = ProductionRecord.objects.select_related("product").prefetch_related(
-        "ingredient_usages__material"
+    # Client review (2026-11-18): scripts/generate_demo_history.py
+    # attributes generated 2020-2026 production history to the
+    # dedicated User.DEMO_DATA_GENERATOR_USERNAME account so the
+    # Reports Hub's Product Performance/Resource Consumption/
+    # Operational Performance tabs aren't empty for old date ranges
+    # (see apps.analytics.services._exclude_demo_data_transactions).
+    # Unlike those three tabs, Batch Logs has no date filter at all and
+    # its own stat cards (Total/Completed/Quality Rate) are computed
+    # from every ProductionRecord by default -- so unlike Reports Hub,
+    # demo batches are excluded here entirely rather than shown with a
+    # label, matching how Sales History already excludes demo sales.
+    base_records = (
+        ProductionRecord.objects.exclude(
+            commissary_staff__username=User.DEMO_DATA_GENERATOR_USERNAME
+        )
+        .select_related("product")
+        .prefetch_related("ingredient_usages__material")
     )
     if date_filter == "today":
         base_records = base_records.filter(created_at__date=timezone.now().date())
