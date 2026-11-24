@@ -139,24 +139,116 @@ the generation job had run.
     </div>
     <div class="col-md-6">
         <div class="jc-card p-3 p-md-4 h-100">
-            <div class="fw-semibold mb-2">Peak Hour &amp; Unusual Patterns</div>
-            {% if peak_hour %}
-            <p class="small">Peak transaction hour: <strong>{{ peak_hour.hour }}:00</strong> ({{ peak_hour.transaction_count }} transactions, last 30 days)</p>
-            {% else %}
-            <p class="small text-muted">Not enough transaction data yet.</p>
-            {% endif %}
-
-            {% for anomaly in anomalies %}
-            <div class="jc-card p-2 mb-2 small" style="border-left: 4px solid #8B6BB0;">
-                {{ anomaly.product.name }}: sold {{ anomaly.yesterday_units }} yesterday
-                vs. a typical {{ anomaly.baseline_average }} for this day of week
-                ({{ anomaly.deviation_pct }}% deviation)
+            {% comment %}
+            Capstone panel/defense feedback (2026-11-24): Peak Hour and
+            Unusual Patterns used to share one header and run together --
+            given their own card and sub-header respectively so they
+            read as two separate things, not one.
+            {% endcomment %}
+            <div class="jc-card p-2 px-3 mb-3" style="background: var(--jc-canvas); border: none;">
+                <div class="fw-semibold small mb-1">Peak Hour</div>
+                {% if peak_hour %}
+                <p class="small mb-2">Peak transaction hour: <strong>{{ peak_hour.hour }}:00</strong> ({{ peak_hour.transaction_count }} transactions, last 30 days)</p>
+                <canvas id="peakHourChart" height="60"></canvas>
+                {% else %}
+                <p class="small text-muted mb-0">Not enough transaction data yet.</p>
+                {% endif %}
             </div>
-            {% empty %}
+
+            <div class="fw-semibold small mb-2">Unusual Patterns</div>
+            {% if no_sales_yesterday %}
+            {% comment %}
+            Capstone client review (2026-11-24): confirmed against real
+            data (most recent completed sale system-wide is from
+            2026-11-14) that a day with zero completed sales produces
+            every tracked product "dropping to zero" at once -- that's a
+            real, correct read of an actual sales gap, not a bug, but
+            listing every product individually for it is noise. One line
+            says the same thing once.
+            {% endcomment %}
+            <div class="jc-card p-2 small" style="border-left: 4px solid var(--jc-critical);">
+                No sales recorded yesterday{% if selected_branch %} at {{ selected_branch.name }}{% else %} across any branch{% endif %}.
+            </div>
+            {% elif ordered_anomalies %}
+            <div id="anomalyList">
+                {% for item in ordered_anomalies %}
+                {% ifchanged item.group %}
+                <div class="text-muted small mb-1{% if not forloop.first %} mt-3{% endif %}">
+                    {% if item.group == "zero" %}Dropped to Zero ({{ zero_drop_anomalies|length }}){% else %}Other Deviations ({{ other_anomalies|length }}){% endif %}
+                </div>
+                {% endifchanged %}
+                <div class="jc-card p-2 mb-1 d-flex justify-content-between align-items-center flex-wrap gap-2 small anomaly-row{% if forloop.counter > 10 %} anomaly-extra d-none{% endif %}">
+                    <span class="fw-semibold">{{ item.product.name }}</span>
+                    <span class="text-muted">Yesterday: {{ item.yesterday_units }} &middot; Typical: {{ item.baseline_average }}</span>
+                    {% if item.yesterday_units == 0 %}
+                    <span class="jc-badge jc-badge-critical">Dropped to zero</span>
+                    {% elif item.deviation_pct > 0 %}
+                    <span class="jc-badge jc-badge-adequate">+{{ item.deviation_pct }}%</span>
+                    {% else %}
+                    <span class="jc-badge jc-badge-low">{{ item.deviation_pct }}%</span>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% if ordered_anomalies|length > 10 %}
+            <button type="button" id="anomalyShowAllToggle" class="btn btn-sm btn-jc-outline mt-2" data-showing-all="false">Show all ({{ ordered_anomalies|length }})</button>
+            {% endif %}
+            {% else %}
             <p class="small text-muted mb-0">No unusual patterns detected.</p>
-            {% endfor %}
+            {% endif %}
         </div>
     </div>
 </div>
 
+{% endblock %}
+
+{% block extra_js %}
+{% if peak_hour %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+(function () {
+    var values = {{ peak_hour_values_json|safe }};
+    var peakIndex = {{ peak_hour_index }};
+    new Chart(document.getElementById("peakHourChart"), {
+        type: "bar",
+        data: {
+            labels: {{ peak_hour_labels_json|safe }},
+            datasets: [{
+                label: "Transactions",
+                data: values,
+                backgroundColor: values.map(function (_, i) {
+                    return i === peakIndex ? "#D2703F" : "#D9CFC4";
+                }),
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+        }
+    });
+})();
+</script>
+{% endif %}
+<script>
+// Capstone panel/defense feedback (2026-11-24): Unusual Patterns shows
+// the top 10 rows (by severity -- see views.py) by default, same
+// show-more idiom already used elsewhere (Reports Hub/Batch Logs), just
+// without a search box since nothing here needs one.
+(function () {
+    var toggleBtn = document.getElementById("anomalyShowAllToggle");
+    if (!toggleBtn) return;
+    var rows = document.querySelectorAll("#anomalyList .anomaly-row");
+    toggleBtn.addEventListener("click", function () {
+        var showingAll = toggleBtn.dataset.showingAll === "true";
+        toggleBtn.dataset.showingAll = showingAll ? "false" : "true";
+        toggleBtn.textContent = showingAll
+            ? "Show all (" + rows.length + ")"
+            : "Show top 10";
+        rows.forEach(function (row, index) {
+            row.classList.toggle("d-none", !showingAll && index >= 10);
+        });
+    });
+})();
+</script>
 {% endblock %}

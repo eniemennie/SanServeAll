@@ -28,6 +28,42 @@ def decision_support(request):
     branch_id = request.GET.get("branch")
     branch = Branch.objects.filter(pk=branch_id).first() if branch_id else None
 
+    peak_hour = services.get_peak_hour(branch)
+
+    # Capstone panel/defense feedback (2026-11-24): "Unusual Patterns"
+    # previously listed every flagged product as one long sentence each,
+    # with no grouping or order. detect_unusual_patterns()'s own
+    # calculation is untouched below -- this only decides *how the
+    # already-returned list is grouped and ordered for display*:
+    # "dropped to zero" items grouped together first, then the rest
+    # sorted by how severe the deviation was. Confirmed against real
+    # data (client console check, 2026-11-24): the most recent completed
+    # sale system-wide is from 2026-11-14, so "every product dropped to
+    # zero yesterday" is a genuine, correct read of an actual sales gap,
+    # not a date/timezone bug -- which is exactly the case
+    # had_any_sales_yesterday()/no_sales_yesterday below collapses into
+    # one line instead of repeating each product.
+    anomalies = services.detect_unusual_patterns(branch)
+    zero_drop_anomalies = sorted(
+        (a for a in anomalies if a["yesterday_units"] == 0),
+        key=lambda a: a["product"].name,
+    )
+    other_anomalies = sorted(
+        (a for a in anomalies if a["yesterday_units"] != 0),
+        key=lambda a: abs(a["deviation_pct"]),
+        reverse=True,
+    )
+    for a in zero_drop_anomalies:
+        a["group"] = "zero"
+    for a in other_anomalies:
+        a["group"] = "other"
+    ordered_anomalies = zero_drop_anomalies + other_anomalies
+    # Mathematically guaranteed: if NO sale happened at all yesterday,
+    # no product could have a nonzero yesterday_units, so other_anomalies
+    # is always empty here too -- the single line below fully replaces
+    # the list rather than sitting alongside an (impossible) remainder.
+    no_sales_yesterday = not services.had_any_sales_yesterday(branch)
+
     return render(
         request,
         "forecasting/decision_support.html",
@@ -39,8 +75,16 @@ def decision_support(request):
             "active_nav": "decision_support",
             "critical_alerts": services.get_critical_alerts(branch),
             "slow_moving_products": services.get_slow_moving_products(branch),
-            "peak_hour": services.get_peak_hour(branch),
-            "anomalies": services.detect_unusual_patterns(branch),
+            "peak_hour": peak_hour,
+            "peak_hour_labels_json": json.dumps([f"{h}:00" for h in range(24)]),
+            "peak_hour_values_json": (
+                json.dumps(peak_hour["hourly_counts"]) if peak_hour else None
+            ),
+            "peak_hour_index": peak_hour["hour"] if peak_hour else None,
+            "zero_drop_anomalies": zero_drop_anomalies,
+            "other_anomalies": other_anomalies,
+            "ordered_anomalies": ordered_anomalies,
+            "no_sales_yesterday": no_sales_yesterday,
             # Capstone panel/defense feedback (2026-11-24): restocking
             # alerts (STOCKOUT_WARNING insights) now get their own
             # deduped, structured per-branch card -- see

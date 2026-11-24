@@ -276,6 +276,39 @@ class TestGetPeakHour:
         assert result["hour"] == 9
         assert result["transaction_count"] == 2
 
+    def test_hourly_counts_is_a_full_24_length_breakdown(self, branch, cashier, latte):
+        """Capstone panel/defense feedback (2026-11-24): additive field
+        for the Peak Hour mini bar chart -- doesn't change which hour is
+        picked as "peak" or its count (both still asserted above)."""
+        _completed_sale(branch, cashier, latte, 1, hour=9)
+        _completed_sale(branch, cashier, latte, 1, hour=9)
+        _completed_sale(branch, cashier, latte, 1, hour=14)
+
+        result = services.get_peak_hour(branch)
+        assert len(result["hourly_counts"]) == 24
+        assert result["hourly_counts"][9] == 2
+        assert result["hourly_counts"][14] == 1
+        assert result["hourly_counts"][0] == 0
+
+
+class TestHadAnySalesYesterday:
+    def test_true_when_a_completed_sale_happened_yesterday(self, branch, cashier, latte):
+        _completed_sale(branch, cashier, latte, quantity=1, days_ago=1)
+        assert services.had_any_sales_yesterday(branch) is True
+
+    def test_false_when_no_sale_happened_yesterday(self, branch, cashier, latte):
+        _completed_sale(branch, cashier, latte, quantity=1, days_ago=5)
+        assert services.had_any_sales_yesterday(branch) is False
+
+    def test_false_with_no_data_at_all(self, branch):
+        assert services.had_any_sales_yesterday(branch) is False
+
+    def test_respects_branch_scoping(self, branch, cashier, latte):
+        other_branch = Branch.objects.create(name="Batangas City", code="BATANGAS")
+        _completed_sale(branch, cashier, latte, quantity=1, days_ago=1)
+        assert services.had_any_sales_yesterday(other_branch) is False
+        assert services.had_any_sales_yesterday(branch) is True
+
 
 class TestDetectUnusualPatterns:
     def test_no_history_produces_no_anomalies(self, branch):
@@ -734,6 +767,103 @@ class TestDecisionSupportRestockingAlertCards:
         content = response.content.decode()
         assert "Demand for Spanish Latte is trending up this week." in content
         assert "AI-Generated" in content
+
+
+class TestPeakHourAndUnusualPatternsDisplay:
+    """Capstone panel/defense feedback (2026-11-24): Peak Hour gets its
+    own card with a mini chart, Unusual Patterns gets its own grouped/
+    paginated section below it."""
+
+    def test_peak_hour_card_renders_with_chart(self, owner_client, branch, cashier, latte):
+        _completed_sale(branch, cashier, latte, 1, hour=9)
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        assert "Peak Hour" in content
+        assert 'id="peakHourChart"' in content
+        assert "9:00" in content
+
+    def test_no_peak_hour_data_shows_no_chart(self, owner_client, branch):
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        assert "Not enough transaction data yet." in content
+        assert 'id="peakHourChart"' not in content
+
+    def test_dropped_to_zero_group_shows_red_badge(self, owner_client, branch, cashier, latte):
+        """Someone else sold something yesterday (so had_any_sales_
+        yesterday() is True and the single "no sales" line does NOT take
+        over), while this specific product genuinely sold zero -- the
+        per-product zero-drop row is what should show for it."""
+        cake = Product.objects.create(name="Cake", price="140.00")
+        for weeks_ago in range(1, 5):
+            _completed_sale(branch, cashier, latte, quantity=5, days_ago=1 + (weeks_ago * 7))
+        _completed_sale(branch, cashier, cake, quantity=1, days_ago=1)  # keeps the day "active"
+
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        assert "No sales recorded yesterday" not in content
+        assert "Dropped to Zero" in content
+        assert "jc-badge-critical" in content
+        assert latte.name in content
+
+    def test_single_no_sales_line_replaces_the_per_product_list(
+        self, owner_client, branch, cashier, latte
+    ):
+        """The exact real-world scenario found in this session: nothing
+        sold at all yesterday (or recently) -- one line, not one card
+        per product."""
+        for weeks_ago in range(1, 5):
+            _completed_sale(branch, cashier, latte, quantity=5, days_ago=1 + (weeks_ago * 7))
+        # No sale at all "yesterday" -- had_any_sales_yesterday() is False.
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        assert "No sales recorded yesterday" in content
+        assert branch.name in content
+        assert "Dropped to Zero" not in content
+        assert "Yesterday: 0" not in content
+
+    def test_mixed_case_shows_both_groups_sorted_by_severity(
+        self, owner_client, branch, cashier, latte
+    ):
+        cake = Product.objects.create(name="Cake", price="140.00")
+        for weeks_ago in range(1, 5):
+            _completed_sale(branch, cashier, latte, quantity=5, days_ago=1 + (weeks_ago * 7))
+            _completed_sale(branch, cashier, cake, quantity=10, days_ago=1 + (weeks_ago * 7))
+        # latte: dropped to zero yesterday. cake: smaller moderate drop.
+        _completed_sale(branch, cashier, cake, quantity=4, days_ago=1)
+
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        assert "No sales recorded yesterday" not in content
+        assert "Dropped to Zero" in content
+        assert "Other Deviations" in content
+        assert latte.name in content
+        assert cake.name in content
+        assert "jc-badge-critical" in content  # latte's "Dropped to zero"
+        assert "jc-badge-low" in content  # cake's moderate drop
+
+    def test_pagination_toggle_appears_past_ten_items(self, owner_client, branch, cashier):
+        for i in range(12):
+            product = Product.objects.create(name=f"Product {i}", price="10.00")
+            for weeks_ago in range(1, 5):
+                _completed_sale(branch, cashier, product, quantity=5, days_ago=1 + (weeks_ago * 7))
+            _completed_sale(branch, cashier, product, quantity=50, days_ago=1)
+
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        assert 'id="anomalyShowAllToggle"' in content
+        assert "Show all (12)" in content
+        assert content.count("anomaly-extra d-none") == 2  # items 11 and 12
+
+    def test_no_pagination_toggle_with_ten_or_fewer_items(self, owner_client, branch, cashier):
+        for i in range(3):
+            product = Product.objects.create(name=f"Product {i}", price="10.00")
+            for weeks_ago in range(1, 5):
+                _completed_sale(branch, cashier, product, quantity=5, days_ago=1 + (weeks_ago * 7))
+            _completed_sale(branch, cashier, product, quantity=50, days_ago=1)
+
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        assert 'id="anomalyShowAllToggle"' not in content
 
 
 class TestForecastingDashboardView:
