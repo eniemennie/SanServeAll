@@ -637,6 +637,31 @@ class TestGetRestockingAlertCards:
         assert cards[0]["item_count"] == 1
         assert cards[0]["items"][0].product == latte
 
+    def test_items_carry_a_recommended_reorder_quantity_for_the_table(self, branch, latte):
+        """Capstone client review (2026-11-24): the chip list became a
+        table with a Recommended Reorder column -- computed via the
+        exact same calculate_recommended_reorder_quantity() function
+        get_critical_alerts already uses, not a new calculation."""
+        AIInsight.objects.create(
+            branch=branch,
+            insight_type=AIInsight.InsightType.STOCKOUT_WARNING,
+            message="placeholder",
+            generated_by_ai=False,
+        )
+        InventoryRiskScore.objects.create(
+            branch=branch,
+            product=latte,
+            risk_level="HIGH",
+            quantity_on_hand=0,
+            avg_daily_demand=5.0,
+            days_of_stock_left=0.0,
+        )
+
+        cards = services.get_restocking_alert_cards()
+        expected = services.calculate_recommended_reorder_quantity(5.0, 0)
+        assert cards[0]["items"][0].recommended_reorder_quantity == expected
+        assert expected > 0
+
     def test_branch_filter_narrows_to_one_branchs_card(self, branch, latte):
         other_branch = Branch.objects.create(name="Batangas City", code="BATANGAS")
         for b in [branch, other_branch]:
@@ -752,6 +777,70 @@ class TestDecisionSupportRestockingAlertCards:
         # branch's restocking alert card.
         assert latte.name in content
         assert other_product.name not in content
+
+    def test_items_render_as_a_table_not_chips(self, owner_client, branch, latte):
+        """Capstone client review (2026-11-24): the wrapped chip list
+        became a table with explicit column headers."""
+        self._make_alert(branch, latte)
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        assert "restock-table" in content
+        assert "<th>Product</th>" in content
+        assert "<th>Risk Level</th>" in content
+        assert "Current Stock" in content
+        assert "Days Left" in content
+        assert "Recommended Reorder" in content
+        # The old chip-list wrapper is gone.
+        assert "d-flex flex-wrap gap-1" not in content
+
+    def test_row_shows_recommended_reorder_quantity(self, owner_client, branch, latte):
+        self._make_alert(branch, latte)
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        expected = services.calculate_recommended_reorder_quantity(5.0, 0)
+        assert f"+{expected} units" in content
+
+    def test_rows_in_high_before_medium_then_alphabetical_order(self, owner_client, branch, latte):
+        """View renders whatever order get_restocking_alert_cards
+        already produced (HIGH before MEDIUM, then alphabetical) --
+        this test checks that order survives into the table markup."""
+        croissant = Product.objects.create(name="Croissant", price="80.00")
+        bagel = Product.objects.create(name="Bagel", price="60.00")
+        self._make_alert(branch, latte, risk_level="MEDIUM")
+        self._make_alert(branch, croissant, risk_level="HIGH")
+        self._make_alert(branch, bagel, risk_level="HIGH")
+
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        assert content.index(bagel.name) < content.index(croissant.name) < content.index(latte.name)
+
+    def test_search_and_show_all_controls_hidden_at_ten_items_or_fewer(self, owner_client, branch):
+        for i in range(10):
+            product = Product.objects.create(name=f"Item {i:02d}", price="10.00")
+            self._make_alert(branch, product)
+
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        # The search input and toggle button themselves are absent (the
+        # class name still appears inside the generic <script> block,
+        # which runs for every card regardless of item count).
+        assert 'class="form-control form-control-sm restock-search"' not in content
+        assert 'class="btn btn-sm btn-jc-outline restock-show-all-toggle"' not in content
+        assert content.count('class="restock-row') == 10
+        assert "restock-row-extra" not in content
+
+    def test_search_and_show_all_controls_appear_past_ten_items(self, owner_client, branch):
+        for i in range(12):
+            product = Product.objects.create(name=f"Item {i:02d}", price="10.00")
+            self._make_alert(branch, product)
+
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        assert "restock-search" in content
+        assert "Show all (12)" in content
+        # First 10 rows render plain; rows after the 10th are hidden
+        # behind the "Show all" toggle until expanded client-side.
+        assert content.count('class="restock-row restock-row-extra d-none"') == 2
 
     def test_demand_summary_insights_still_render_in_the_generic_block(self, owner_client, branch):
         """Regression guard: narrowing the "insights" queryset to

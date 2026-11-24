@@ -286,7 +286,11 @@ def get_restocking_alert_cards(branch=None):
     Deliberately still HIGH/MEDIUM only, matching
     generate_insights_for_all_branches's own filter exactly -- this is a
     display reorganization, not a change to which items count as "at
-    risk"."""
+    risk". Items are already sorted HIGH before MEDIUM, then
+    alphabetically by product name within each level (capstone client
+    review, 2026-11-24: the per-branch chip list became a table, which
+    needed that sort order spelled out explicitly -- it was already the
+    order this function produced)."""
     from apps.forecasting.models import AIInsight, InventoryRiskScore
 
     insights = (
@@ -315,6 +319,16 @@ def get_restocking_alert_cards(branch=None):
             risk_level__in=[InventoryRiskScore.RiskLevel.HIGH, InventoryRiskScore.RiskLevel.MEDIUM]
         )
         items = sorted(scores, key=lambda s: (risk_priority.get(s.risk_level, 99), s.product.name))
+        # Capstone client review (2026-11-24): the chip-list -> table
+        # reformat adds a Recommended Reorder column, computed the exact
+        # same way get_critical_alerts already computes it for its own
+        # table -- not a new calculation, just also attached here
+        # (transient attribute, never saved) so the per-branch table can
+        # show it without a second query per row.
+        for score in items:
+            score.recommended_reorder_quantity = calculate_recommended_reorder_quantity(
+                score.avg_daily_demand, score.quantity_on_hand
+            )
         cards.append(
             {
                 "branch": insight.branch,

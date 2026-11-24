@@ -33,7 +33,17 @@ the generation job had run.
 <div class="mb-4">
     <div class="fw-semibold mb-2">Restocking Alerts</div>
     {% for card in restocking_alert_cards %}
-    <div class="jc-card p-3 mb-2" style="border-left: 4px solid var(--jc-teal);">
+    {% comment %}
+    Capstone client review (2026-11-24): the wrapped chip list became a
+    table (Product/Risk Level/Current Stock/Days Left/Recommended
+    Reorder) for more scannable, actionable detail -- items are already
+    sorted HIGH before MEDIUM then alphabetically (see
+    get_restocking_alert_cards), so no re-sorting happens here. A search
+    box + "Show all" expand only appear once a branch has more than 10
+    items (Batangas City/Lipa's long lists), same idiom Reports Hub/Batch
+    Logs already use.
+    {% endcomment %}
+    <div class="jc-card p-3 mb-2 jc-restock-card" style="border-left: 4px solid var(--jc-teal);">
         <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
             <div>
                 <span class="fw-semibold">{{ card.branch.name }}</span>
@@ -43,14 +53,51 @@ the generation job had run.
             <span class="jc-badge jc-badge-adequate">AI-Generated</span>
             {% endif %}
         </div>
-        <div class="d-flex flex-wrap gap-1 mb-2">
-            {% for item in card.items %}
-            <span class="jc-badge {% if item.risk_level == 'HIGH' %}jc-badge-critical{% elif item.risk_level == 'MEDIUM' %}jc-badge-low{% else %}jc-badge-mild{% endif %}">
-                {{ item.product.name }} &middot; {{ item.get_risk_level_display }}
-            </span>
-            {% endfor %}
+
+        {% if card.item_count > 10 %}
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+            <input type="search" class="form-control form-control-sm restock-search" style="max-width: 240px;" placeholder="Search products&hellip;">
+            <button type="button" class="btn btn-sm btn-jc-outline restock-show-all-toggle" data-showing-all="false">Show all ({{ card.item_count }})</button>
         </div>
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 small text-muted">
+        {% endif %}
+
+        <div class="table-responsive">
+        <table class="table table-sm mb-0 restock-table">
+            <thead>
+                <tr>
+                    <th>Product</th>
+                    <th>Risk Level</th>
+                    <th class="text-center">Current Stock</th>
+                    <th class="text-center">Days Left</th>
+                    <th class="text-end">Recommended Reorder</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in card.items %}
+                <tr class="restock-row{% if forloop.counter > 10 %} restock-row-extra d-none{% endif %}" data-search-text="{{ item.product.name|lower }}">
+                    <td>{{ item.product.name }}</td>
+                    <td>
+                        <span class="jc-badge {% if item.risk_level == 'HIGH' %}jc-badge-critical{% elif item.risk_level == 'MEDIUM' %}jc-badge-low{% else %}jc-badge-mild{% endif %}">
+                            {{ item.get_risk_level_display }}
+                        </span>
+                    </td>
+                    <td class="text-center">{{ item.quantity_on_hand }}</td>
+                    <td class="text-center">{% if item.days_of_stock_left %}{{ item.days_of_stock_left|floatformat:1 }}{% else %}&mdash;{% endif %}</td>
+                    <td class="text-end">
+                        {% if item.recommended_reorder_quantity %}
+                        <span class="jc-badge jc-badge-critical">+{{ item.recommended_reorder_quantity }} units</span>
+                        {% else %}
+                        <span class="text-muted">&mdash;</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        <p class="text-muted small mb-0 mt-2 d-none restock-no-matches">No products match that search.</p>
+
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 small text-muted mt-2">
             <span>Generated {{ card.generated_at|date:"M d, Y g:i A" }}</span>
             <a href="#restocking-recommendations">View restocking recommendations</a>
         </div>
@@ -248,6 +295,52 @@ the generation job had run.
         rows.forEach(function (row, index) {
             row.classList.toggle("d-none", !showingAll && index >= 10);
         });
+    });
+})();
+</script>
+<script>
+// Capstone client review (2026-11-24): each branch's restocking table
+// (Product/Risk Level/Current Stock/Days Left/Recommended Reorder) gets
+// its own search box + "Show all" toggle, scoped to that one card --
+// same search+cap-to-10 algorithm Reports Hub's setupReportTable()
+// already uses, generalized here to run once per .jc-restock-card
+// instead of needing a unique element id per branch.
+(function () {
+    document.querySelectorAll(".jc-restock-card").forEach(function (card) {
+        var table = card.querySelector(".restock-table");
+        if (!table) return;
+        var rows = Array.prototype.slice.call(table.querySelectorAll("tbody tr.restock-row"));
+        var searchInput = card.querySelector(".restock-search");
+        var toggleBtn = card.querySelector(".restock-show-all-toggle");
+        var noMatches = card.querySelector(".restock-no-matches");
+        if (!rows.length) return;
+
+        function applyState() {
+            var query = (searchInput && searchInput.value || "").trim().toLowerCase();
+            var showingAll = toggleBtn ? toggleBtn.dataset.showingAll === "true" : true;
+            var visibleCount = 0;
+            rows.forEach(function (row, index) {
+                var matchesSearch = !query || row.dataset.searchText.indexOf(query) !== -1;
+                var withinTopTen = showingAll || query || index < 10;
+                var visible = matchesSearch && withinTopTen;
+                row.classList.toggle("d-none", !visible);
+                if (visible) visibleCount += 1;
+            });
+            if (noMatches) noMatches.classList.toggle("d-none", visibleCount !== 0 || !query);
+        }
+
+        if (searchInput) searchInput.addEventListener("input", applyState);
+        if (toggleBtn) {
+            toggleBtn.addEventListener("click", function () {
+                var showingAll = toggleBtn.dataset.showingAll === "true";
+                toggleBtn.dataset.showingAll = showingAll ? "false" : "true";
+                toggleBtn.textContent = showingAll
+                    ? "Show all (" + rows.length + ")"
+                    : "Show top 10";
+                applyState();
+            });
+        }
+        applyState();
     });
 })();
 </script>
