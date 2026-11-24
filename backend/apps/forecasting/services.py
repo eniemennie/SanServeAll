@@ -364,7 +364,36 @@ def get_peak_hour(branch=None, days=30):
         return None
 
     peak_hour = max(hour_counts, key=hour_counts.get)
-    return {"hour": peak_hour, "transaction_count": hour_counts[peak_hour]}
+    return {
+        "hour": peak_hour,
+        "transaction_count": hour_counts[peak_hour],
+        # Capstone client review (2026-11-24): Decision Support's Peak
+        # Hour card gets a small by-hour volume chart -- additive only,
+        # the same hour_counts this function already computed, just also
+        # surfaced as a full 24-length list (0 for any hour with no
+        # transactions) rather than collapsed down to just the single
+        # peak. Which hour is picked as "peak" above is unchanged.
+        "hourly_counts": [hour_counts.get(h, 0) for h in range(24)],
+    }
+
+
+def had_any_sales_yesterday(branch=None):
+    """Capstone panel/defense feedback (2026-11-24): whether ANY
+    completed sale happened yesterday, branch-scoped the same way
+    detect_unusual_patterns() is. Used purely to decide, at display
+    time, whether Decision Support shows one consolidated "no sales
+    recorded yesterday" line instead of every product's "dropped to
+    zero" anomaly individually -- it does not change
+    detect_unusual_patterns()'s own calculation in any way."""
+    from datetime import timedelta
+
+    yesterday = timezone.localdate() - timedelta(days=1)
+    transactions = SalesTransaction.objects.filter(
+        status=SalesTransaction.Status.COMPLETED, completed_at__date=yesterday
+    )
+    if branch is not None:
+        transactions = transactions.filter(branch=branch)
+    return transactions.exists()
 
 
 def detect_unusual_patterns(branch=None, weeks_of_history=4):
