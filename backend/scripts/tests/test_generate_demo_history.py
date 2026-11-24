@@ -209,7 +209,7 @@ class TestDemoHistorySurfacesOnlyWhereIntended:
             {"branch": branch1.pk, "date_from": "2021-01-01", "date_to": "2021-03-01"},
         )
         assert response.status_code == 200
-        assert b"Demo</span>" in response.content
+        assert b"jc-demo-marker" in response.content
 
 
 class TestRemoveDemoHistory:

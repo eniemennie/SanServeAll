@@ -2150,7 +2150,7 @@ class TestReportsHubDemoDataLabeling:
 
         response = owner_client.get(reverse("analytics:reports_hub"), {"branch": branch.pk})
         assert response.status_code == 200
-        assert b"Demo</span>" in response.content
+        assert b"jc-demo-marker" in response.content
         assert b"Spanish Latte" in response.content
 
     def test_reports_hub_has_no_demo_badge_without_any_demo_data(
@@ -2162,7 +2162,7 @@ class TestReportsHubDemoDataLabeling:
 
         response = owner_client.get(reverse("analytics:reports_hub"), {"branch": branch.pk})
         assert response.status_code == 200
-        assert b"Demo</span>" not in response.content
+        assert b"jc-demo-marker" not in response.content
 
     def test_export_marks_demo_rows_in_product_performance_and_resource_consumption_sheets(
         self, owner_client, branch, demo_user

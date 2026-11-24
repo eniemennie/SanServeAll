@@ -218,7 +218,7 @@
                     <td>
                         {{ row.product_name }}
                         {% if row.includes_demo_data %}
-                        <span class="jc-badge jc-badge-info" title="This row's totals include demo data generated to fill periods before production/sale detail was tracked here (pre-May 2026). Sales &amp; Trend and Sales History never include this data.">Demo</span>
+                        <span class="jc-demo-marker" title="This row's totals include demo data generated to fill periods before production/sale detail was tracked here (pre-May 2026). Sales &amp; Trend and Sales History never include this data.">i</span>
                         {% endif %}
                     </td>
                     <td>{{ row.current_units|intcomma }}</td>
@@ -262,7 +262,7 @@
     {% endif %}
     {% if consumption.includes_demo_data %}
     <p class="text-muted small mb-3">
-        <span class="jc-badge jc-badge-info" title="Figures below include demo data generated to fill periods before production tracking began here (pre-May 2026). Sales &amp; Trend and Sales History never include this data.">Demo</span>
+        <span class="jc-demo-marker" title="Figures below include demo data generated to fill periods before production tracking began here (pre-May 2026). Sales &amp; Trend and Sales History never include this data.">i</span>
         Some totals in this range include demo data, not real production.
     </p>
     {% endif %}
@@ -317,7 +317,7 @@
                     <td>
                         {{ m.material__name }}
                         {% if m.includes_demo_data %}
-                        <span class="jc-badge jc-badge-info" title="This row's totals include demo data generated to fill periods before production tracking began here (pre-May 2026). Sales &amp; Trend and Sales History never include this data.">Demo</span>
+                        <span class="jc-demo-marker" title="This row's totals include demo data generated to fill periods before production tracking began here (pre-May 2026). Sales &amp; Trend and Sales History never include this data.">i</span>
                         {% endif %}
                     </td>
                     <td>{{ m.unit_display }}</td>
@@ -349,7 +349,7 @@
     {% endif %}
     {% if operational.includes_demo_data %}
     <p class="text-muted small mb-3">
-        <span class="jc-badge jc-badge-info" title="Figures below include demo data generated to fill periods before production tracking began here (pre-May 2026). Sales &amp; Trend and Sales History never include this data.">Demo</span>
+        <span class="jc-demo-marker" title="Figures below include demo data generated to fill periods before production tracking began here (pre-May 2026). Sales &amp; Trend and Sales History never include this data.">i</span>
         Some batches in this range are demo data, not real production.
     </p>
     {% endif %}
