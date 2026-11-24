@@ -15,6 +15,7 @@ from django.core.paginator import Paginator
 from django.db.models import CharField, Q
 from django.db.models.functions import Cast
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 
 from apps.accounts.models import Branch, Role, User
@@ -174,19 +175,44 @@ def batch_management(request):
     # from every ProductionRecord by default -- so unlike Reports Hub,
     # demo batches are excluded here entirely rather than shown with a
     # label, matching how Sales History already excludes demo sales.
+    # Capstone panel/defense feedback (2026-11-24): archived batches are
+    # excluded from the active tabs/stat cards below by default, exactly
+    # like demo batches already are -- see ProductionRecord.is_archived's
+    # own docstring for why this is "declutter the active list", not
+    # "hide from history" (Reports Hub/Dashboard totals are untouched).
     base_records = (
         ProductionRecord.objects.exclude(
             commissary_staff__username=User.DEMO_DATA_GENERATOR_USERNAME
         )
+        .filter(is_archived=False)
         .select_related("product")
         .prefetch_related("ingredient_usages__material")
     )
     if date_filter == "today":
         base_records = base_records.filter(created_at__date=timezone.now().date())
 
-    records = base_records
-    if status_filter:
-        records = records.filter(status=status_filter)
+    archived_records = (
+        ProductionRecord.objects.exclude(
+            commissary_staff__username=User.DEMO_DATA_GENERATOR_USERNAME
+        )
+        .filter(is_archived=True)
+        .select_related("product")
+        .prefetch_related("ingredient_usages__material")
+        .order_by("-archived_at")
+    )
+    archived_count = archived_records.count()
+
+    # The Archived tab shows archived batches regardless of their
+    # original status (Pending/In Progress/Completed), so it's handled
+    # as its own branch rather than another `.filter(status=...)` on
+    # base_records -- base_records has already excluded archived rows
+    # entirely.
+    if status_filter == "ARCHIVED":
+        records = archived_records
+    else:
+        records = base_records
+        if status_filter:
+            records = records.filter(status=status_filter)
 
     total = base_records.count()
     completed = base_records.filter(status=ProductionRecord.Status.COMPLETED).count()
@@ -228,6 +254,7 @@ def batch_management(request):
                 "pending": pending,
                 "total_quantity": total_quantity,
                 "quality_rate": quality_rate,
+                "archived": archived_count,
             },
             "status_choices": ProductionRecord.Status.choices,
         },
@@ -236,12 +263,23 @@ def batch_management(request):
 
 @role_required(Role.COMMISSARY_STAFF, Role.OWNER_ADMIN)
 def delete_production_record(request, record_id):
-    """Delete action (Fig. 3-24). Deliberately does NOT reverse the
-    inventory changes the record originally made -- undoing a completed
-    production run's stock effects is a distinct, more consequential
-    operation than removing the record of it, and isn't assumed safe to
-    do silently as a side effect of a delete click."""
+    """Permanent delete action (Fig. 3-24). Deliberately does NOT reverse
+    the inventory changes the record originally made -- undoing a
+    completed production run's stock effects is a distinct, more
+    consequential operation than removing the record of it, and isn't
+    assumed safe to do silently as a side effect of a delete click.
+
+    Capstone panel/defense feedback (2026-11-24): this is now a
+    deliberate second step, reachable only from the Archived tab (see
+    archive_production_record/batch_management) rather than the default
+    action from the main list -- enforced here, not just by hiding the
+    button, so a batch can't be hard-deleted by guessing this URL before
+    it's been archived first.
+    """
     record = get_object_or_404(ProductionRecord, pk=record_id)
+    if not record.is_archived:
+        return redirect("production:batch_management")
+
     if request.method == "POST":
         record.delete()
         return redirect("production:batch_management")
@@ -249,6 +287,33 @@ def delete_production_record(request, record_id):
     return render(
         request, "production/confirm_delete.html", {"active_nav": "batch", "record": record}
     )
+
+
+@role_required(Role.COMMISSARY_STAFF, Role.OWNER_ADMIN)
+def archive_production_record(request, record_id):
+    """Batch Logs "Archive" action (capstone panel/defense feedback,
+    2026-11-24): moves the batch out of the active list without
+    deleting it -- see ProductionRecord.is_archived's own docstring."""
+    record = get_object_or_404(ProductionRecord, pk=record_id)
+    if request.method == "POST":
+        services.archive_production_record(record)
+        return redirect("production:batch_management")
+
+    return render(
+        request, "production/confirm_archive.html", {"active_nav": "batch", "record": record}
+    )
+
+
+@role_required(Role.COMMISSARY_STAFF, Role.OWNER_ADMIN)
+def restore_production_record(request, record_id):
+    """Reverses archive_production_record from the Archived tab -- the
+    batch reappears in its original status tab. POST-only, no
+    confirmation step, matching how advance_stock_transfer treats its
+    own reversible, low-stakes status changes."""
+    record = get_object_or_404(ProductionRecord, pk=record_id)
+    if request.method == "POST":
+        services.restore_production_record(record)
+    return redirect(f"{reverse('production:batch_management')}?status={record.status}")
 
 
 @role_required(Role.COMMISSARY_STAFF, Role.OWNER_ADMIN)

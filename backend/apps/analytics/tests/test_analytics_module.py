@@ -537,6 +537,32 @@ class TestResourceConsumption:
         assert by_material["Cup Lids"]["unit"] == "PIECE"
         assert by_material["Cup Lids"]["unit_display"] == "pc"
 
+    def test_archiving_a_batch_does_not_remove_it_from_the_historical_total(self, branch):
+        """Capstone panel/defense feedback (2026-11-24): archiving a
+        batch in Batch Logs only hides it from that page's active
+        list/stat cards -- it must keep counting here, since archiving
+        is for decluttering the active list, not erasing history (see
+        ProductionRecord.is_archived's own docstring)."""
+        from apps.production import services as production_services
+
+        role = Role.objects.create(name=Role.COMMISSARY_STAFF)
+        staff = User.objects.create_user(username="commissary1", password="testpass123", role=role)
+        flour = Product.objects.create(
+            name="Flour (kg)", price="55.00", product_type=Product.ProductType.MATERIAL
+        )
+        cake = Product.objects.create(name="Cake", price="140.00")
+
+        record = ProductionRecord.objects.create(
+            commissary_staff=staff, product=cake, quantity_produced=10
+        )
+        IngredientUsage.objects.create(production_record=record, material=flour, quantity_used=5)
+
+        production_services.archive_production_record(record)
+
+        summary = services.get_resource_consumption_summary(days=30)
+        assert summary["total_produced"] == 10
+        assert summary["total_cost"] == pytest.approx(275.00)
+
 
 class TestOperationalPerformance:
     def test_completion_and_quality_rates(self):
@@ -571,6 +597,29 @@ class TestOperationalPerformance:
         assert summary["total_batches"] == 0
         assert summary["completion_rate"] is None
         assert summary["quality_pass_rate"] is None
+
+    def test_archiving_a_batch_does_not_remove_it_from_the_historical_total(self):
+        """Same guarantee as TestResourceConsumption's equivalent test,
+        for Operational Performance's own totals."""
+        from apps.production import services as production_services
+
+        role = Role.objects.create(name=Role.COMMISSARY_STAFF)
+        staff = User.objects.create_user(username="commissary1", password="testpass123", role=role)
+        cake = Product.objects.create(name="Cake", price="140.00")
+
+        record = ProductionRecord.objects.create(
+            commissary_staff=staff,
+            product=cake,
+            quantity_produced=10,
+            status=ProductionRecord.Status.COMPLETED,
+            quality=ProductionRecord.Quality.PASS,
+        )
+        production_services.archive_production_record(record)
+
+        summary = services.get_operational_performance_summary(days=30)
+        assert summary["total_batches"] == 1
+        assert summary["completion_rate"] == pytest.approx(100.0)
+        assert summary["quality_pass_rate"] == pytest.approx(100.0)
 
 
 class TestSalesDashboardView:

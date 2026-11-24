@@ -67,6 +67,14 @@
         {% else %}{{ label }}{% endif %}
     </a>
     {% endfor %}
+    <!-- Capstone panel/defense feedback (2026-11-24): archived batches
+         live behind their own tab rather than a fifth status, since
+         "archived" isn't a production status (a batch keeps its real
+         Pending/In Progress/Completed status while archived) -- it's a
+         separate, orthogonal "hidden from the active list" flag. -->
+    <a href="?status=ARCHIVED" class="btn btn-sm {% if status_filter == "ARCHIVED" %}jc-filter-tab-active{% else %}btn-outline-secondary{% endif %}">
+        Archived ({{ stats.archived }})
+    </a>
 </div>
 
 <div class="jc-card p-3 p-md-4">
@@ -84,6 +92,18 @@
 
     <div class="table-responsive">
     <table class="table table-sm mb-0 align-middle">
+        {% if status_filter == "ARCHIVED" %}
+        <colgroup>
+            <col style="width: 4%;">
+            <col style="width: 8%;">
+            <col style="width: 22%;">
+            <col style="width: 10%;">
+            <col style="width: 12%;">
+            <col style="width: 12%;">
+            <col style="width: 12%;">
+            <col style="width: 20%;">
+        </colgroup>
+        {% else %}
         <colgroup>
             <col style="width: 4%;">
             <col style="width: 9%;">
@@ -93,6 +113,7 @@
             <col style="width: 14%;">
             <col style="width: 20%;">
         </colgroup>
+        {% endif %}
         <thead>
             <tr>
                 <th></th>
@@ -101,6 +122,7 @@
                 <th class="text-center">Qty Produced</th>
                 <th>Quality</th>
                 <th>Status</th>
+                {% if status_filter == "ARCHIVED" %}<th>Archived on</th>{% endif %}
                 <th class="text-end pe-1">Actions</th>
             </tr>
         </thead>
@@ -132,13 +154,24 @@
                         {{ record.get_status_display }}
                     </span>
                 </td>
+                {% if status_filter == "ARCHIVED" %}
+                <td>{{ record.archived_at|date:"M d, Y" }}</td>
+                {% endif %}
                 <td class="text-end pe-1">
+                    {% if status_filter == "ARCHIVED" %}
+                    <form method="post" action="{% url 'production:restore_record' record.pk %}" class="d-inline" onclick="event.stopPropagation();">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-outline-secondary btn-sm">Restore</button>
+                    </form>
                     <a href="{% url 'production:delete_record' record.pk %}" class="btn btn-outline-danger btn-sm" onclick="event.stopPropagation();">Delete</a>
+                    {% else %}
+                    <a href="{% url 'production:archive_record' record.pk %}" class="btn btn-outline-secondary btn-sm" onclick="event.stopPropagation();">Archive</a>
+                    {% endif %}
                 </td>
             </tr>
             <tr class="collapse jc-batch-details-row" id="batch-details-{{ record.pk }}">
                 <td></td>
-                <td colspan="6">
+                <td colspan="{% if status_filter == "ARCHIVED" %}7{% else %}6{% endif %}">
                     <div class="row g-3 py-1">
                         <div class="col-md-8">
                             <div class="jc-batch-details-label mb-2">Ingredients Used</div>
@@ -162,7 +195,9 @@
                 </td>
             </tr>
             {% empty %}
-            <tr><td colspan="7" class="text-center text-muted py-3">No production batches recorded yet.</td></tr>
+            <tr><td colspan="{% if status_filter == "ARCHIVED" %}8{% else %}7{% endif %}" class="text-center text-muted py-3">
+                {% if status_filter == "ARCHIVED" %}No archived batches.{% else %}No production batches recorded yet.{% endif %}
+            </td></tr>
             {% endfor %}
         </tbody>
     </table>
