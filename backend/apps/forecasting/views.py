@@ -41,8 +41,23 @@ def decision_support(request):
             "slow_moving_products": services.get_slow_moving_products(branch),
             "peak_hour": services.get_peak_hour(branch),
             "anomalies": services.detect_unusual_patterns(branch),
+            # Capstone panel/defense feedback (2026-11-24): restocking
+            # alerts (STOCKOUT_WARNING insights) now get their own
+            # deduped, structured per-branch card -- see
+            # get_restocking_alert_cards. This "insights" list is
+            # narrowed to any other insight type (currently just
+            # DEMAND_SUMMARY, which nothing in this codebase actually
+            # generates yet) so it keeps rendering exactly as before for
+            # those.
+            "restocking_alert_cards": services.get_restocking_alert_cards(branch),
             "insights": (
-                AIInsight.objects.filter(branch=branch) if branch else AIInsight.objects.all()[:10]
+                AIInsight.objects.filter(branch=branch).exclude(
+                    insight_type=AIInsight.InsightType.STOCKOUT_WARNING
+                )
+                if branch
+                else AIInsight.objects.exclude(insight_type=AIInsight.InsightType.STOCKOUT_WARNING)[
+                    :10
+                ]
             ),
             "branches": Branch.objects.filter(is_active=True, is_commissary=False),
             "selected_branch": branch,

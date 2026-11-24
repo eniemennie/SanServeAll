@@ -22,6 +22,43 @@
     </select>
 </form>
 
+{% if restocking_alert_cards %}
+{% comment %}
+Capstone panel/defense feedback (2026-11-24): one card per branch
+(deduped to its single latest STOCKOUT_WARNING insight -- see
+services.get_restocking_alert_cards) instead of one card per insight
+row, which previously repeated the same branch's alert once per night
+the generation job had run.
+{% endcomment %}
+<div class="mb-4">
+    <div class="fw-semibold mb-2">Restocking Alerts</div>
+    {% for card in restocking_alert_cards %}
+    <div class="jc-card p-3 mb-2" style="border-left: 4px solid var(--jc-teal);">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+            <div>
+                <span class="fw-semibold">{{ card.branch.name }}</span>
+                <span class="text-muted">&mdash; {{ card.item_count }} item{{ card.item_count|pluralize }} at risk</span>
+            </div>
+            {% if card.generated_by_ai %}
+            <span class="jc-badge jc-badge-adequate">AI-Generated</span>
+            {% endif %}
+        </div>
+        <div class="d-flex flex-wrap gap-1 mb-2">
+            {% for item in card.items %}
+            <span class="jc-badge {% if item.risk_level == 'HIGH' %}jc-badge-critical{% elif item.risk_level == 'MEDIUM' %}jc-badge-low{% else %}jc-badge-mild{% endif %}">
+                {{ item.product.name }} &middot; {{ item.get_risk_level_display }}
+            </span>
+            {% endfor %}
+        </div>
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 small text-muted">
+            <span>Generated {{ card.generated_at|date:"M d, Y g:i A" }}</span>
+            <a href="#restocking-recommendations">View restocking recommendations</a>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
 {% if insights %}
 <div class="mb-4">
     {% for insight in insights %}
@@ -43,7 +80,7 @@
 </div>
 {% endif %}
 
-<div class="jc-card p-3 p-md-4 mb-4">
+<div class="jc-card p-3 p-md-4 mb-4" id="restocking-recommendations">
     <div class="fw-semibold mb-2">Critical Alerts &amp; Restocking Recommendations</div>
     <p class="text-muted small mb-2">
         Based on trailing 30-day actual sales, not the Holt-Winters forecast on the

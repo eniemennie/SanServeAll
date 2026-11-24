@@ -485,6 +485,257 @@ class TestDecisionSupportView:
         assert score.avg_daily_demand == 0.50
 
 
+class TestGetRestockingAlertCards:
+    """Capstone panel/defense feedback (2026-11-24): deduping repeated
+    STOCKOUT_WARNING insights into one structured card per branch."""
+
+    def test_only_the_latest_insight_per_branch_is_used(self, branch, latte):
+        """3 nightly runs for the same branch (the exact scenario the
+        client reported) must still produce exactly one card."""
+        now = timezone.now()
+        for days_ago in [2, 1, 0]:
+            AIInsight.objects.create(
+                branch=branch,
+                insight_type=AIInsight.InsightType.STOCKOUT_WARNING,
+                message=f"Old message from {days_ago} days ago",
+                generated_by_ai=False,
+            )
+        # Force distinct generated_at values (auto_now_add fires "now"
+        # for all three in a fast test run otherwise).
+        insights = list(AIInsight.objects.filter(branch=branch).order_by("pk"))
+        for i, insight in enumerate(insights):
+            AIInsight.objects.filter(pk=insight.pk).update(generated_at=now - timedelta(days=2 - i))
+        newest = AIInsight.objects.get(pk=insights[-1].pk)
+
+        InventoryRiskScore.objects.create(
+            branch=branch,
+            product=latte,
+            risk_level="HIGH",
+            quantity_on_hand=0,
+            avg_daily_demand=5.0,
+            days_of_stock_left=0.0,
+        )
+
+        cards = services.get_restocking_alert_cards()
+        assert len(cards) == 1
+        assert cards[0]["branch"] == branch
+        assert cards[0]["generated_at"] == newest.generated_at  # the newest one
+
+    def test_items_come_from_live_risk_scores_not_the_insight_text(self, branch, latte):
+        AIInsight.objects.create(
+            branch=branch,
+            insight_type=AIInsight.InsightType.STOCKOUT_WARNING,
+            message="Lipa City: the following items are at risk -- some stale wording.",
+            generated_by_ai=False,
+        )
+        InventoryRiskScore.objects.create(
+            branch=branch,
+            product=latte,
+            risk_level="HIGH",
+            quantity_on_hand=0,
+            avg_daily_demand=5.0,
+            days_of_stock_left=0.0,
+        )
+
+        cards = services.get_restocking_alert_cards()
+        assert cards[0]["item_count"] == 1
+        assert cards[0]["items"][0].product == latte
+        assert cards[0]["items"][0].risk_level == "HIGH"
+
+    def test_items_are_ordered_high_before_medium(self, branch):
+        cereal = Product.objects.create(name="Cereal Box", price="50.00")
+        milk = Product.objects.create(name="Milk Carton", price="60.00")
+        AIInsight.objects.create(
+            branch=branch,
+            insight_type=AIInsight.InsightType.STOCKOUT_WARNING,
+            message="placeholder",
+            generated_by_ai=False,
+        )
+        InventoryRiskScore.objects.create(
+            branch=branch,
+            product=milk,
+            risk_level="MEDIUM",
+            quantity_on_hand=5,
+            avg_daily_demand=1.0,
+            days_of_stock_left=5.0,
+        )
+        InventoryRiskScore.objects.create(
+            branch=branch,
+            product=cereal,
+            risk_level="HIGH",
+            quantity_on_hand=0,
+            avg_daily_demand=1.0,
+            days_of_stock_left=0.0,
+        )
+
+        cards = services.get_restocking_alert_cards()
+        names_in_order = [item.product.name for item in cards[0]["items"]]
+        assert names_in_order == ["Cereal Box", "Milk Carton"]
+
+    def test_low_risk_items_are_not_included(self, branch, latte):
+        """The underlying "what counts as at-risk" filter is deliberately
+        untouched -- same HIGH/MEDIUM-only rule
+        generate_insights_for_all_branches already used."""
+        healthy_product = Product.objects.create(name="Bottled Water", price="20.00")
+        AIInsight.objects.create(
+            branch=branch,
+            insight_type=AIInsight.InsightType.STOCKOUT_WARNING,
+            message="placeholder",
+            generated_by_ai=False,
+        )
+        InventoryRiskScore.objects.create(
+            branch=branch,
+            product=latte,
+            risk_level="HIGH",
+            quantity_on_hand=0,
+            avg_daily_demand=5.0,
+            days_of_stock_left=0.0,
+        )
+        InventoryRiskScore.objects.create(
+            branch=branch,
+            product=healthy_product,
+            risk_level="LOW",
+            quantity_on_hand=500,
+            avg_daily_demand=1.0,
+            days_of_stock_left=500.0,
+        )
+
+        cards = services.get_restocking_alert_cards()
+        assert cards[0]["item_count"] == 1
+        assert cards[0]["items"][0].product == latte
+
+    def test_branch_filter_narrows_to_one_branchs_card(self, branch, latte):
+        other_branch = Branch.objects.create(name="Batangas City", code="BATANGAS")
+        for b in [branch, other_branch]:
+            AIInsight.objects.create(
+                branch=b,
+                insight_type=AIInsight.InsightType.STOCKOUT_WARNING,
+                message="placeholder",
+                generated_by_ai=False,
+            )
+            InventoryRiskScore.objects.create(
+                branch=b,
+                product=latte,
+                risk_level="HIGH",
+                quantity_on_hand=0,
+                avg_daily_demand=5.0,
+                days_of_stock_left=0.0,
+            )
+
+        cards = services.get_restocking_alert_cards(branch=branch)
+        assert len(cards) == 1
+        assert cards[0]["branch"] == branch
+
+    def test_no_insights_returns_no_cards(self):
+        assert services.get_restocking_alert_cards() == []
+
+
+class TestDecisionSupportRestockingAlertCards:
+    """View/template layer for the same feature."""
+
+    def _make_alert(self, branch, product, risk_level="HIGH"):
+        AIInsight.objects.create(
+            branch=branch,
+            insight_type=AIInsight.InsightType.STOCKOUT_WARNING,
+            message=f"{branch.name}: the following items are at risk -- {product.name} (HIGH).",
+            generated_by_ai=False,
+        )
+        InventoryRiskScore.objects.create(
+            branch=branch,
+            product=product,
+            risk_level=risk_level,
+            quantity_on_hand=0,
+            avg_daily_demand=5.0,
+            days_of_stock_left=0.0,
+        )
+
+    def test_old_repeated_long_sentence_no_longer_appears_more_than_once(
+        self, owner_client, branch, latte
+    ):
+        for _ in range(3):
+            AIInsight.objects.create(
+                branch=branch,
+                insight_type=AIInsight.InsightType.STOCKOUT_WARNING,
+                message=(
+                    f"{branch.name}: the following items are at risk of running out "
+                    f"soon -- {latte.name} (HIGH). Consider restocking soon."
+                ),
+                generated_by_ai=False,
+            )
+        InventoryRiskScore.objects.create(
+            branch=branch,
+            product=latte,
+            risk_level="HIGH",
+            quantity_on_hand=0,
+            avg_daily_demand=5.0,
+            days_of_stock_left=0.0,
+        )
+
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        # The old long-sentence wording is gone entirely, replaced by the
+        # structured card -- not just deduplicated down to one instance.
+        assert content.count("the following items are at risk") == 0
+
+    def test_card_shows_branch_header_and_item_count(self, owner_client, branch, latte):
+        self._make_alert(branch, latte)
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        assert branch.name in content
+        assert "1 item at risk" in content
+
+    def test_card_shows_item_as_a_badge_with_its_risk_level(self, owner_client, branch, latte):
+        self._make_alert(branch, latte, risk_level="HIGH")
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        assert "jc-badge-critical" in content
+        assert latte.name in content
+        assert "High Risk" in content
+
+    def test_card_shows_generated_at_timestamp(self, owner_client, branch, latte):
+        self._make_alert(branch, latte)
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        assert "Generated" in content
+
+    def test_action_link_points_to_the_recommendations_anchor(self, owner_client, branch, latte):
+        self._make_alert(branch, latte)
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        assert 'href="#restocking-recommendations"' in content
+        assert 'id="restocking-recommendations"' in content
+
+    def test_branch_dropdown_filter_shows_only_that_branchs_card(self, owner_client, branch, latte):
+        other_branch = Branch.objects.create(name="Batangas City", code="BATANGAS")
+        other_product = Product.objects.create(name="Croissant", price="80.00")
+        self._make_alert(branch, latte)
+        self._make_alert(other_branch, other_product)
+
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        # Both branch names legitimately appear in the branch dropdown's
+        # own <option> list regardless of filter -- the real check is
+        # that the OTHER branch's at-risk product doesn't leak into this
+        # branch's restocking alert card.
+        assert latte.name in content
+        assert other_product.name not in content
+
+    def test_demand_summary_insights_still_render_in_the_generic_block(self, owner_client, branch):
+        """Regression guard: narrowing the "insights" queryset to
+        exclude STOCKOUT_WARNING must not affect any other insight
+        type's existing rendering."""
+        AIInsight.objects.create(
+            branch=branch,
+            insight_type=AIInsight.InsightType.DEMAND_SUMMARY,
+            message="Demand for Spanish Latte is trending up this week.",
+            generated_by_ai=True,
+        )
+        response = owner_client.get(reverse("forecasting:decision_support"), {"branch": branch.pk})
+        content = response.content.decode()
+        assert "Demand for Spanish Latte is trending up this week." in content
+        assert "AI-Generated" in content
+
+
 class TestForecastingDashboardView:
     def test_owner_can_view(self, owner_client):
         response = owner_client.get(reverse("forecasting:forecasting_dashboard"))
