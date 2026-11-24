@@ -50,6 +50,19 @@ class ProductionRecord(models.Model):
     notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    # Capstone panel/defense feedback (2026-11-24): Batch Logs previously
+    # only offered a hard "Delete", with no way to declutter the active
+    # list without permanently losing a batch's data. Archiving sets
+    # this flag instead of deleting the row -- the batch disappears from
+    # the active status tabs/stat cards (see
+    # apps.production.views.batch_management) but every field (product,
+    # quantity, quality, status, ingredient usage, supplier) stays
+    # intact, and it can be restored. Deliberately NOT filtered out of
+    # apps.analytics.services or get_total_output -- archiving is about
+    # decluttering the active list, not erasing history, so historical
+    # reports keep counting an archived batch exactly as before.
+    is_archived = models.BooleanField(default=False)
+    archived_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]

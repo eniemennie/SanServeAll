@@ -222,6 +222,27 @@ def record_production(commissary_staff, product_id, quantity_produced, ingredien
     return record
 
 
+def archive_production_record(record):
+    """Batch Logs "Archive" action (capstone panel/defense feedback,
+    2026-11-24): moves a batch out of the active Batch Logs list without
+    deleting it or touching any of its data -- see
+    ProductionRecord.is_archived's own docstring for why historical
+    reports are deliberately unaffected."""
+    record.is_archived = True
+    record.archived_at = timezone.now()
+    record.save(update_fields=["is_archived", "archived_at"])
+    return record
+
+
+def restore_production_record(record):
+    """Reverses archive_production_record -- the batch reappears in its
+    original status tab with every field untouched."""
+    record.is_archived = False
+    record.archived_at = None
+    record.save(update_fields=["is_archived", "archived_at"])
+    return record
+
+
 # Forward-only lifecycle -- the only legal "next status" from each status.
 # Enforced in advance_stock_transfer_status rather than left to callers,
 # so skipping a step or going backward is a service-level error, not a

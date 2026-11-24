@@ -382,7 +382,29 @@ class TestBatchManagementView:
         response = client.get(reverse("production:batch_management"))
         assert response.status_code == 200
 
-    def test_delete_removes_the_record(self, commissary_client, commissary_staff, cake, flour):
+    def test_delete_removes_the_record_once_archived(
+        self, commissary_client, commissary_staff, cake, flour
+    ):
+        """Capstone panel/defense feedback (2026-11-24): permanent delete
+        is now a deliberate second step reachable only after a batch has
+        been archived first (see test_delete_refuses_a_non_archived_record
+        below for the other half of this behavior change)."""
+        record = services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 5}],
+        )
+        services.archive_production_record(record)
+        response = commissary_client.post(reverse("production:delete_record", args=[record.pk]))
+        assert response.status_code == 302
+        assert not ProductionRecord.objects.filter(pk=record.pk).exists()
+
+    def test_delete_refuses_a_non_archived_record(
+        self, commissary_client, commissary_staff, cake, flour
+    ):
+        """Hard delete must not be reachable from the active list, even
+        by posting directly to the URL -- archiving first is required."""
         record = services.record_production(
             commissary_staff=commissary_staff,
             product_id=cake.pk,
@@ -391,7 +413,7 @@ class TestBatchManagementView:
         )
         response = commissary_client.post(reverse("production:delete_record", args=[record.pk]))
         assert response.status_code == 302
-        assert not ProductionRecord.objects.filter(pk=record.pk).exists()
+        assert ProductionRecord.objects.filter(pk=record.pk).exists()
 
     def test_delete_does_not_reverse_inventory_changes(
         self, commissary_client, commissary, commissary_staff, cake, flour
@@ -404,6 +426,7 @@ class TestBatchManagementView:
             quantity_produced=10,
             ingredient_rows=[{"material_id": flour.pk, "quantity_used": 5}],
         )
+        services.archive_production_record(record)
         commissary_client.post(reverse("production:delete_record", args=[record.pk]))
 
         flour_inventory = Inventory.objects.get(branch=commissary, product=flour)
@@ -495,6 +518,136 @@ class TestBatchManagementView:
         )
         response = commissary_client.get(reverse("production:batch_management"))
         assert "ABC Grains Co." in response.content.decode()
+
+
+class TestBatchArchiving:
+    """Capstone panel/defense feedback (2026-11-24): Archive/Restore on
+    Batch Logs, replacing hard delete as the default row action."""
+
+    def test_active_tab_row_shows_archive_not_delete(
+        self, commissary_client, commissary_staff, cake, flour
+    ):
+        record = services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 5}],
+        )
+        response = commissary_client.get(reverse("production:batch_management"))
+        content = response.content.decode()
+        assert reverse("production:archive_record", args=[record.pk]) in content
+        assert reverse("production:delete_record", args=[record.pk]) not in content
+
+    def test_archive_confirm_page_renders(self, commissary_client, commissary_staff, cake, flour):
+        record = services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 5}],
+        )
+        response = commissary_client.get(reverse("production:archive_record", args=[record.pk]))
+        assert response.status_code == 200
+        assert "Archive Batch" in response.content.decode()
+
+    def test_archiving_sets_the_flag_and_does_not_touch_other_data(
+        self, commissary_client, commissary_staff, cake, flour
+    ):
+        record = services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 5}],
+            supplier="ABC Grains Co.",
+        )
+        response = commissary_client.post(reverse("production:archive_record", args=[record.pk]))
+        assert response.status_code == 302
+
+        record.refresh_from_db()
+        assert record.is_archived is True
+        assert record.archived_at is not None
+        # Nothing about the batch itself changed.
+        assert record.quantity_produced == 10
+        assert record.supplier == "ABC Grains Co."
+        assert record.product_id == cake.pk
+        assert IngredientUsage.objects.filter(production_record=record).count() == 1
+
+    def test_archived_batch_excluded_from_active_tabs_and_stat_cards(
+        self, commissary_client, commissary_staff, cake, flour
+    ):
+        record = services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 5}],
+        )
+        services.archive_production_record(record)
+
+        response = commissary_client.get(reverse("production:batch_management"))
+        assert response.status_code == 200
+        assert response.context["stats"]["total"] == 0
+        assert f"#{record.pk}" not in response.content.decode()
+
+    def test_archived_tab_lists_the_batch_regardless_of_original_status(
+        self, commissary_client, commissary_staff, cake, flour
+    ):
+        record = services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 5}],
+            status=ProductionRecord.Status.IN_PROGRESS,
+        )
+        services.archive_production_record(record)
+
+        response = commissary_client.get(
+            reverse("production:batch_management"), {"status": "ARCHIVED"}
+        )
+        assert response.status_code == 200
+        content = response.content.decode()
+        assert f"#{record.pk}" in content
+        assert "In Progress" in content
+        assert response.context["stats"]["archived"] == 1
+
+    def test_restore_clears_the_flag_and_returns_to_its_original_tab(
+        self, commissary_client, commissary_staff, cake, flour
+    ):
+        record = services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 5}],
+            status=ProductionRecord.Status.COMPLETED,
+        )
+        services.archive_production_record(record)
+
+        response = commissary_client.post(reverse("production:restore_record", args=[record.pk]))
+        assert response.status_code == 302
+        assert response.url == reverse("production:batch_management") + "?status=COMPLETED"
+
+        record.refresh_from_db()
+        assert record.is_archived is False
+        assert record.archived_at is None
+
+        active_response = commissary_client.get(reverse("production:batch_management"))
+        assert f"#{record.pk}" in active_response.content.decode()
+
+    def test_delete_is_only_offered_from_the_archived_tab(
+        self, commissary_client, commissary_staff, cake, flour
+    ):
+        record = services.record_production(
+            commissary_staff=commissary_staff,
+            product_id=cake.pk,
+            quantity_produced=10,
+            ingredient_rows=[{"material_id": flour.pk, "quantity_used": 5}],
+        )
+        services.archive_production_record(record)
+
+        response = commissary_client.get(
+            reverse("production:batch_management"), {"status": "ARCHIVED"}
+        )
+        content = response.content.decode()
+        assert reverse("production:delete_record", args=[record.pk]) in content
+        assert reverse("production:restore_record", args=[record.pk]) in content
 
 
 class TestGetTotalOutput:
