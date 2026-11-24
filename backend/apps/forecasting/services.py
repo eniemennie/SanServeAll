@@ -264,6 +264,71 @@ def get_critical_alerts(branch=None):
     return alerts
 
 
+def get_restocking_alert_cards(branch=None):
+    """Capstone panel/defense feedback (2026-11-24): Decision Support
+    previously rendered one card per AIInsight row, and since
+    generate_insights_for_all_branches (Row 11.2) APPENDS a new
+    STOCKOUT_WARNING insight per at-risk branch every night rather than
+    updating an existing one, the same branch's alert kept reappearing
+    once per night it ran, as a single long sentence
+    ("Branch: the following items are at risk ... Item A (HIGH), Item B
+    (HIGH) ... Consider restocking soon.").
+
+    This reshapes that into one structured card per branch: only the
+    single latest insight per branch (deduped here, not by changing how
+    insights are generated or stored), with its at-risk items reread
+    live from get_latest_risk_scores -- the exact same
+    InventoryRiskScore data generate_insights_for_all_branches itself
+    summarized into that insight's message, not a re-parse of the
+    free-text sentence (which can't be done reliably for a real
+    AI-generated sentence anyway).
+
+    Deliberately still HIGH/MEDIUM only, matching
+    generate_insights_for_all_branches's own filter exactly -- this is a
+    display reorganization, not a change to which items count as "at
+    risk"."""
+    from apps.forecasting.models import AIInsight, InventoryRiskScore
+
+    insights = (
+        AIInsight.objects.filter(insight_type=AIInsight.InsightType.STOCKOUT_WARNING)
+        .select_related("branch")
+        .order_by("-generated_at")
+    )
+    if branch is not None:
+        insights = insights.filter(branch=branch)
+
+    # Already ordered newest-first above, so the first insight seen for
+    # a given branch_id here is that branch's latest one.
+    latest_insight_by_branch = {}
+    for insight in insights:
+        latest_insight_by_branch.setdefault(insight.branch_id, insight)
+
+    risk_priority = {
+        InventoryRiskScore.RiskLevel.HIGH: 0,
+        InventoryRiskScore.RiskLevel.MEDIUM: 1,
+        InventoryRiskScore.RiskLevel.LOW: 2,
+    }
+
+    cards = []
+    for insight in latest_insight_by_branch.values():
+        scores = get_latest_risk_scores(insight.branch).filter(
+            risk_level__in=[InventoryRiskScore.RiskLevel.HIGH, InventoryRiskScore.RiskLevel.MEDIUM]
+        )
+        items = sorted(scores, key=lambda s: (risk_priority.get(s.risk_level, 99), s.product.name))
+        cards.append(
+            {
+                "branch": insight.branch,
+                "generated_at": insight.generated_at,
+                "generated_by_ai": insight.generated_by_ai,
+                "items": items,
+                "item_count": len(items),
+            }
+        )
+
+    cards.sort(key=lambda c: c["branch"].name)
+    return cards
+
+
 def get_slow_moving_products(branch=None, limit=5):
     """Products with real stock on hand but very low sales velocity
     (Fig. 3-21). Items with zero avg_daily_demand AND zero stock are

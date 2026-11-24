@@ -185,6 +185,15 @@ body {
 .jc-badge-low { background-color: #FBF1DC; color: #A9781F; }
 .jc-badge-adequate { background-color: #E3F1E8; color: var(--jc-adequate); }
 .jc-badge-info { background-color: #E5EEF6; color: #3E6B92; }
+/* Capstone panel/defense feedback (2026-11-24): the Decision Support
+   page's restocking alert cards use HIGH=jc-badge-critical (red),
+   MEDIUM=jc-badge-low (orange) -- both already exist above -- plus this
+   new LOW=yellow variant for the same 3-level risk scheme. Note:
+   get_restocking_alert_cards only ever lists HIGH/MEDIUM items (same
+   filter generate_insights_for_all_branches already used), so this
+   class is unused by real data today -- added for a scheme that's
+   complete if that filter is ever widened later. */
+.jc-badge-mild { background-color: #FEF6D8; color: #8A6D1D; }
 
 /* --- Demo-data marker: deliberately quieter than a jc-badge pill (see
    scripts/generate_demo_history.py). Keeps the same informational
