@@ -108,6 +108,21 @@ class SalesTransaction(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            # Stress-test benchmark (capstone panel revision, Dr. Rowell
+            # M. Hernandez, 2026-11-27) surfaced a severe slowdown at
+            # realistic volume (~270,000 rows) on Reports Hub, Dashboard
+            # Home, and Decision Support: every one of them filters on
+            # status=COMPLETED together with a completed_at range or
+            # exact date, and this table had NO index on completed_at at
+            # all -- every such query was a full sequential scan.
+            # Composite (not two separate single-column indexes) because
+            # every real call site filters on both columns together, and
+            # a composite index serves that combined predicate directly
+            # rather than requiring SQLite to intersect two separate
+            # index scans.
+            models.Index(fields=["status", "completed_at"], name="pos_txn_status_completed_idx"),
+        ]
 
     def __str__(self):
         return f"Transaction #{self.pk} ({self.status})"

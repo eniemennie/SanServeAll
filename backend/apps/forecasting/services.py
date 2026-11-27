@@ -391,6 +391,23 @@ def get_peak_hour(branch=None, days=30):
     }
 
 
+def _local_day_range(day):
+    """The half-open [start, end) datetime range, in the active
+    timezone, covering one calendar day -- expressed with completed_at__
+    gte/__lt rather than completed_at__date=day so the query can use a
+    plain index on completed_at. completed_at__date=... compiles (on
+    SQLite) to a wrapped django_datetime_cast_date(completed_at)=...
+    expression that cannot use a plain index at all, forcing a full
+    table scan -- confirmed as the dominant cause of a 50x-3,000x
+    slowdown under a ~270,000-row stress test (capstone panel revision,
+    Dr. Rowell M. Hernandez, 2026-11-27); see
+    apps.pos.models.SalesTransaction.Meta.indexes for the matching
+    index this is designed to use."""
+    start = timezone.make_aware(datetime.datetime.combine(day, datetime.time.min))
+    end = start + datetime.timedelta(days=1)
+    return start, end
+
+
 def had_any_sales_yesterday(branch=None):
     """Capstone panel/defense feedback (2026-11-24): whether ANY
     completed sale happened yesterday, branch-scoped the same way
@@ -398,12 +415,22 @@ def had_any_sales_yesterday(branch=None):
     time, whether Decision Support shows one consolidated "no sales
     recorded yesterday" line instead of every product's "dropped to
     zero" anomaly individually -- it does not change
-    detect_unusual_patterns()'s own calculation in any way."""
+    detect_unusual_patterns()'s own calculation in any way.
+
+    Uses a half-open completed_at range (_local_day_range) rather than
+    completed_at__date=yesterday -- see that helper's docstring. This
+    matters most precisely when the real answer is False: .exists()
+    can short-circuit on the first match, but proving there is NO match
+    requires scanning every row that could match, and an unindexed
+    completed_at__date lookup means scanning the WHOLE table to do
+    that -- exactly the "no sales recorded yesterday" case this
+    function exists to detect."""
     from datetime import timedelta
 
     yesterday = timezone.localdate() - timedelta(days=1)
+    start, end = _local_day_range(yesterday)
     transactions = SalesTransaction.objects.filter(
-        status=SalesTransaction.Status.COMPLETED, completed_at__date=yesterday
+        status=SalesTransaction.Status.COMPLETED, completed_at__gte=start, completed_at__lt=end
     )
     if branch is not None:
         transactions = transactions.filter(branch=branch)
@@ -414,42 +441,73 @@ def detect_unusual_patterns(branch=None, weeks_of_history=4):
     """Flags a product whose sales YESTERDAY deviated sharply (more than
     50% above or below) from that same weekday's average over the last
     few weeks. A simple, genuinely computable anomaly signal -- not a
-    statistical model, just a real comparison against real history."""
+    statistical model, just a real comparison against real history.
+
+    Rewritten (capstone panel revision, Dr. Rowell M. Hernandez,
+    2026-11-27 -- stress-test benchmark at ~270,000 rows) from a
+    per-product Python loop issuing ~5 separate queries each (one per
+    comparison week plus one for yesterday -- roughly weeks_of_history+1
+    queries x however many distinct products exist) down to ONE
+    aggregate query covering the whole comparison window, plus one
+    batched Product fetch for whatever gets flagged. The per-product
+    loop wasn't just "more queries": each one filtered on
+    completed_at__date=..., which (see _local_day_range) cannot use a
+    plain index on SQLite, so every one of those queries was ALSO a
+    full table scan -- the combination was the dominant cause of a
+    documented ~3,000x slowdown at that data volume (confirmed via
+    scripts/benchmark_report_performance.py). The anomaly-selection math
+    itself (same-weekday baseline, >50% deviation threshold, "no
+    baseline/zero baseline -> skip") is byte-for-byte unchanged -- only
+    how the underlying daily totals are fetched changed, verified
+    against the pre-existing TestDetectUnusualPatterns tests."""
     from datetime import timedelta
+
+    from django.db.models.functions import TruncDate
 
     yesterday = timezone.localdate() - timedelta(days=1)
     weekday = yesterday.weekday()
-
     comparison_start = yesterday - timedelta(weeks=weeks_of_history)
 
-    def _units_sold_on(target_date, product_id=None):
-        items = SalesItem.objects.filter(
-            transaction__status=SalesTransaction.Status.COMPLETED,
-            transaction__completed_at__date=target_date,
-        )
-        if branch is not None:
-            items = items.filter(transaction__branch=branch)
-        if product_id is not None:
-            items = items.filter(product_id=product_id)
-        return items.aggregate(total=models.Sum("quantity"))["total"] or 0
+    window_start, _ = _local_day_range(comparison_start)
+    _, window_end = _local_day_range(yesterday)
 
-    product_ids = (
-        SalesItem.objects.filter(transaction__status=SalesTransaction.Status.COMPLETED)
-        .values_list("product_id", flat=True)
-        .distinct()
+    items = SalesItem.objects.filter(
+        transaction__status=SalesTransaction.Status.COMPLETED,
+        transaction__completed_at__gte=window_start,
+        transaction__completed_at__lt=window_end,
+    )
+    if branch is not None:
+        items = items.filter(transaction__branch=branch)
+
+    daily_totals = (
+        items.annotate(day=TruncDate("transaction__completed_at"))
+        .values("day", "product_id")
+        .annotate(total=models.Sum("quantity"))
     )
 
-    anomalies = []
-    for product_id in product_ids:
-        if product_id is None:
+    # {(date, product_id): units sold that day}. Only products that sold
+    # at least once somewhere in [comparison_start, yesterday] appear
+    # here -- equivalent to the original's full all-time product list,
+    # since a product absent from this window would have an all-zero
+    # same_weekday_totals below and be skipped anyway (see the original
+    # docstring's "if not same_weekday_totals or sum(...) == 0: continue").
+    totals_by_day_product = {}
+    product_ids_seen = set()
+    for row in daily_totals:
+        if row["product_id"] is None:
             continue
-        yesterday_units = _units_sold_on(yesterday, product_id)
+        totals_by_day_product[(row["day"], row["product_id"])] = row["total"] or 0
+        product_ids_seen.add(row["product_id"])
+
+    raw_anomalies = []
+    for product_id in product_ids_seen:
+        yesterday_units = totals_by_day_product.get((yesterday, product_id), 0)
 
         same_weekday_totals = []
         check_date = yesterday - timedelta(weeks=1)
         while check_date >= comparison_start:
             if check_date.weekday() == weekday:
-                same_weekday_totals.append(_units_sold_on(check_date, product_id))
+                same_weekday_totals.append(totals_by_day_product.get((check_date, product_id), 0))
             check_date -= timedelta(days=1)
 
         if not same_weekday_totals or sum(same_weekday_totals) == 0:
@@ -461,16 +519,29 @@ def detect_unusual_patterns(branch=None, weeks_of_history=4):
 
         deviation_pct = ((yesterday_units - baseline) / baseline) * 100
         if abs(deviation_pct) > 50:
-            product = Product.objects.get(pk=product_id)
-            anomalies.append(
+            raw_anomalies.append(
                 {
-                    "product": product,
+                    "product_id": product_id,
                     "yesterday_units": yesterday_units,
                     "baseline_average": round(baseline, 1),
                     "deviation_pct": round(deviation_pct, 1),
                 }
             )
 
+    if not raw_anomalies:
+        return []
+
+    products_by_id = Product.objects.in_bulk(a["product_id"] for a in raw_anomalies)
+    anomalies = []
+    for a in raw_anomalies:
+        anomalies.append(
+            {
+                "product": products_by_id[a["product_id"]],
+                "yesterday_units": a["yesterday_units"],
+                "baseline_average": a["baseline_average"],
+                "deviation_pct": a["deviation_pct"],
+            }
+        )
     return anomalies
 
 

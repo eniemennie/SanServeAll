@@ -9,6 +9,8 @@ query would otherwise mix stale and fresh rows together on.
 from datetime import timedelta
 
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
@@ -333,6 +335,50 @@ class TestDetectUnusualPatterns:
 
         anomalies = services.detect_unusual_patterns(branch)
         assert anomalies == []
+
+
+class TestDetectUnusualPatternsQueryCount:
+    """Regression tests for the 2026-11-27 rewrite (capstone panel
+    revision, Dr. Rowell M. Hernandez -- ~270,000-row stress-test
+    benchmark): the old implementation issued roughly
+    (weeks_of_history + 1) queries PER DISTINCT PRODUCT, so query count
+    scaled linearly with the number of products on the menu. These
+    tests lock in that the new aggregate-query implementation issues a
+    constant, small number of queries regardless of how many products
+    exist -- the whole point of the rewrite."""
+
+    def _sell_everything(self, branch, cashier, products):
+        for weeks_ago in range(1, 5):
+            for product in products:
+                _completed_sale(branch, cashier, product, quantity=5, days_ago=1 + (weeks_ago * 7))
+        for product in products:
+            _completed_sale(branch, cashier, product, quantity=6, days_ago=1)
+
+    def test_query_count_does_not_scale_with_product_count(self, branch, cashier, latte):
+        self._sell_everything(branch, cashier, [latte])
+        with CaptureQueriesContext(connection) as ctx_one_product:
+            services.detect_unusual_patterns(branch)
+        baseline_queries = len(ctx_one_product.captured_queries)
+
+        many_products = [latte] + [
+            Product.objects.create(name=f"Product {n}", price="100.00") for n in range(19)
+        ]
+        self._sell_everything(branch, cashier, many_products)
+        with CaptureQueriesContext(connection) as ctx_many_products:
+            services.detect_unusual_patterns(branch)
+
+        assert len(ctx_many_products.captured_queries) == baseline_queries
+
+    def test_had_any_sales_yesterday_uses_an_index_friendly_range_filter(self, branch):
+        """Confirms had_any_sales_yesterday() no longer compiles to the
+        wrapped completed_at__date=... expression that can't use a plain
+        index on SQLite -- it should issue a plain gte/lt range query
+        instead, with no django_datetime_cast_date(...) wrapper in the
+        generated SQL."""
+        with CaptureQueriesContext(connection) as ctx:
+            services.had_any_sales_yesterday(branch)
+        assert len(ctx.captured_queries) == 1
+        assert "django_datetime_cast_date" not in ctx.captured_queries[0]["sql"]
 
 
 class TestGetLatestForecastBatch:
