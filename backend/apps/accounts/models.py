@@ -144,9 +144,27 @@ class User(AbstractUser):
     #   & Trend, Sales History, the Dashboard, or the Excel export --
     #   see _exclude_demo_data_transactions in apps.analytics.services,
     #   applied everywhere except get_product_performance.
+    # - STRESS_TEST_GENERATOR_USERNAME: a fourth kind, deliberately the
+    #   OPPOSITE of DEMO_DATA_GENERATOR_USERNAME (capstone panel revision,
+    #   2026-11-27: Dr. Rowell M. Hernandez -- "the dataset should be
+    #   expanded... to provide sufficient records for testing the
+    #   system's data-handling capacity, and evaluating the accuracy,
+    #   efficiency, and responsiveness of the generated graphs and
+    #   dashboards"). scripts/generate_stress_test_data.py attributes a
+    #   large synthetic load-test volume to this one dedicated identity.
+    #   NOT real, and unlike DEMO_DATA_GENERATOR_USERNAME, NOT meant to
+    #   be permanent or to ever reach a shared/production database --
+    #   that script refuses to run anywhere but a local dev settings
+    #   module (see its own docstring). Deliberately counted in EVERY
+    #   report/dashboard total (no _exclude_*-style filtering anywhere),
+    #   because the whole point is benchmarking those totals/charts
+    #   under realistic volume -- excluding it would make the benchmark
+    #   measure the real, tiny dataset instead. Meant to be fully removed
+    #   via scripts/remove_stress_test_data.py once benchmarking is done.
     SYNTHETIC_BACKFILL_BOT_USERNAME = "synthetic_backfill_bot"
     HISTORICAL_IMPORT_USERNAME_PREFIX = "historical_import_"
     DEMO_DATA_GENERATOR_USERNAME = "demo_data_generator"
+    STRESS_TEST_GENERATOR_USERNAME = "stress_test_generator"
 
     role = models.ForeignKey(
         Role,
@@ -200,6 +218,15 @@ class User(AbstractUser):
         return self.username == self.DEMO_DATA_GENERATOR_USERNAME
 
     @property
+    def is_stress_test_account(self) -> bool:
+        """True only for the single dedicated identity
+        scripts/generate_stress_test_data.py attributes its local-only,
+        throwaway load-test volume to. See the
+        STRESS_TEST_GENERATOR_USERNAME comment above for what created it
+        and why it is never excluded from report totals."""
+        return self.username == self.STRESS_TEST_GENERATOR_USERNAME
+
+    @property
     def display_name(self) -> str:
         """A report should never show a bare login-style username as if
         it were a cashier's name. Real users: unchanged (full name, or
@@ -221,6 +248,8 @@ class User(AbstractUser):
             return "Demo"
         if self.is_synthetic_backfill_account:
             return "Synthetic (forecast only)"
+        if self.is_stress_test_account:
+            return "Stress Test (local only)"
         return self.get_full_name() or self.username
 
     def __str__(self):
