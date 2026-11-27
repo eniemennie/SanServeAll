@@ -32,10 +32,31 @@ first place.
 SalesItem rows are deleted automatically via their CASCADE foreign key
 to SalesTransaction -- not tracked or deleted independently.
 
-Deletion itself filters on BOTH conditions at once
-(pk__gt=floor AND cashier__username=username) in a single DB-side
-query, so it scales to six-figure row counts without ever materializing
-a pk list in Python.
+Deletion happens in DELETE_BATCH_SIZE-row chunks, NOT as one single
+queryset-wide .delete() call, even though that looks like it should be
+safe for a simple two-condition filter (pk__gt=floor AND cashier_id=
+stress_user_id). The real reason: apps/inventory/models.py's
+InventoryTransaction.related_sales_item is a nullable FK to
+pos.SalesItem with on_delete=SET_NULL. Every SalesTransaction this
+deletes cascades to delete its SalesItem (CASCADE), and for every
+batch of SalesItem rows Django's own deletion collector internally
+discovers along the way, it queues up a separate "set
+related_sales_item to NULL" update -- then, when the single
+queryset-wide .delete() actually executes, Django ORs every one of
+those per-internal-batch update clauses together into ONE combined SQL
+UPDATE statement before running it (see django/db/models/deletion.py,
+Collector.delete(), the `field_updates` / `combined_updates` handling).
+That one statement's bind-variable count scales with the TOTAL number
+of rows being deleted, not any one batch's size -- Django's own
+internal chunking (GET_ITERATOR_CHUNK_SIZE, bulk_batch_size) does
+nothing to prevent this, because it happens one level up, combining
+the batches back together. Confirmed live: deleting all 270,000
+stress-test rows in one .delete() call raised
+"sqlite3.OperationalError: too many SQL variables" (2026-11-27, panel
+defense dry run). Chunking the delete call ITSELF, not just relying on
+Django's internal batching, is what actually keeps each combined
+UPDATE's variable count bounded -- which is why this loops over small
+slices instead.
 
 Usage (from the backend/ directory, with the venv active):
     python manage.py shell --settings=config.settings.development \\
@@ -64,6 +85,12 @@ from apps.pos.models import SalesTransaction  # noqa: E402
 
 MANIFEST_PATH = Path(__file__).resolve().parent / "stress_test_data_manifest.json"
 
+# See the "too many SQL variables" explanation in the module docstring
+# above -- this bounds the bind-variable count of the combined SET-NULL
+# update Django builds across however many rows get deleted, by bounding
+# how many rows a single .delete() call is ever asked to cover at once.
+DELETE_BATCH_SIZE = 1_000
+
 
 def run():
     print("=" * 70)
@@ -81,7 +108,17 @@ def run():
     pk_floor = manifest["pk_floor"]["sales_transaction"]
     stress_username = manifest["stress_test_username"]
 
-    count_by_account = SalesTransaction.objects.filter(cashier__username=stress_username).count()
+    # Resolved once, up front, so the per-batch deletion loop below can
+    # filter on the plain indexed cashier_id column rather than
+    # re-joining to accounts_user by username on every iteration.
+    stress_user = User.objects.filter(username=stress_username).first()
+    stress_user_id = stress_user.pk if stress_user is not None else None
+
+    count_by_account = (
+        SalesTransaction.objects.filter(cashier_id=stress_user_id).count()
+        if stress_user_id is not None
+        else 0
+    )
     count_by_floor = SalesTransaction.objects.filter(pk__gt=pk_floor).count()
 
     if count_by_account != count_by_floor:
@@ -100,9 +137,21 @@ def run():
     )
 
     with transaction.atomic():
-        deleted_sales, _ = SalesTransaction.objects.filter(
-            pk__gt=pk_floor, cashier__username=stress_username
-        ).delete()
+        deleted_sales = 0
+        while True:
+            # DELETE_BATCH_SIZE at a time, by pk, rather than one
+            # queryset-wide .delete() -- see the module docstring and
+            # DELETE_BATCH_SIZE's own comment for why that one single
+            # call can crash SQLite at real stress-test volume.
+            batch_pks = list(
+                SalesTransaction.objects.filter(pk__gt=pk_floor, cashier_id=stress_user_id)
+                .order_by("pk")
+                .values_list("pk", flat=True)[:DELETE_BATCH_SIZE]
+            )
+            if not batch_pks:
+                break
+            batch_deleted, _ = SalesTransaction.objects.filter(pk__in=batch_pks).delete()
+            deleted_sales += batch_deleted
         print(f"  Deleted stress-test sales transactions (and their line items): {deleted_sales}")
 
         # Safe only now -- SalesTransaction.cashier is a PROTECT foreign

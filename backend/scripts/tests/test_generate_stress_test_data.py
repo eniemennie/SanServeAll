@@ -178,6 +178,51 @@ class TestRemove:
     def test_safe_to_call_with_no_manifest(self):
         remove_stress_test_data.run()  # does not raise
 
+    def test_removes_in_batches_smaller_than_the_total_row_count(self, catalog, monkeypatch):
+        """Regression test (2026-11-27): a single queryset-wide .delete()
+        call on all stress-test SalesTransaction rows at once can raise
+        sqlite3.OperationalError: too many SQL variables at real
+        stress-test volume (~270,000 rows) -- confirmed live -- because
+        InventoryTransaction.related_sales_item is a nullable SET_NULL FK
+        to SalesItem, and Django ORs every internal per-batch "set to
+        NULL" update together into one combined statement whose
+        bind-variable count scales with the TOTAL row count being
+        deleted, not any one batch. remove_stress_test_data.run() now
+        chunks the delete call itself (DELETE_BATCH_SIZE) rather than
+        relying on Django's own internal batching alone. This test forces
+        a small batch size with a row count that doesn't divide evenly
+        by it, so the loop must run several iterations plus a partial
+        final one, and confirms the end result is still exactly correct:
+        every stress-test row gone, every real row untouched."""
+        monkeypatch.setattr(remove_stress_test_data, "DELETE_BATCH_SIZE", 7)
+
+        real_branch = catalog["branches"][0]
+        real_cashier = User.objects.create_user(
+            username="real_cashier3",
+            password="x",
+            role=Role.objects.get_or_create(name=Role.BRANCH_STAFF)[0],
+            branch=real_branch,
+        )
+        real_txn = SalesTransaction.objects.create(
+            branch=real_branch,
+            cashier=real_cashier,
+            status=SalesTransaction.Status.COMPLETED,
+            payment_method="CASH",
+        )
+        SalesItem.objects.create(
+            transaction=real_txn, product=catalog["products"][0], unit_price="140.00", quantity=1
+        )
+
+        generate_stress_test_data.run(dry_run=False, total_transactions=23, days_back=30)
+        assert SalesTransaction.objects.count() == 24  # 23 synthetic + 1 real
+
+        remove_stress_test_data.run()
+
+        assert not generate_stress_test_data.MANIFEST_PATH.exists()
+        assert SalesTransaction.objects.count() == 1
+        assert SalesTransaction.objects.first().pk == real_txn.pk
+        assert not User.objects.filter(username=generate_stress_test_data.STRESS_USERNAME).exists()
+
     def test_reports_mismatch_without_deleting_if_counts_disagree(self, catalog, capsys):
         generate_stress_test_data.run(dry_run=False, total_transactions=10, days_back=30)
         # Simulate drift: a real transaction somehow attributed to the
