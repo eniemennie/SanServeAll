@@ -198,10 +198,15 @@ def _eligible_products():
 
 
 def _eligible_branches():
-    branches = list(Branch.objects.filter(is_active=True))
+    """Active, customer-facing branches only. The commissary
+    (Branch.is_commissary=True) is the production facility, not a POS
+    sales location -- it never processes a real sale, so it must never
+    be picked as a synthetic transaction's branch either."""
+    branches = list(Branch.objects.filter(is_active=True, is_commissary=False))
     if not branches:
         raise RuntimeError(
-            "No active branches found. Seed branches first (see " "scripts/seed_demo_data.py)."
+            "No active, non-commissary branches found. Seed branches first "
+            "(see scripts/seed_demo_data.py)."
         )
     return branches
 

@@ -25,6 +25,13 @@ pytestmark = pytest.mark.django_db
 def catalog():
     branch1 = Branch.objects.create(name="Lipa City", code="LIPA")
     branch2 = Branch.objects.create(name="Batangas City", code="BATANGAS")
+    # Deliberately also seeds an active commissary -- proves
+    # _eligible_branches() excludes it rather than just happening to
+    # never see one (the bug this fixture was added to catch: the
+    # commissary is the production facility, never a POS sales
+    # location, and must never be picked as a synthetic transaction's
+    # branch).
+    Branch.objects.create(name="Commissary", code="COMMISSARY", is_commissary=True)
     cake = Product.objects.create(
         name="Chocolate Cake", price="140.00", product_type=Product.ProductType.FINISHED_GOOD
     )
@@ -64,6 +71,13 @@ class TestAssertLocalDevSettings:
     def test_allows_the_real_test_settings_module(self, monkeypatch):
         monkeypatch.setenv("DJANGO_SETTINGS_MODULE", "config.settings.test")
         generate_stress_test_data._assert_local_dev_settings()  # does not raise
+
+
+class TestEligibleBranches:
+    def test_excludes_the_commissary(self, catalog):
+        branches = generate_stress_test_data._eligible_branches()
+        assert all(not b.is_commissary for b in branches)
+        assert {b.pk for b in branches} == {b.pk for b in catalog["branches"]}
 
 
 class TestGenerate:
